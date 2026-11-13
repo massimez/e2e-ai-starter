@@ -33,6 +33,9 @@ export function createWorkspaceAssistantAgent(
 	options: WorkspaceAssistantOptions = {}
 ): Agent {
 	return new Agent({
+		defaultOptions: {
+			maxSteps: 5,
+		},
 		description:
 			"Tenant-scoped assistant for workspace questions, member directory, file search, storage summary, and multi-turn memory.",
 		id: DEFAULT_AI_AGENT_ID,

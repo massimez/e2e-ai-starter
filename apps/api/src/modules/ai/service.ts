@@ -207,6 +207,9 @@ export async function createAiChatResponse(
 
 	const stream = await handleChatStream({
 		agentId,
+		defaultOptions: {
+			maxSteps: 5,
+		},
 		mastra: runtime.mastra,
 		params: {
 			id: threadId,
