@@ -2,6 +2,16 @@
   "name": "@workspace/web",
   "version": "0.1.0",
   "private": true,
+  "description": "Next.js 16 App Router web application with Tailwind CSS v4, Better Auth, and streaming Mastra AI chat",
+  "keywords": [
+    "nextjs",
+    "nextjs-16",
+    "react-19",
+    "tailwind-css",
+    "better-auth",
+    "mastra",
+    "ai-sdk"
+  ],
   "scripts": {
     "build": "next build",
     "check-types": "tsc --noEmit",

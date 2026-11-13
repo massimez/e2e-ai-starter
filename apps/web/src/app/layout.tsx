@@ -24,13 +24,22 @@ const SITE_TITLE = `${APP_CONFIG.name}: ${APP_CONFIG.tagline}`;
 const SITE_DESCRIPTION = APP_CONFIG.description;
 
 export const metadata: Metadata = {
+	applicationName: APP_CONFIG.name,
+	authors: [{ name: APP_CONFIG.name }],
+	creator: APP_CONFIG.name,
 	description: SITE_DESCRIPTION,
+	keywords: [...APP_CONFIG.keywords],
 	metadataBase: new URL(publicWebEnv.appUrl),
 	openGraph: {
 		description: SITE_DESCRIPTION,
 		siteName: APP_CONFIG.name,
 		title: SITE_TITLE,
 		type: "website",
+	},
+	publisher: APP_CONFIG.name,
+	robots: {
+		follow: true,
+		index: true,
 	},
 	title: {
 		default: SITE_TITLE,

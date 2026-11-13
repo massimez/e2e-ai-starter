@@ -33,6 +33,7 @@ export const metadata: Metadata = {
 		canonical: "/",
 	},
 	description: HOME_DESCRIPTION,
+	keywords: [...APP_CONFIG.keywords],
 	openGraph: {
 		description: HOME_DESCRIPTION,
 		title: HOME_TITLE,

@@ -1,5 +1,15 @@
 # e2e-ai-starter
 
+> **Production-Ready Multi-Tenant SaaS Starter**: Next.js 16 App Router · Hono API on Bun · Mastra AI Agents with pgvector · Better Auth RBAC · Drizzle ORM · BullMQ · Tailwind CSS v4 · Turborepo
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
+[![Bun](https://img.shields.io/badge/Bun-1.3+-fbf0df.svg)](https://bun.sh/)
+[![Hono](https://img.shields.io/badge/Hono-API-e36002.svg)](https://hono.dev/)
+[![Mastra AI](https://img.shields.io/badge/Mastra-AI%20Agents-purple.svg)](https://mastra.ai/)
+[![Better Auth](https://img.shields.io/badge/Better%20Auth-Multi--Tenant-red.svg)](https://better-auth.com/)
+
 A TypeScript Turborepo monorepo template powered by **Next.js 16 (App Router)**, **Hono API** (running natively on Bun), **Mastra AI** (Google Gemini, OpenAI, Anthropic, or OpenRouter + `pgvector` memory), **Better Auth** (with multi-tenant organizations, Email OTP, and RBAC), **Drizzle ORM** (PostgreSQL + `pgvector`), **BullMQ** (Redis background worker), **Tailwind CSS v4**, and pure subpath API exports (`@workspace/api/{config,hc,logger,permissions,queues,storage}`).
 
 ---
