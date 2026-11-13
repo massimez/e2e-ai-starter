@@ -1,0 +1,97 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": false,
+    "clientKind": "git",
+    "useIgnoreFile": false
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**/*.{js,jsx,ts,tsx,json,jsonc,astro,svelte,css,html,graphql}",
+      "!**/.next",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/.turbo",
+      "!**/dev-dist",
+      "!**/.zed",
+      "!**/.vscode",
+      "!**/public",
+      "!**/bun.lock",
+      "!**/coverage",
+      "!**/*.min.*",
+      "!packages/db/migrations/**/*.sql",
+      "!packages/db/migrations/meta/*.json",
+      "!**/.agents",
+      "!**/.claude",
+      "!**/graphify-out",
+      "!**/.mastra"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "tab"
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "performance": {
+        "noBarrelFile": "off",
+        "noJsxPropsBind": "off"
+      },
+      "suspicious": {
+        "useBaseline": "off"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "warn"
+      },
+      "nursery": {
+        "useTailwindSortedClasses": {
+          "level": "warn",
+          "fix": "safe"
+        }
+      },
+      "style": {
+        "noExcessiveClassesPerFile": "off",
+        "noParameterAssign": "error",
+        "useAsConstAssertion": "error",
+        "useDefaultParameterLast": "error",
+        "useEnumInitializers": "error",
+        "useSelfClosingElements": "error",
+        "useSingleVarDeclarator": "error",
+        "noUnusedTemplateLiteral": "error",
+        "useNumberNamespace": "error",
+        "noInferrableTypes": "error",
+        "noUselessElse": "error"
+      },
+      "a11y": {
+        "noSvgWithoutTitle": "error",
+        "useButtonType": "error"
+      }
+    }
+  },
+  "javascript": {
+    "globals": ["Bun"],
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "extends": [
+    "ultracite/biome/core",
+    "ultracite/biome/next",
+    "ultracite/biome/react"
+  ]
+}

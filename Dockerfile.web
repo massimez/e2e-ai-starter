@@ -1,0 +1,44 @@
+# Multi-stage Dockerfile for Next.js Standalone
+FROM oven/bun:1.3-alpine AS base
+WORKDIR /app
+
+FROM base AS pruner
+COPY . .
+RUN bun x turbo prune @workspace/web --docker
+
+FROM base AS builder
+COPY --from=pruner /app/out/json/ ./
+RUN bun install --frozen-lockfile --ignore-scripts
+COPY --from=pruner /app/out/full/ ./
+
+ARG INTERNAL_API_URL=http://api:3001
+ARG NEXT_PUBLIC_API_URL=
+ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
+ARG NEXT_PUBLIC_GOOGLE_AUTH_ENABLED=false
+ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY=
+
+ENV INTERNAL_API_URL=${INTERNAL_API_URL}
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+ENV NEXT_PUBLIC_GOOGLE_AUTH_ENABLED=${NEXT_PUBLIC_GOOGLE_AUTH_ENABLED}
+ENV NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN bun x turbo build --filter=@workspace/web
+
+FROM base AS runner
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+WORKDIR /app
+
+COPY --from=builder --chown=bun:bun /app/apps/web/public ./apps/web/public
+COPY --from=builder --chown=bun:bun /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=bun:bun /app/apps/web/.next/static ./apps/web/.next/static
+
+USER bun
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+	CMD bun -e "fetch('http://127.0.0.1:' + (process.env.PORT || '3000') + '/').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+CMD ["bun", "run", "apps/web/server.js"]

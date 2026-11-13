@@ -1,0 +1,4 @@
+[install]
+# Use isolated linker to prevent hidden dependencies
+# Each package can only access its declared dependencies
+linker = "isolated"

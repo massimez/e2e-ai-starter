@@ -1,0 +1,134 @@
+{
+	// ===========================================================================
+	// Formatter & Linter: Biome (Ultracite)
+	// ===========================================================================
+	"editor.defaultFormatter": "biomejs.biome",
+	"editor.formatOnSave": true,
+	"editor.codeActionsOnSave": {
+		"quickfix.biome": "explicit",
+		"source.organizeImports.biome": "explicit"
+	},
+	// Ensure external linters/formatters do not clash with Biome
+	"prettier.enable": false,
+	"eslint.enable": false,
+
+	// Language-specific formatter declarations for Biome-supported files
+	"[javascript]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[javascriptreact]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[typescript]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[typescriptreact]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[json]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[jsonc]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[css]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[graphql]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+
+	// ===========================================================================
+	// Editor Indentation & Whitespace (Biome tab standard)
+	// ===========================================================================
+	"editor.insertSpaces": false,
+	"editor.tabSize": 2,
+	"editor.detectIndentation": false,
+	"files.insertFinalNewline": true,
+	"files.trimTrailingWhitespace": true,
+	"files.eol": "\n",
+
+	// Formats requiring spaces over tabs (e.g. YAML and Markdown)
+	"[yaml]": {
+		"editor.insertSpaces": true,
+		"editor.tabSize": 2
+	},
+	"[yml]": {
+		"editor.insertSpaces": true,
+		"editor.tabSize": 2
+	},
+	"[markdown]": {
+		"editor.insertSpaces": true,
+		"editor.tabSize": 2,
+		"editor.defaultFormatter": "vscode.markdown-language-features"
+	},
+
+	// ===========================================================================
+	// TypeScript & JavaScript SDK & Imports
+	// ===========================================================================
+	"typescript.tsdk": "node_modules/typescript/lib",
+	"typescript.enablePromptUseWorkspaceTsdk": true,
+	"typescript.suggest.autoImports": true,
+	"javascript.suggest.autoImports": true,
+	"typescript.updateImportsOnFileMove.enabled": "always",
+	"javascript.updateImportsOnFileMove.enabled": "always",
+	"typescript.preferences.includePackageJsonAutoImports": "auto",
+	"typescript.preferences.preferTypeOnlyAutoImports": true,
+	"typescript.format.enable": false,
+	"javascript.format.enable": false,
+
+	// ===========================================================================
+	// Tailwind CSS v4 & Stylesheet Validation
+	// ===========================================================================
+	// Tailwind v4 uses @theme, @utility, @custom-variant, @source; ignore unknown at-rules warnings
+	"css.lint.unknownAtRules": "ignore",
+	"scss.lint.unknownAtRules": "ignore",
+	"tailwindCSS.includeLanguages": {
+		"typescript": "javascript",
+		"typescriptreact": "javascript"
+	},
+	"tailwindCSS.classAttributes": ["class", "className", "ngClass"],
+	"tailwindCSS.experimental.classRegex": [
+		["cva\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"],
+		["cn\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"],
+		["clsx\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"]
+	],
+
+	// ===========================================================================
+	// File Watching & Monorepo Search Optimization
+	// ===========================================================================
+	"files.watcherExclude": {
+		"**/.git/objects/**": true,
+		"**/.git/subtree-cache/**": true,
+		"**/node_modules/**": true,
+		"**/.next/**": true,
+		"**/.turbo/**": true,
+		"**/dist/**": true,
+		"**/coverage/**": true
+	},
+	"search.exclude": {
+		"**/node_modules": true,
+		"**/.next": true,
+		"**/.turbo": true,
+		"**/dist": true,
+		"**/coverage": true,
+		"**/bun.lock": true
+	},
+
+	// ===========================================================================
+	// File Associations & Explorer Nesting
+	// ===========================================================================
+	"files.associations": {
+		"*.sql": "sql",
+		".env*": "dotenv",
+		"bunfig.toml": "toml"
+	},
+	"explorer.fileNesting.enabled": true,
+	"explorer.fileNesting.expand": false,
+	"explorer.fileNesting.patterns": {
+		".env": ".env.*, .env.example",
+		"package.json": "bun.lock, package-lock.json, pnpm-lock.yaml, yarn.lock, turbo.json, tsconfig.json, biome.json, bunfig.toml, skills-lock.json",
+		"*.ts": "$(capture).d.ts, $(capture).js, $(capture).d.ts.map",
+		"*.tsx": "$(capture).d.ts, $(capture).js, $(capture).d.ts.map"
+	}
+}

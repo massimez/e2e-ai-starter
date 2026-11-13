@@ -1,0 +1,75 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "env": [
+        "NEXT_PUBLIC_APP_URL",
+        "NEXT_PUBLIC_API_URL",
+        "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
+        "NEXT_PUBLIC_GOOGLE_AUTH_ENABLED",
+        "INTERNAL_API_URL"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "out/**",
+        ".mastra/**",
+        "!.next/cache/**"
+      ]
+    },
+    "check": {
+      "dependsOn": ["^check"]
+    },
+    "test": {
+      "inputs": ["$TURBO_DEFAULT$", ".env*"]
+    },
+    "check-types": {
+      "dependsOn": ["^check-types"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "studio": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": [
+        "DATABASE_URL",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "MASTRA_DB_SCHEMA",
+        "MASTRA_DEFAULT_MODEL",
+        "MASTRA_EMBEDDING_MODEL",
+        "MASTRA_EMBEDDING_DIMENSIONS",
+        "NODE_ENV"
+      ]
+    },
+    "db:push": {
+      "cache": false,
+      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+    },
+    "db:studio": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+    },
+    "db:migrate": {
+      "cache": false,
+      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+    },
+    "db:generate": {
+      "cache": false,
+      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+    },
+    "db:seed": {
+      "cache": false,
+      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+    },
+    "start": {
+      "dependsOn": ["^build"],
+      "persistent": true
+    }
+  }
+}

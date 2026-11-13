@@ -1,0 +1,40 @@
+{
+  "name": "@workspace/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "check-types": "tsc --noEmit",
+    "dev": "next dev",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@ai-sdk/react": "catalog:",
+    "@next/bundle-analyzer": "catalog:",
+    "@tanstack/react-query": "catalog:",
+    "@workspace/ai-core": "workspace:*",
+    "@workspace/api": "workspace:*",
+    "@workspace/ui": "workspace:*",
+    "ai": "catalog:",
+    "better-auth": "catalog:",
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
+    "hono": "catalog:",
+    "lucide-react": "catalog:",
+    "next": "catalog:",
+    "next-themes": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "sonner": "catalog:",
+    "tailwind-merge": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:"
+  }
+}
