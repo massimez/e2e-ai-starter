@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1794519888788,
+      "tag": "0000_unusual_lilith",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794532052195,
+      "tag": "0001_green_lilith",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794566176297,
+      "tag": "0002_damp_felicia_hardy",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794570631673,
+      "tag": "0003_enable_pgvector",
+      "breakpoints": true
+    }
+  ]
+}
