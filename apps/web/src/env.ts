@@ -27,6 +27,7 @@ const serverWebEnvSchema = z.object({
 		.enum(["true", "false"])
 		.optional()
 		.default("false"),
+	NEXT_PUBLIC_STORAGE_ORIGIN: optionalUrlSchema,
 	NEXT_PUBLIC_VAPID_PUBLIC_KEY: z.string().optional().default(""),
 });
 

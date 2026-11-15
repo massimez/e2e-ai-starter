@@ -6,7 +6,8 @@
    - Shared libraries live in `packages/*` (`ai-core`, `db`, `ui`).
    - Database operations (Drizzle ORM) strictly use `@workspace/db` (`schemaFilter: ["public"]`), while Mastra persists state and `pgvector` embeddings in the isolated `mastra` schema via `@mastra/pg`.
    - `@workspace/ai-core` (`packages/ai-core`) exports Mastra agents, tools, workflows, and browser-safe `@workspace/ai-core/contracts`; never import `@workspace/api` from `packages/ai-core`.
-   - Shared permission matrices, queue constants, notification categories/channels, and storage rules live in `apps/api` concrete modules and are exported via pure `@workspace/api` subpaths (`permissions`, `queues`, `storage`).
+   - Shared permission matrices, queue constants, notification categories/channels, app branding defaults, and storage rules live in `apps/api` concrete modules and are exported via pure `@workspace/api` subpaths (`config`, `hc`, `logger`, `permissions`, `queues`, `storage`).
+   - Dynamic organization RBAC, role permissions, and invitations live in `apps/api/src/modules/roles/` (`/api/organizations/roles`, `/api/organizations/invitations`).
 
 2. **Code Quality**:
    - Run `bun run check` and `bun run check-types` to verify code changes.
@@ -15,9 +16,9 @@
 3. **Authentication**:
    - Built with Better Auth (Drizzle adapter) + Redis secondary session storage.
    - Server-side Better Auth setup is located in `apps/api/src/lib/auth/index.ts`.
-   - Next.js Server Components verify sessions via `apps/web/src/lib/auth-server.ts` (`getServerSession()`), and `apps/web/src/proxy.ts` provides optimistic route guarding for `/dashboard/:path*`.
+   - Next.js Server Components verify sessions via `apps/web/src/lib/auth-server.ts` (`getServerSession()`), and `apps/web/src/proxy.ts` provides optimistic route guarding for `["/dashboard/:path*", "/onboarding"]` (`/dashboard/settings/{general,members,roles,notifications,advanced}` and `/onboarding`).
    - Client-side auth is exported from `apps/web/src/lib/auth-client.ts` (`@/lib/auth-client`).
-   - Pre-built UI components live in `@workspace/ui/components/auth`.
+   - Pre-built UI components live in `@workspace/ui/components/auth`, and all 11 brand icons in `@workspace/ui/components/icons/brands/*` are rendered in `apps/web/src/components/site-footer.tsx` (`SiteFooter`).
 
 4. **Security**:
    - Validate all untrusted input with Zod.
