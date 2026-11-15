@@ -9,7 +9,6 @@ import {
 	type AccountMenuUser,
 	UserAccountMenu,
 } from "@/components/user-account-menu";
-import { publicWebEnv } from "@/env";
 import { useSession } from "@/lib/auth-client";
 import { useCurrentOrganization } from "@/lib/organization-hooks";
 import { useAuthModal } from "@/providers/auth-provider";
@@ -22,7 +21,8 @@ function SignedInHeaderControls({ user }: { user: AccountMenuUser }) {
 		<div className="flex shrink-0 items-center gap-2">
 			<ThemeToggle />
 			<NotificationCenter
-				apiUrl={publicWebEnv.apiUrl}
+				apiUrl=""
+				enabled
 				onNavigate={(path) => router.push(path)}
 			/>
 

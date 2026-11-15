@@ -10,7 +10,7 @@ import {
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Loader2 } from "lucide-react";
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
 import type defaultTranslations from "./translations.json";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
@@ -25,6 +25,8 @@ export const ForgetPassword = ({
 	translations: typeof defaultTranslations.en.forgetPassword;
 }) => {
 	const emailId = useId();
+	const errorId = useId();
+	const emailRef = useRef<HTMLInputElement>(null);
 	const [email, setEmail] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [formError, setFormError] = useState<string | null>(null);
@@ -34,6 +36,7 @@ export const ForgetPassword = ({
 		const trimmedEmail = email.trim();
 		if (!EMAIL_PATTERN.test(trimmedEmail)) {
 			setFormError("Please enter a valid email address.");
+			emailRef.current?.focus();
 			return;
 		}
 
@@ -63,6 +66,8 @@ export const ForgetPassword = ({
 						{translations.email_label}
 					</Label>
 					<Input
+						aria-describedby={formError ? errorId : undefined}
+						aria-invalid={formError ? true : undefined}
 						autoComplete="email"
 						className="h-12"
 						id={emailId}
@@ -73,6 +78,7 @@ export const ForgetPassword = ({
 							}
 						}}
 						placeholder={translations.email_label}
+						ref={emailRef}
 						required
 						type="email"
 						value={email}
@@ -80,7 +86,7 @@ export const ForgetPassword = ({
 				</div>
 
 				{formError ? (
-					<p className="text-destructive text-sm" role="alert">
+					<p className="text-destructive text-sm" id={errorId} role="alert">
 						{formError}
 					</p>
 				) : null}

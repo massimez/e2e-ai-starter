@@ -8,8 +8,12 @@ import {
 } from "@workspace/ui/components/dialog";
 import { Input } from "@workspace/ui/components/input";
 import OTPInput, { type InputProps } from "@workspace/ui/components/inputs/otp";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type defaultTranslations from "./translations.json";
+
+export interface OtpVerificationSubmitResult {
+	error?: string;
+}
 
 export interface OtpVerificationProps {
 	autoSubmit?: boolean;
@@ -18,7 +22,12 @@ export interface OtpVerificationProps {
 	isResending?: boolean;
 	length?: number;
 	maxResendAttempts?: number;
-	onComplete?: (otp: string) => Promise<void> | void;
+	onComplete?: (
+		otp: string
+	) =>
+		| Promise<OtpVerificationSubmitResult | undefined>
+		| OtpVerificationSubmitResult
+		| undefined;
 	onResend?: () => Promise<{
 		code?: string | undefined;
 		message?: string | undefined;
@@ -26,7 +35,12 @@ export interface OtpVerificationProps {
 		statusText: string;
 	} | null>;
 	onResendLimitReached?: () => void;
-	onSubmit: (otp: string) => Promise<void> | void;
+	onSubmit: (
+		otp: string
+	) =>
+		| Promise<OtpVerificationSubmitResult | undefined>
+		| OtpVerificationSubmitResult
+		| undefined;
 	resendTimeoutDuration?: number;
 	title?: string;
 	translations: typeof defaultTranslations.en.otpVerification;
@@ -47,13 +61,21 @@ export const OtpVerification = ({
 	translations,
 	autoSubmit = true,
 }: OtpVerificationProps) => {
+	const errorId = useId();
+	const otpContainerRef = useRef<HTMLDivElement>(null);
 	const [otp, setOtp] = useState("");
+	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [timeLeft, setTimeLeft] = useState(0);
 	const [resendAttempts, setResendAttempts] = useState(0);
 	const [isTimeoutActive, setIsTimeoutActive] = useState(false);
 	const [internalLoading, setInternalLoading] = useState(false);
 
 	const activeLoading = isLoading || internalLoading;
+
+	const focusFirstOtpInput = useCallback(() => {
+		const firstInput = otpContainerRef.current?.querySelector("input");
+		firstInput?.focus();
+	}, []);
 
 	// Timer effect
 	useEffect(() => {
@@ -76,20 +98,55 @@ export const OtpVerification = ({
 		return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 	}, []);
 
+	const submitOtpCode = useCallback(
+		async (value: string, invokeComplete: boolean) => {
+			setErrorMessage(null);
+			setInternalLoading(true);
+			try {
+				const completeResult = invokeComplete
+					? await onComplete?.(value)
+					: undefined;
+				if (
+					completeResult &&
+					"error" in completeResult &&
+					completeResult.error
+				) {
+					setErrorMessage(completeResult.error);
+					setOtp("");
+					requestAnimationFrame(() => focusFirstOtpInput());
+					return;
+				}
+				if (!invokeComplete || onComplete !== onSubmit) {
+					const submitResult = await onSubmit(value);
+					if (submitResult && "error" in submitResult && submitResult.error) {
+						setErrorMessage(submitResult.error);
+						setOtp("");
+						requestAnimationFrame(() => focusFirstOtpInput());
+					}
+				}
+			} catch (error) {
+				setErrorMessage(
+					error instanceof Error
+						? error.message
+						: "Verification failed. Please try again."
+				);
+				setOtp("");
+				requestAnimationFrame(() => focusFirstOtpInput());
+			} finally {
+				setInternalLoading(false);
+			}
+		},
+		[focusFirstOtpInput, onComplete, onSubmit]
+	);
+
 	const handleOtpChange = async (value: string) => {
 		setOtp(value);
+		if (value.length > 0 && errorMessage) {
+			setErrorMessage(null);
+		}
 		if (value.length === length && !activeLoading) {
 			if (autoSubmit) {
-				setInternalLoading(true);
-				try {
-					await onComplete?.(value);
-					// Avoid double submission if onComplete and onSubmit are the same
-					if (onComplete !== onSubmit) {
-						await onSubmit(value);
-					}
-				} finally {
-					setInternalLoading(false);
-				}
+				await submitOtpCode(value, true);
 			} else {
 				onComplete?.(value);
 			}
@@ -99,12 +156,7 @@ export const OtpVerification = ({
 	const handleSubmit = async (e?: React.FormEvent) => {
 		e?.preventDefault();
 		if (otp.length === length && !activeLoading) {
-			setInternalLoading(true);
-			try {
-				await onSubmit(otp);
-			} finally {
-				setInternalLoading(false);
-			}
+			await submitOtpCode(otp, false);
 		}
 	};
 
@@ -128,13 +180,17 @@ export const OtpVerification = ({
 		setIsTimeoutActive(true);
 		setResendAttempts((prev) => prev + 1);
 
-		// Clear current OTP
+		// Clear current OTP and error
+		setErrorMessage(null);
 		setOtp("");
+		requestAnimationFrame(() => focusFirstOtpInput());
 	};
 
 	const renderInput = (inputProps: InputProps, index: number) => (
 		<Input
 			{...inputProps}
+			aria-describedby={errorMessage ? errorId : undefined}
+			aria-invalid={errorMessage ? true : undefined}
 			className="h-14 w-10 text-center text-xl font-semibold md:w-12 md:text-3xl"
 			key={index}
 		/>
@@ -194,7 +250,7 @@ export const OtpVerification = ({
 				</DialogDescription>
 			</DialogHeader>
 			<form className="space-y-6" onSubmit={handleSubmit}>
-				<div className="flex justify-center">
+				<div className="flex justify-center" ref={otpContainerRef}>
 					<OTPInput
 						allowedCharacterSet="numeric"
 						containerStyle={"gap-1"}
@@ -206,6 +262,16 @@ export const OtpVerification = ({
 						value={otp}
 					/>
 				</div>
+
+				{errorMessage ? (
+					<p
+						className="text-destructive text-center text-sm"
+						id={errorId}
+						role="alert"
+					>
+						{errorMessage}
+					</p>
+				) : null}
 
 				<Button
 					className="h-12 w-full text-base font-medium"

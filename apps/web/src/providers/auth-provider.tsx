@@ -2,17 +2,20 @@
 
 import { AuthModalProvider } from "@workspace/ui/components/auth/auth-modal-provider";
 import { sanitizeInternalRedirect } from "@workspace/ui/lib/utils";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
 	createContext,
+	Suspense,
 	useCallback,
 	useContext,
+	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import { toast } from "sonner";
 import { publicWebEnv } from "@/env";
-import { authClient } from "@/lib/auth-client";
+import { authClient, useSession } from "@/lib/auth-client";
 
 interface AuthOpenOptions {
 	onSuccess?: () => Promise<void> | void;
@@ -40,6 +43,58 @@ const normalizeAuthOptions = (
 		socialRedirectTo: sanitizeInternalRedirect(options?.socialRedirectTo),
 	};
 };
+
+function AuthSearchParamsSync({
+	openSignIn,
+	openSignUp,
+}: {
+	openSignIn: (options?: AuthOpenOptions | string) => void;
+	openSignUp: (options?: AuthOpenOptions | string) => void;
+}) {
+	const searchParams = useSearchParams();
+	const router = useRouter();
+	const { data: session, isPending } = useSession();
+	const handledParamsRef = useRef<string | null>(null);
+
+	useEffect(() => {
+		if (isPending) {
+			return;
+		}
+		const authParam = searchParams.get("auth")?.toLowerCase();
+		if (authParam !== "signin" && authParam !== "signup") {
+			handledParamsRef.current = null;
+			return;
+		}
+
+		const paramsKey = searchParams.toString();
+		if (handledParamsRef.current === paramsKey) {
+			return;
+		}
+		handledParamsRef.current = paramsKey;
+
+		const callbackUrl = sanitizeInternalRedirect(
+			searchParams.get("callbackUrl") ?? undefined
+		);
+
+		if (session?.user) {
+			if (callbackUrl) {
+				router.replace(callbackUrl);
+			}
+			return;
+		}
+
+		const options: AuthOpenOptions = callbackUrl
+			? { redirectTo: callbackUrl, socialRedirectTo: callbackUrl }
+			: {};
+		if (authParam === "signup") {
+			openSignUp(options);
+		} else {
+			openSignIn(options);
+		}
+	}, [isPending, openSignIn, openSignUp, router, searchParams, session?.user]);
+
+	return null;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [isOpen, setIsOpen] = useState(false);
@@ -99,6 +154,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 	return (
 		<AuthContext.Provider value={value}>
+			<Suspense fallback={null}>
+				<AuthSearchParamsSync openSignIn={openSignIn} openSignUp={openSignUp} />
+			</Suspense>
 			{children}
 			<AuthModalProvider
 				authClient={authClient}

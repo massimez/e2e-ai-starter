@@ -23,7 +23,6 @@ export default function NotificationSettingsPage() {
 	return (
 		<SettingsPage
 			description="Choose which workspace events trigger alerts and manage Web Push delivery for this browser."
-			headingLevel="h2"
 			title="Notifications & Delivery"
 		>
 			<PushSettingsSection />

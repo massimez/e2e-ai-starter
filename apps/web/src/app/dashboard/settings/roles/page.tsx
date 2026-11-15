@@ -4,6 +4,16 @@ import type {
 	OrganizationPermissionGroup,
 	OrganizationRoleSummary,
 } from "@workspace/api/permissions";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@workspace/ui/components/alert-dialog";
 import { Badge } from "@workspace/ui/components/badge";
 import { Button } from "@workspace/ui/components/button";
 import { Checkbox, type CheckedState } from "@workspace/ui/components/checkbox";
@@ -832,6 +842,11 @@ export default function RolesSettingsPage() {
 	const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
 	const [permissionFilter, setPermissionFilter] = useState("");
 	const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
+	const [pendingSwitchTarget, setPendingSwitchTarget] = useState<
+		| { role: OrganizationRoleSummary; type: "select" }
+		| { type: "create" }
+		| null
+	>(null);
 
 	const selectedRole = useMemo(
 		() => roles.find((role) => role.id === selectedRoleId) ?? roles[0] ?? null,
@@ -911,17 +926,52 @@ export default function RolesSettingsPage() {
 		);
 	}, [formState, isCreating, selectedRole]);
 
-	const handleSelectRole = (role: OrganizationRoleSummary) => {
+	const applySelectRole = (role: OrganizationRoleSummary) => {
 		setMode("view");
 		setSelectedRoleId(role.id);
 		setFormState(roleToFormState(role));
 		setSlugManuallyEdited(true);
 	};
 
-	const handleStartCreate = () => {
+	const applyStartCreate = () => {
 		setMode("create");
 		setFormState(createEmptyRoleForm());
 		setSlugManuallyEdited(false);
+	};
+
+	const handleSelectRole = (role: OrganizationRoleSummary) => {
+		if (!isCreating && selectedRole?.id === role.id) {
+			return;
+		}
+		if (isDirty) {
+			setPendingSwitchTarget({ role, type: "select" });
+			return;
+		}
+		applySelectRole(role);
+	};
+
+	const handleStartCreate = () => {
+		if (isCreating) {
+			return;
+		}
+		if (isDirty) {
+			setPendingSwitchTarget({ type: "create" });
+			return;
+		}
+		applyStartCreate();
+	};
+
+	const handleConfirmDiscard = () => {
+		if (!pendingSwitchTarget) {
+			return;
+		}
+		const target = pendingSwitchTarget;
+		setPendingSwitchTarget(null);
+		if (target.type === "create") {
+			applyStartCreate();
+		} else {
+			applySelectRole(target.role);
+		}
 	};
 
 	const handleTogglePermissions = (keys: string[], checked: boolean) => {
@@ -1023,7 +1073,6 @@ export default function RolesSettingsPage() {
 				) : undefined
 			}
 			description="Create custom roles and tailor fine-grained permissions enforced dynamically across workspace APIs, storage, and AI execution."
-			headingLevel="h2"
 			title="Roles & Dynamic Permissions"
 		>
 			{canManageRoles || orgLoading ? null : (
@@ -1116,6 +1165,31 @@ export default function RolesSettingsPage() {
 				open={cloneDialogOpen}
 				sourceRole={selectedRole}
 			/>
+
+			<AlertDialog
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingSwitchTarget(null);
+					}
+				}}
+				open={Boolean(pendingSwitchTarget)}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Discard unsaved role changes?</AlertDialogTitle>
+						<AlertDialogDescription>
+							You have unsaved edits to this role. Switching away now will
+							discard your changes.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Keep editing</AlertDialogCancel>
+						<AlertDialogAction onClick={handleConfirmDiscard}>
+							Discard changes
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</SettingsPage>
 	);
 }

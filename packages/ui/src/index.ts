@@ -15,7 +15,6 @@ export * from "./components/select";
 export * from "./components/settings-shell";
 export * from "./components/skeleton";
 export * from "./components/sonner";
-export * from "./components/storage-dropzone";
 export * from "./components/switch";
 export * from "./components/table";
 export * from "./components/tabs";

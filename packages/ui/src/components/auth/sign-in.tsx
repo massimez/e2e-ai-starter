@@ -11,7 +11,7 @@ import { GoogleIcon } from "@workspace/ui/components/icons/brands/google-icon";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
 import type defaultTranslations from "./translations.json";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
@@ -31,25 +31,36 @@ export const SignIn = ({
 }) => {
 	const emailId = useId();
 	const passwordId = useId();
+	const errorId = useId();
+	const emailRef = useRef<HTMLInputElement>(null);
+	const passwordRef = useRef<HTMLInputElement>(null);
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [formError, setFormError] = useState<string | null>(null);
+	const [errorField, setErrorField] = useState<"email" | "password" | null>(
+		null
+	);
 
 	const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
 		const trimmedEmail = email.trim();
 		if (!EMAIL_PATTERN.test(trimmedEmail)) {
 			setFormError("Please enter a valid email address.");
+			setErrorField("email");
+			emailRef.current?.focus();
 			return;
 		}
 		if (!password) {
 			setFormError("Please enter your password.");
+			setErrorField("password");
+			passwordRef.current?.focus();
 			return;
 		}
 
 		setFormError(null);
+		setErrorField(null);
 		setLoading(true);
 		try {
 			await onLoginClick(trimmedEmail, password);
@@ -119,6 +130,8 @@ export const SignIn = ({
 						{translations.email_label}
 					</Label>
 					<Input
+						aria-describedby={errorField === "email" ? errorId : undefined}
+						aria-invalid={errorField === "email" ? true : undefined}
 						autoComplete="email"
 						className="h-12"
 						id={emailId}
@@ -126,9 +139,11 @@ export const SignIn = ({
 							setEmail(e.target.value);
 							if (formError) {
 								setFormError(null);
+								setErrorField(null);
 							}
 						}}
 						placeholder={translations.email_label}
+						ref={emailRef}
 						required
 						type="email"
 						value={email}
@@ -153,16 +168,20 @@ export const SignIn = ({
 
 					<div className="relative">
 						<Input
+							aria-describedby={errorField === "password" ? errorId : undefined}
+							aria-invalid={errorField === "password" ? true : undefined}
 							autoComplete="current-password"
-							className="h-12 pe-10"
+							className="h-12 pe-12"
 							id={passwordId}
 							onChange={(e) => {
 								setPassword(e.target.value);
 								if (formError) {
 									setFormError(null);
+									setErrorField(null);
 								}
 							}}
 							placeholder={translations.password_label}
+							ref={passwordRef}
 							required
 							type={showPassword ? "text" : "password"}
 							value={password}
@@ -170,21 +189,21 @@ export const SignIn = ({
 						<button
 							aria-label={showPassword ? "Hide password" : "Show password"}
 							aria-pressed={showPassword}
-							className="text-muted-foreground hover:text-foreground absolute inset-e-3 top-1/2 -translate-y-1/2"
+							className="text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute inset-e-1 top-1/2 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:outline-none"
 							onClick={() => setShowPassword(!showPassword)}
 							type="button"
 						>
 							{showPassword ? (
-								<EyeOff className="h-5 w-5" />
+								<EyeOff aria-hidden="true" className="h-5 w-5" />
 							) : (
-								<Eye className="h-5 w-5" />
+								<Eye aria-hidden="true" className="h-5 w-5" />
 							)}
 						</button>
 					</div>
 				</div>
 
 				{formError ? (
-					<p className="text-destructive text-sm" role="alert">
+					<p className="text-destructive text-sm" id={errorId} role="alert">
 						{formError}
 					</p>
 				) : null}

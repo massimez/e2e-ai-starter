@@ -21,9 +21,10 @@ export default async function DashboardLayout({
 }: {
 	children: ReactNode;
 }) {
-	const [session, organizations] = await Promise.all([
+	const [session, organizations, defaultOrganizationId] = await Promise.all([
 		getServerSession(),
 		getServerOrganizations(),
+		getServerDefaultOrganizationId(),
 	]);
 
 	if (!session?.user) {
@@ -37,16 +38,22 @@ export default async function DashboardLayout({
 	const activeOrganizationId = session.session.activeOrganizationId ?? null;
 	const preferredOrganizationId =
 		!activeOrganizationId && organizations && organizations.length > 0
-			? await getServerDefaultOrganizationId()
+			? defaultOrganizationId
 			: null;
 
 	return (
 		<div className="bg-muted/20 text-foreground min-h-screen">
-			<DashboardHeader />
+			<DashboardHeader
+				initialActiveOrgId={activeOrganizationId ?? preferredOrganizationId}
+				initialOrganizations={organizations ?? []}
+				initialUser={session.user}
+			/>
 			<DashboardWorkspaceGuard
 				preferredOrganizationId={preferredOrganizationId}
 			>
-				<main>{children}</main>
+				<main className="outline-none" id="main-content" tabIndex={-1}>
+					{children}
+				</main>
 			</DashboardWorkspaceGuard>
 		</div>
 	);

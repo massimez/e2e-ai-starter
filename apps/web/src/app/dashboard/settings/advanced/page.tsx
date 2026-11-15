@@ -99,7 +99,7 @@ export default function AdvancedSettingsPage() {
 								Designate New Primary Owner
 							</p>
 							<p className="text-muted-foreground max-w-xl text-xs leading-relaxed">
-								Transferring ownership assigns full administrative and billing
+								Transferring ownership assigns full administrative and deletion
 								control to the designated member. Your role will be converted to
 								Admin.
 							</p>
@@ -134,12 +134,12 @@ export default function AdvancedSettingsPage() {
 					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="space-y-1">
 							<p className="text-destructive text-sm font-bold">
-								Eradicate Workspace Data
+								Delete Workspace Permanently
 							</p>
 							<p className="text-muted-foreground max-w-xl text-xs leading-relaxed">
-								Once initiated, this organization and all associated projects,
+								Once initiated, this organization and all associated AI threads,
 								cloud storage assets, and team invitations will be permanently
-								dropped. This action is irreversible.
+								removed. This action is irreversible.
 							</p>
 						</div>
 
@@ -210,7 +210,7 @@ export default function AdvancedSettingsPage() {
 
 						<div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-amber-700 dark:text-amber-400">
 							<strong>Warning:</strong> You will be demoted to an Admin role
-							immediately upon confirmation and will relinquish billing and
+							immediately upon confirmation and will relinquish ownership and
 							deletion privileges.
 						</div>
 

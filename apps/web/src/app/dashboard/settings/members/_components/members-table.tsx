@@ -221,7 +221,10 @@ export function MembersTable({
 										/>
 									</TableCell>
 									<TableCell className="text-muted-foreground hidden font-mono text-xs md:table-cell">
-										{new Date(member.createdAt).toLocaleDateString()}
+										{new Intl.DateTimeFormat("en-US", {
+											dateStyle: "medium",
+											timeZone: "UTC",
+										}).format(new Date(member.createdAt))}
 									</TableCell>
 									<TableCell className="text-right">
 										<MemberActionsCell

@@ -192,8 +192,7 @@ export default function GeneralSettingsPage() {
 
 	return (
 		<SettingsPage
-			description="Manage your organization profile, custom branding, and vanity URL routing."
-			headingLevel="h2"
+			description="Manage your organization profile, custom branding, and workspace identifier."
 			title="General Organization Profile"
 			titleAccessory={
 				canManageSettings ? (
@@ -332,7 +331,7 @@ export default function GeneralSettingsPage() {
 									className="text-foreground flex items-center gap-1.5 text-xs font-medium"
 									htmlFor={orgSlugId}
 								>
-									Vanity URL Slug
+									Workspace Slug
 								</Label>
 								<div className="relative">
 									<Input
@@ -345,10 +344,8 @@ export default function GeneralSettingsPage() {
 									/>
 								</div>
 								<p className="text-muted-foreground font-mono text-[11px]">
-									Scope identifier:{" "}
-									<span className="text-foreground">
-										/org/{slug || "workspace"}
-									</span>
+									Identifier:{" "}
+									<span className="text-foreground">{slug || "workspace"}</span>
 								</p>
 							</div>
 

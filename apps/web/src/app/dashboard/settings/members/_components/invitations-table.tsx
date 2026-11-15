@@ -74,7 +74,10 @@ export function InvitationsTable({
 									</Badge>
 								</TableCell>
 								<TableCell className="text-muted-foreground hidden font-mono text-xs md:table-cell">
-									{new Date(invite.expiresAt).toLocaleDateString()}
+									{new Intl.DateTimeFormat("en-US", {
+										dateStyle: "medium",
+										timeZone: "UTC",
+									}).format(new Date(invite.expiresAt))}
 								</TableCell>
 								<TableCell className="text-right">
 									{canManageMembers ? (

@@ -216,8 +216,8 @@ export function OrganizationSwitcher({
 							Create Organization
 						</DialogTitle>
 						<DialogDescription className="text-xs leading-relaxed">
-							Create a new multi-tenant workspace to collaborate with your team
-							and scale projects.
+							Create a new multi-tenant workspace to collaborate with your team,
+							manage files, and run AI workflows.
 						</DialogDescription>
 					</DialogHeader>
 
@@ -243,7 +243,7 @@ export function OrganizationSwitcher({
 
 						<div className="space-y-1.5">
 							<Label className="text-xs font-medium" htmlFor={orgSlugId}>
-								URL Vanity Slug
+								Workspace Slug
 							</Label>
 							<Input
 								id={orgSlugId}
