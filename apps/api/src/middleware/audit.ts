@@ -59,14 +59,20 @@ function extractEntityFromPath(path: string): {
 		return { entityId: null, entityType: null };
 	}
 
-	const first = (segments[0] ?? "").slice(0, MAX_ENTITY_TYPE_LENGTH) || null;
-	const second = segments[1] ?? null;
-
-	if (second && UUID_OR_ID_SEGMENT_REGEX.test(second)) {
-		return { entityType: first, entityId: second };
+	for (let index = 1; index < segments.length; index += 1) {
+		const segment = segments[index];
+		if (segment && UUID_OR_ID_SEGMENT_REGEX.test(segment)) {
+			const entityType =
+				segments.slice(0, index).join("/").slice(0, MAX_ENTITY_TYPE_LENGTH) ||
+				null;
+			return { entityType, entityId: segment };
+		}
 	}
 
-	return { entityType: first, entityId: null };
+	return {
+		entityType: segments.join("/").slice(0, MAX_ENTITY_TYPE_LENGTH) || null,
+		entityId: null,
+	};
 }
 
 function methodToVerb(method: string): string {
