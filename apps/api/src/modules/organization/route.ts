@@ -2,6 +2,7 @@ import {
 	createRouter,
 	createSuccessResponse,
 	jsonValidator,
+	paramValidator,
 	requireUser,
 } from "../../lib/create-hono-app";
 import { NotFoundError } from "../../lib/errors";
@@ -10,12 +11,21 @@ import { authMiddleware } from "../../middleware/auth";
 import { hasOrgPermission } from "../../middleware/org-permission";
 import { rateLimiter } from "../../middleware/rate-limiter";
 import { tenantBoundaryMiddleware } from "../../middleware/tenant-boundary";
+import { roleRoutes } from "../roles/route";
+import {
+	invitationIdParamSchema,
+	inviteOrganizationMemberSchema,
+	memberIdParamSchema,
+} from "../roles/schema";
+import { rolesService } from "../roles/service";
 import { resolveSessionOrganizationOnConnect } from "./default-organization";
-import { transferOwnershipSchema } from "./schema";
+import { transferOwnershipSchema, updateOrganizationSchema } from "./schema";
 import {
 	getOrganizationById,
 	getUserOrganizations,
+	removeOrganizationMember,
 	transferOwnership,
+	updateCurrentOrganization,
 } from "./service";
 
 export const organizationRoutes = createRouter()
@@ -23,8 +33,8 @@ export const organizationRoutes = createRouter()
 	.use(
 		"*",
 		authMiddleware,
-		rateLimiter(60_000, 120, { identity: "actor" }),
-		tenantBoundaryMiddleware
+		tenantBoundaryMiddleware,
+		rateLimiter(60_000, 120, { identity: "actor" })
 	)
 
 	// List user's organizations
@@ -53,6 +63,21 @@ export const organizationRoutes = createRouter()
 		return c.json(createSuccessResponse(org));
 	})
 
+	// Update current active organization profile
+	.patch(
+		"/current",
+		hasOrgPermission("organization:update"),
+		jsonValidator(updateOrganizationSchema),
+		async (c) => {
+			const { organizationId } = getActiveOrgContext(c);
+			const input = c.req.valid("json");
+			const updated = await updateCurrentOrganization(organizationId, input);
+			return c.json(
+				createSuccessResponse(updated, "Organization updated successfully")
+			);
+		}
+	)
+
 	// Transfer organization ownership atomically from current owner to an active admin
 	.post(
 		"/transfer-ownership",
@@ -70,4 +95,69 @@ export const organizationRoutes = createRouter()
 				createSuccessResponse(result, "Organization ownership transferred")
 			);
 		}
-	);
+	)
+
+	// Remove a member from the active organization using dynamic RBAC
+	.delete(
+		"/members/:memberId",
+		hasOrgPermission("member:remove"),
+		paramValidator(memberIdParamSchema),
+		async (c) => {
+			const { organizationId, userId } = getActiveOrgContext(c);
+			const { memberId } = c.req.valid("param");
+			const result = await removeOrganizationMember({
+				actorUserId: userId,
+				memberId,
+				organizationId,
+			});
+			return c.json(
+				createSuccessResponse(result, "Member removed from organization")
+			);
+		}
+	)
+
+	// Invite member with any assignable dynamic organization role
+	.post(
+		"/invitations",
+		hasOrgPermission("member:invite"),
+		jsonValidator(inviteOrganizationMemberSchema),
+		async (c) => {
+			const { organizationId, userId } = getActiveOrgContext(c);
+			const user = requireUser(c);
+			const input = c.req.valid("json");
+			const result = await rolesService.inviteOrganizationMember(
+				organizationId,
+				input,
+				{
+					id: userId,
+					name: user.name,
+				}
+			);
+			return c.json(
+				createSuccessResponse(
+					result,
+					result.resent ? "Invitation resent" : "Invitation sent"
+				),
+				result.resent ? 200 : 201
+			);
+		}
+	)
+
+	// Cancel pending organization invitation
+	.delete(
+		"/invitations/:id",
+		hasOrgPermission("member:invite"),
+		paramValidator(invitationIdParamSchema),
+		async (c) => {
+			const { organizationId } = getActiveOrgContext(c);
+			const { id } = c.req.valid("param");
+			const result = await rolesService.cancelOrganizationInvitation(
+				organizationId,
+				id
+			);
+			return c.json(createSuccessResponse(result, "Invitation canceled"));
+		}
+	)
+
+	// Tenant-scoped dynamic organization roles & role assignments
+	.route("/roles", roleRoutes);

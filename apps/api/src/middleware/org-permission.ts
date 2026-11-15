@@ -1,62 +1,13 @@
-import { APIError } from "better-auth/api";
 import { createMiddleware } from "hono/factory";
-import { auth } from "../lib/auth/index";
 import { type AppEnv, createErrorResponse } from "../lib/create-hono-app";
-
-async function verifyOrgPermissionWithBetterAuth(params: {
-	action: string;
-	headers: Headers;
-	organizationId: string;
-	resource: string;
-}): Promise<{ ok: true } | { message: string; ok: false; status: 401 | 403 }> {
-	const { action, headers, organizationId, resource } = params;
-
-	let result: { error?: unknown; success?: boolean };
-	try {
-		result = await auth.api.hasPermission({
-			body: {
-				organizationId,
-				permissions: {
-					[resource]: [action],
-				},
-			},
-			headers,
-		});
-	} catch (error) {
-		if (error instanceof APIError) {
-			if (error.statusCode === 401) {
-				return {
-					message: error.message || "Authentication or membership required",
-					ok: false,
-					status: 401,
-				};
-			}
-			if (error.statusCode === 403) {
-				return {
-					message: `You do not have permission to ${action} ${resource}`,
-					ok: false,
-					status: 403,
-				};
-			}
-		}
-		throw error;
-	}
-
-	if (!result.success || result.error) {
-		return {
-			message: `You do not have permission to ${action} ${resource}`,
-			ok: false,
-			status: 403,
-		};
-	}
-
-	return { ok: true };
-}
+import { rolesService } from "../modules/roles/service";
 
 export function hasOrgPermission(requiredPermission: string) {
 	return createMiddleware<AppEnv>(async (c, next) => {
 		const session = c.get("session");
+		const user = c.get("user");
 		const organizationId = session?.activeOrganizationId;
+		const userId = user?.id;
 
 		if (!organizationId) {
 			return c.json(
@@ -72,6 +23,13 @@ export function hasOrgPermission(requiredPermission: string) {
 					]
 				),
 				400
+			);
+		}
+
+		if (!userId) {
+			return c.json(
+				createErrorResponse("Unauthorized", "Authentication required"),
+				401
 			);
 		}
 
@@ -99,20 +57,19 @@ export function hasOrgPermission(requiredPermission: string) {
 			return;
 		}
 
-		const verification = await verifyOrgPermissionWithBetterAuth({
-			action,
-			headers: c.req.raw.headers,
+		const allowed = await rolesService.userHasOrganizationPermission({
 			organizationId,
-			resource,
+			permission: requiredPermission,
+			userId,
 		});
 
-		if (!verification.ok) {
+		if (!allowed) {
 			return c.json(
 				createErrorResponse(
-					verification.status === 401 ? "Unauthorized" : "Forbidden",
-					verification.message
+					"Forbidden",
+					`You do not have permission to ${action} ${resource}`
 				),
-				verification.status
+				403
 			);
 		}
 

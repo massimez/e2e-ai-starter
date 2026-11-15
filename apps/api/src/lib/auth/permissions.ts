@@ -2,13 +2,12 @@ import { createAccessControl } from "better-auth/plugins/access";
 import {
 	adminAc,
 	defaultStatements,
-	ownerAc,
 } from "better-auth/plugins/organization/access";
 
 /**
  * Single source of truth for organization RBAC statements and roles.
- * Spreads Better Auth's built-in `member` statements (`create`, `update`, `delete`)
- * so built-in endpoints (`removeMember`, `updateMemberRole`) function alongside custom actions.
+ * Spreads Better Auth's built-in `defaultStatements` (`organization`, `member`,
+ * `invitation`, `team`, `ac`) and extends them with application resources.
  */
 export const statements = {
 	...defaultStatements,
@@ -17,7 +16,7 @@ export const statements = {
 	audit: ["read", "export"],
 	billing: ["read", "manage"],
 	document: ["create", "read", "update", "delete"],
-	member: [...defaultStatements.member, "invite", "remove", "update_role"],
+	member: [...defaultStatements.member, "invite", "remove"],
 	notification: ["read", "manage"],
 	project: ["create", "read", "update", "delete"],
 	role: ["create", "read", "update", "delete", "assign"],
@@ -28,20 +27,7 @@ export const statements = {
 export const ac = createAccessControl(statements);
 
 export const roles = {
-	owner: ac.newRole({
-		...ownerAc.statements,
-		ai: ["read", "execute", "manage"],
-		apiKey: ["create", "read", "revoke"],
-		audit: ["read", "export"],
-		billing: ["read", "manage"],
-		document: ["create", "read", "update", "delete"],
-		member: [...ownerAc.statements.member, "invite", "remove", "update_role"],
-		notification: ["read", "manage"],
-		project: ["create", "read", "update", "delete"],
-		role: ["create", "read", "update", "delete", "assign"],
-		setting: ["read", "update"],
-		storage: ["create", "read", "update", "delete"],
-	}),
+	owner: ac.newRole(statements),
 	admin: ac.newRole({
 		...adminAc.statements,
 		ai: ["read", "execute", "manage"],
@@ -52,7 +38,7 @@ export const roles = {
 		member: [...adminAc.statements.member, "invite", "remove"],
 		notification: ["read", "manage"],
 		project: ["create", "read", "update"],
-		role: ["create", "read", "update"],
+		role: ["read"],
 		setting: ["read", "update"],
 		storage: ["create", "read", "update", "delete"],
 	}),
@@ -78,8 +64,6 @@ export const roles = {
 
 export type OrganizationRoleName = keyof typeof roles;
 
-export type PermissionResource = keyof typeof statements;
-
 export function roleAllows(
 	roleName: OrganizationRoleName,
 	resource: string,
@@ -89,8 +73,7 @@ export function roleAllows(
 		string,
 		readonly string[] | undefined
 	>;
-	const actions = roleStatements[resource];
-	return Boolean(actions?.includes(action));
+	return Boolean(roleStatements[resource]?.includes(action));
 }
 
 export interface PermissionMatrixEntry {
@@ -108,165 +91,151 @@ export interface PermissionMatrixEntry {
 	viewer: boolean;
 }
 
+function matrixEntry(
+	category: PermissionMatrixEntry["category"],
+	resource: string,
+	description: string,
+	statementResource: keyof typeof statements,
+	action: string
+): PermissionMatrixEntry {
+	return {
+		admin: roleAllows("admin", statementResource, action),
+		category,
+		description,
+		member: roleAllows("member", statementResource, action),
+		owner: roleAllows("owner", statementResource, action),
+		resource,
+		viewer: roleAllows("viewer", statementResource, action),
+	};
+}
+
 /**
  * UI permission matrix derived directly from `roles` so the Roles Settings UI
  * always stays synchronized with API enforcement.
  */
 export const PERMISSION_MATRIX: readonly PermissionMatrixEntry[] = [
+	matrixEntry(
+		"Workspace & Governance",
+		"View Workspace Settings",
+		"View organization profile, slug, and settings",
+		"setting",
+		"read"
+	),
+	matrixEntry(
+		"Workspace & Governance",
+		"Update Workspace Settings",
+		"Modify workspace profile name, slug, and branding",
+		"organization",
+		"update"
+	),
 	{
-		category: "Workspace & Governance",
-		description: "View organization profile, slug, and settings",
-		resource: "View Workspace Settings",
-		viewer: roleAllows("viewer", "setting", "read"),
-		member: roleAllows("member", "setting", "read"),
-		admin: roleAllows("admin", "setting", "read"),
-		owner: roleAllows("owner", "setting", "read"),
-	},
-	{
-		category: "Workspace & Governance",
-		description: "Modify workspace profile name, slug, and branding",
-		resource: "Update Workspace Settings",
-		viewer: roleAllows("viewer", "organization", "update"),
-		member: roleAllows("member", "organization", "update"),
-		admin: roleAllows("admin", "organization", "update"),
-		owner: roleAllows("owner", "organization", "update"),
-	},
-	{
+		admin: false,
 		category: "Workspace & Governance",
 		description:
 			"Transfer primary workspace ownership to an active administrator",
+		member: false,
+		owner: true,
 		resource: "Transfer Ownership",
 		viewer: false,
-		member: false,
-		admin: false,
-		owner: true,
 	},
-	{
-		category: "Workspace & Governance",
-		description: "Permanently delete the organization and all associated data",
-		resource: "Delete Workspace",
-		viewer: roleAllows("viewer", "organization", "delete"),
-		member: roleAllows("member", "organization", "delete"),
-		admin: roleAllows("admin", "organization", "delete"),
-		owner: roleAllows("owner", "organization", "delete"),
-	},
-	{
-		category: "Team & Access",
-		description: "Send workspace invitations and cancel pending invitations",
-		resource: "Invite Members",
-		viewer: roleAllows("viewer", "member", "invite"),
-		member: roleAllows("member", "member", "invite"),
-		admin: roleAllows("admin", "member", "invite"),
-		owner: roleAllows("owner", "member", "invite"),
-	},
-	{
-		category: "Team & Access",
-		description: "Remove members from the organization",
-		resource: "Remove Members",
-		viewer: roleAllows("viewer", "member", "delete"),
-		member: roleAllows("member", "member", "delete"),
-		admin: roleAllows("admin", "member", "delete"),
-		owner: roleAllows("owner", "member", "delete"),
-	},
-	{
-		category: "Team & Access",
-		description: "Promote or demote member roles across the workspace",
-		resource: "Update Member Roles",
-		viewer: roleAllows("viewer", "member", "update"),
-		member: roleAllows("member", "member", "update"),
-		admin: roleAllows("admin", "member", "update"),
-		owner: roleAllows("owner", "member", "update"),
-	},
-	{
-		category: "Content & Storage",
-		description: "Create and modify workspace projects",
-		resource: "Manage Projects",
-		viewer: roleAllows("viewer", "project", "create"),
-		member: roleAllows("member", "project", "create"),
-		admin: roleAllows("admin", "project", "create"),
-		owner: roleAllows("owner", "project", "create"),
-	},
-	{
-		category: "Content & Storage",
-		description: "Permanently delete workspace projects",
-		resource: "Delete Projects",
-		viewer: roleAllows("viewer", "project", "delete"),
-		member: roleAllows("member", "project", "delete"),
-		admin: roleAllows("admin", "project", "delete"),
-		owner: roleAllows("owner", "project", "delete"),
-	},
-	{
-		category: "Content & Storage",
-		description: "Upload files via presigned storage URLs",
-		resource: "Upload Storage Assets",
-		viewer: roleAllows("viewer", "storage", "create"),
-		member: roleAllows("member", "storage", "create"),
-		admin: roleAllows("admin", "storage", "create"),
-		owner: roleAllows("owner", "storage", "create"),
-	},
-	{
-		category: "Content & Storage",
-		description: "Read and download private workspace files",
-		resource: "Read Storage Assets",
-		viewer: roleAllows("viewer", "storage", "read"),
-		member: roleAllows("member", "storage", "read"),
-		admin: roleAllows("admin", "storage", "read"),
-		owner: roleAllows("owner", "storage", "read"),
-	},
-	{
-		category: "Content & Storage",
-		description: "Delete uploaded files from workspace storage",
-		resource: "Delete Storage Assets",
-		viewer: roleAllows("viewer", "storage", "delete"),
-		member: roleAllows("member", "storage", "delete"),
-		admin: roleAllows("admin", "storage", "delete"),
-		owner: roleAllows("owner", "storage", "delete"),
-	},
-	{
-		category: "Operations & Billing",
-		description: "Inspect workspace audit trails",
-		resource: "Read Audit Logs",
-		viewer: roleAllows("viewer", "audit", "read"),
-		member: roleAllows("member", "audit", "read"),
-		admin: roleAllows("admin", "audit", "read"),
-		owner: roleAllows("owner", "audit", "read"),
-	},
-	{
-		category: "Operations & Billing",
-		description: "View workspace billing details and invoices",
-		resource: "Read Billing",
-		viewer: roleAllows("viewer", "billing", "read"),
-		member: roleAllows("member", "billing", "read"),
-		admin: roleAllows("admin", "billing", "read"),
-		owner: roleAllows("owner", "billing", "read"),
-	},
-	{
-		category: "Operations & Billing",
-		description: "Manage billing plans and payment methods",
-		resource: "Manage Billing",
-		viewer: roleAllows("viewer", "billing", "manage"),
-		member: roleAllows("member", "billing", "manage"),
-		admin: roleAllows("admin", "billing", "manage"),
-		owner: roleAllows("owner", "billing", "manage"),
-	},
-	{
-		category: "AI & Agents",
-		description: "View available AI agents and workspace chat history",
-		resource: "Read AI Assistant",
-		viewer: roleAllows("viewer", "ai", "read"),
-		member: roleAllows("member", "ai", "read"),
-		admin: roleAllows("admin", "ai", "read"),
-		owner: roleAllows("owner", "ai", "read"),
-	},
-	{
-		category: "AI & Agents",
-		description: "Chat with AI agents and invoke workspace tools",
-		resource: "Run AI Chat",
-		viewer: roleAllows("viewer", "ai", "execute"),
-		member: roleAllows("member", "ai", "execute"),
-		admin: roleAllows("admin", "ai", "execute"),
-		owner: roleAllows("owner", "ai", "execute"),
-	},
+	matrixEntry(
+		"Workspace & Governance",
+		"Delete Workspace",
+		"Permanently delete the organization and all associated data",
+		"organization",
+		"delete"
+	),
+	matrixEntry(
+		"Team & Access",
+		"Invite Members",
+		"Send workspace invitations and cancel pending invitations",
+		"member",
+		"invite"
+	),
+	matrixEntry(
+		"Team & Access",
+		"Remove Members",
+		"Remove members from the organization",
+		"member",
+		"delete"
+	),
+	matrixEntry(
+		"Team & Access",
+		"Update Member Roles",
+		"Promote or demote member roles across the workspace",
+		"member",
+		"update"
+	),
+	matrixEntry(
+		"Content & Storage",
+		"Manage Projects",
+		"Create and modify workspace projects",
+		"project",
+		"create"
+	),
+	matrixEntry(
+		"Content & Storage",
+		"Delete Projects",
+		"Permanently delete workspace projects",
+		"project",
+		"delete"
+	),
+	matrixEntry(
+		"Content & Storage",
+		"Upload Storage Assets",
+		"Upload files via presigned storage URLs",
+		"storage",
+		"create"
+	),
+	matrixEntry(
+		"Content & Storage",
+		"Read Storage Assets",
+		"Read and download private workspace files",
+		"storage",
+		"read"
+	),
+	matrixEntry(
+		"Content & Storage",
+		"Delete Storage Assets",
+		"Delete uploaded files from workspace storage",
+		"storage",
+		"delete"
+	),
+	matrixEntry(
+		"Operations & Billing",
+		"Read Audit Logs",
+		"Inspect workspace audit trails",
+		"audit",
+		"read"
+	),
+	matrixEntry(
+		"Operations & Billing",
+		"Read Billing",
+		"View workspace billing details and invoices",
+		"billing",
+		"read"
+	),
+	matrixEntry(
+		"Operations & Billing",
+		"Manage Billing",
+		"Manage billing plans and payment methods",
+		"billing",
+		"manage"
+	),
+	matrixEntry(
+		"AI & Agents",
+		"Read AI Assistant",
+		"View available AI agents and workspace chat history",
+		"ai",
+		"read"
+	),
+	matrixEntry(
+		"AI & Agents",
+		"Run AI Chat",
+		"Chat with AI agents and invoke workspace tools",
+		"ai",
+		"execute"
+	),
 ];
 
 export function parseMemberRoles(role: string | null | undefined): string[] {
@@ -282,4 +251,94 @@ export function parseMemberRoles(role: string | null | undefined): string[] {
 export function isOrgAdminRole(role: string | null | undefined): boolean {
 	const parsed = parseMemberRoles(role);
 	return parsed.includes("owner") || parsed.includes("admin");
+}
+
+export const SYSTEM_ROLE_SLUGS = [
+	"owner",
+	"admin",
+	"member",
+	"viewer",
+] as const;
+
+export const SYSTEM_ROLE_META: Record<
+	OrganizationRoleName,
+	{ description: string; name: string }
+> = {
+	admin: {
+		description:
+			"Manages team members, invitations, projects, storage, and workspace profile.",
+		name: "Admin",
+	},
+	member: {
+		description:
+			"Standard collaborator who can create and modify projects and upload storage assets.",
+		name: "Member",
+	},
+	owner: {
+		description:
+			"Full administrative authority over workspace billing, ownership, roles, and deletion.",
+		name: "Owner",
+	},
+	viewer: {
+		description:
+			"Read-only access across workspace documents, projects, and notifications.",
+		name: "Viewer",
+	},
+};
+
+export type PermissionStatementMap = Record<string, readonly string[]>;
+
+export const PERMISSION_CATALOG_ENTRIES = Object.entries(
+	statements as PermissionStatementMap
+).map(([resource, actions]) => ({
+	actions: [...actions],
+	resource,
+}));
+
+const ALL_PERMISSION_KEYS = PERMISSION_CATALOG_ENTRIES.flatMap(
+	({ resource, actions }) => actions.map((action) => `${resource}:${action}`)
+);
+
+export const VALID_PERMISSION_KEYS = new Set(ALL_PERMISSION_KEYS);
+
+export const NON_DELEGABLE_PERMISSIONS = new Set(
+	ALL_PERMISSION_KEYS.filter(
+		(key) =>
+			key.startsWith("role:") ||
+			key.startsWith("member:") ||
+			key === "organization:delete"
+	)
+);
+
+export interface OrganizationPermissionItem {
+	action: string;
+	key: string;
+	resource: string;
+}
+
+export interface OrganizationPermissionGroup {
+	permissions: OrganizationPermissionItem[];
+	resource: string;
+}
+
+export interface OrganizationRoleSummary {
+	description: string | null;
+	id: string;
+	isDefault: boolean;
+	isSystem: boolean;
+	memberCount: number;
+	name: string;
+	permissions: string[];
+	slug: string;
+}
+
+export interface EffectiveOrganizationPermissions {
+	isOwner: boolean;
+	permissions: string[];
+	roleSlug: string | null;
+}
+
+export function normalizeRoleSlug(role: string | null | undefined): string {
+	const parsed = parseMemberRoles(role);
+	return (parsed[0] ?? "member").trim().toLowerCase();
 }

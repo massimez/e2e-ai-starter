@@ -5,13 +5,18 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, emailOTP, organization } from "better-auth/plugins";
 import { env } from "../../env";
 import { enqueueEmail } from "../../modules/email/queue";
+import { ensureDefaultOrganizationRoles } from "../../modules/roles/service";
 import { APP_CONFIG } from "../app-config";
 import { logDebug, logError, logInfo, logWarning } from "../logger";
 import { redis } from "../redis/client";
 import { createOrganizationLifecycleHooks } from "./organization-lifecycle";
 import { ac, roles } from "./permissions";
 
-const orgLifecycle = createOrganizationLifecycleHooks();
+const orgLifecycle = createOrganizationLifecycleHooks(undefined, {
+	onOrganizationCreated: async (organizationId) => {
+		await ensureDefaultOrganizationRoles(organizationId);
+	},
+});
 
 const BETTER_AUTH_PREFIX_REGEX = /^\[better-auth\]\s*/iu;
 
@@ -53,6 +58,15 @@ export const auth = betterAuth({
 		},
 	},
 	baseURL: env.BETTER_AUTH_URL,
+	// Disable static-RBAC organization endpoints; dynamic RBAC is enforced on /api/organizations/*
+	disabledPaths: [
+		"/organization/update-member-role",
+		"/organization/invite-member",
+		"/organization/cancel-invitation",
+		"/organization/update",
+		"/organization/remove-member",
+		"/organization/has-permission",
+	],
 	logger: {
 		disabled:
 			env.LOG_LEVEL === "silent" || (env.NODE_ENV === "test" && !env.LOG_LEVEL),

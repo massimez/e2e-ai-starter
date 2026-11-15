@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
-import { member, organization } from "@workspace/db/schema";
-import { and, eq } from "drizzle-orm";
+import { member, organization, session } from "@workspace/db/schema";
+import { and, eq, ne } from "drizzle-orm";
 import { parseMemberRoles } from "../../lib/auth/permissions";
 import {
 	ConflictError,
@@ -9,6 +9,8 @@ import {
 	ValidationError,
 } from "../../lib/errors";
 import { scopedWhere } from "../../lib/tenant";
+import { healDefaultOrganizationAfterMembershipLoss } from "./default-organization";
+import type { UpdateOrganizationInput } from "./schema";
 
 export async function getUserOrganizations(userId: string) {
 	return await db
@@ -97,4 +99,113 @@ export async function transferOwnership(params: {
 			previousOwnerUserId: currentOwnerUserId,
 		};
 	});
+}
+
+export async function updateCurrentOrganization(
+	organizationId: string,
+	input: UpdateOrganizationInput
+) {
+	const existing = await getOrganizationById(organizationId);
+	if (!existing) {
+		throw new NotFoundError("Organization");
+	}
+
+	if (input.slug !== undefined && input.slug !== existing.slug) {
+		const [slugConflict] = await db
+			.select({ id: organization.id })
+			.from(organization)
+			.where(
+				and(
+					eq(organization.slug, input.slug),
+					ne(organization.id, organizationId)
+				)
+			)
+			.limit(1);
+
+		if (slugConflict) {
+			throw new ConflictError("Organization slug already taken", "slug");
+		}
+	}
+
+	const updates: Partial<typeof organization.$inferInsert> = {};
+	if (input.name !== undefined) {
+		updates.name = input.name;
+	}
+	if (input.slug !== undefined) {
+		updates.slug = input.slug;
+	}
+	if (input.logo !== undefined) {
+		updates.logo = input.logo === "" ? null : input.logo;
+	}
+	if (input.metadata !== undefined) {
+		updates.metadata = JSON.stringify(input.metadata);
+	}
+
+	const [updated] = await db
+		.update(organization)
+		.set(updates)
+		.where(eq(organization.id, organizationId))
+		.returning();
+
+	if (!updated) {
+		throw new NotFoundError("Organization");
+	}
+
+	return updated;
+}
+
+export async function removeOrganizationMember(params: {
+	actorUserId: string;
+	memberId: string;
+	organizationId: string;
+}) {
+	const { actorUserId, memberId, organizationId } = params;
+	const orgPredicate = scopedWhere(member, organizationId);
+
+	const [targetMember] = await db
+		.select()
+		.from(member)
+		.where(and(orgPredicate, eq(member.id, memberId)))
+		.limit(1);
+
+	if (!targetMember) {
+		throw new NotFoundError("Organization member", "memberId");
+	}
+
+	if (parseMemberRoles(targetMember.role).includes("owner")) {
+		throw new ForbiddenError(
+			"Organization owner cannot be removed; transfer ownership first"
+		);
+	}
+
+	if (targetMember.userId === actorUserId) {
+		throw new ValidationError(
+			"Use Leave Organization to remove yourself from the workspace",
+			"memberId"
+		);
+	}
+
+	await db
+		.delete(member)
+		.where(and(orgPredicate, eq(member.id, targetMember.id)));
+
+	const fallbackOrganizationId =
+		await healDefaultOrganizationAfterMembershipLoss({
+			lostOrganizationId: organizationId,
+			userId: targetMember.userId,
+		});
+
+	await db
+		.update(session)
+		.set({ activeOrganizationId: fallbackOrganizationId })
+		.where(
+			and(
+				eq(session.userId, targetMember.userId),
+				eq(session.activeOrganizationId, organizationId)
+			)
+		);
+
+	return {
+		member: targetMember,
+	};
 }

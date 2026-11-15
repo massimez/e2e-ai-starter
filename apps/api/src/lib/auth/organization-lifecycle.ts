@@ -95,12 +95,17 @@ const ORG_ACTIVATION_PATHS = new Set([
 	"/organization/set-active",
 ]);
 
+export interface OrganizationLifecycleOptions {
+	onOrganizationCreated?: (organizationId: string) => Promise<void>;
+}
+
 /**
  * Builds Better Auth middleware, database hooks, and organization plugin hooks
  * that enforce active-on-create and persisted default organization across logins and switches.
  */
 export function createOrganizationLifecycleHooks(
-	store?: DefaultOrganizationStore
+	store?: DefaultOrganizationStore,
+	options?: OrganizationLifecycleOptions
 ) {
 	const before = createAuthMiddleware(async (ctx) => {
 		if (ctx.path === "/organization/create") {
@@ -267,6 +272,16 @@ export function createOrganizationLifecycleHooks(
 				},
 				store
 			);
+			if (options?.onOrganizationCreated) {
+				try {
+					await options.onOrganizationCreated(organization.id);
+				} catch (error) {
+					logError("AuthOrganizationLifecycle:onOrganizationCreated", error, {
+						organizationId: organization.id,
+						userId: user.id,
+					});
+				}
+			}
 		},
 		// Delete & leave are healed once in `hooks.after` (which also restores any fallback active org);
 		// `afterRemoveMember` remains here so admin-initiated removal heals another member's default.

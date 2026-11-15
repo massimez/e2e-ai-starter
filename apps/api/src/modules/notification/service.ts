@@ -6,12 +6,13 @@ import {
 	pushSubscription,
 } from "@workspace/db/schema";
 import { and, count, desc, eq } from "drizzle-orm";
-import { isOrgAdminRole } from "../../lib/auth/permissions";
+import { parseMemberRoles } from "../../lib/auth/permissions";
 import {
 	NOTIFICATION_CATEGORIES,
 	NOTIFICATION_CHANNELS,
 	type NotificationJobData,
 } from "../../lib/queues";
+import { rolesService } from "../roles/service";
 import { enqueueNotification, enqueueNotificationsBulk } from "./queue";
 import type {
 	ListNotificationsQuery,
@@ -163,14 +164,27 @@ export const notificationService = {
 		organizationId: string,
 		payload: Omit<NotificationJobData, "userId">
 	) {
-		const orgMembers = await db
-			.select({ role: member.role, userId: member.userId })
-			.from(member)
-			.where(eq(member.organizationId, organizationId));
+		const [orgMembers, eligibleRoleSlugs] = await Promise.all([
+			db
+				.select({ role: member.role, userId: member.userId })
+				.from(member)
+				.where(eq(member.organizationId, organizationId)),
+			rolesService.getRoleSlugsWithPermission(
+				organizationId,
+				"notification:manage"
+			),
+		]);
 
+		const eligibleSet = new Set(eligibleRoleSlugs);
 		const adminUserIds = new Set<string>();
 		for (const orgMember of orgMembers) {
-			if (isOrgAdminRole(orgMember.role)) {
+			const memberRoles = parseMemberRoles(orgMember.role).map((role) =>
+				role.trim().toLowerCase()
+			);
+			if (
+				memberRoles.includes("owner") ||
+				memberRoles.some((role) => eligibleSet.has(role))
+			) {
 				adminUserIds.add(orgMember.userId);
 			}
 		}
