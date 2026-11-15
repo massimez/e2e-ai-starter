@@ -5,5 +5,6 @@ export {
 	type NotificationCategory,
 	type NotificationChannel,
 	type NotificationJobData,
+	notificationChannelSchema,
 	notificationJobDataSchema,
 } from "@workspace/api/queues";

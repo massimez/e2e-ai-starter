@@ -2,9 +2,8 @@ import { z } from "zod";
 import {
 	notificationCategorySchema,
 	notificationChannelSchema,
+	validatePushEndpointUrl,
 } from "../../lib/queues";
-
-const HTTP_URL_REGEX = /^https?:\/\//iu;
 
 export const notificationIdParamSchema = z.object({
 	id: z.string().uuid("Invalid notification ID"),
@@ -27,8 +26,14 @@ export const pushSubscriptionSchema = z.object({
 		.string()
 		.url()
 		.max(2048)
-		.refine((val) => HTTP_URL_REGEX.test(val), {
-			message: "Push endpoint must use http or https",
+		.superRefine((val, ctx) => {
+			const validation = validatePushEndpointUrl(val);
+			if (!validation.ok) {
+				ctx.addIssue({
+					code: "custom",
+					message: validation.reason,
+				});
+			}
 		}),
 	keys: z.object({
 		auth: z.string().min(1),

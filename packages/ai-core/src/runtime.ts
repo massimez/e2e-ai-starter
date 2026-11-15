@@ -34,6 +34,8 @@ export interface MastraRuntimeConfig {
 	embeddingModel?: string;
 	/** Enable pgvector semantic recall (requires an API key for the embedding provider). Defaults to true. */
 	enableSemanticRecall?: boolean;
+	/** Maximum connections for the shared Mastra PostgreSQL pool. Defaults to 5. */
+	maxPoolConnections?: number;
 	schemaName?: string;
 }
 
@@ -58,6 +60,16 @@ export function createTenantRequestContext(
 	requestContext.set(AI_CONTEXT_KEYS.organizationId, parsed.organizationId);
 	requestContext.set(AI_CONTEXT_KEYS.userId, parsed.userId);
 	requestContext.set(AI_CONTEXT_KEYS.userRole, parsed.userRole);
+	requestContext.set(
+		AI_CONTEXT_KEYS.canReadStorage,
+		parsed.canReadStorage ?? false
+	);
+	if (parsed.canReadMemberEmails !== undefined) {
+		requestContext.set(
+			AI_CONTEXT_KEYS.canReadMemberEmails,
+			parsed.canReadMemberEmails
+		);
+	}
 	if (parsed.requestId) {
 		requestContext.set(AI_CONTEXT_KEYS.requestId, parsed.requestId);
 	}
@@ -82,16 +94,20 @@ export function createMastraRuntime(
 	let memory: Memory | undefined;
 
 	if (config.databaseUrl) {
-		storage = new PostgresStore({
-			connectionString: config.databaseUrl,
-			disableInit: config.disableStorageInit,
-			id: "mastra-pg-store",
-			schemaName,
-		});
+		const maxPoolConnections = config.maxPoolConnections ?? 5;
 		vector = new PgVector({
 			connectionString: config.databaseUrl,
 			disableInit: config.disableStorageInit,
 			id: "mastra-pg-vector",
+			pgPoolOptions: {
+				max: maxPoolConnections,
+			},
+			schemaName,
+		});
+		storage = new PostgresStore({
+			disableInit: config.disableStorageInit,
+			id: "mastra-pg-store",
+			pool: vector.pool,
 			schemaName,
 		});
 		// Embedders are resolved eagerly and throw without a provider API key, so
@@ -160,8 +176,14 @@ export function createMastraRuntime(
 		}
 		await Promise.allSettled([
 			observability ? observability.shutdown() : Promise.resolve(),
-			vector ? vector.disconnect() : Promise.resolve(),
-			storage ? storage.close() : Promise.resolve(),
+			(async () => {
+				if (storage) {
+					await storage.close();
+				}
+				if (vector) {
+					await vector.disconnect();
+				}
+			})(),
 		]);
 	};
 

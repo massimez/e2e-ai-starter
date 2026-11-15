@@ -3,14 +3,15 @@ import { db } from "@workspace/db";
 import { member, user } from "@workspace/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { AI_CONTEXT_KEYS, tenantAiContextSchema } from "../../contracts";
+import { tenantAiContextSchema } from "../../contracts";
+import { requireTenantMembership } from "./tenant-auth";
 
 const workspaceMembersInputSchema = z.object({
 	limit: z.number().int().min(1).max(50).optional().default(20),
 });
 
 const workspaceMemberItemSchema = z.object({
-	email: z.string(),
+	email: z.string().optional(),
 	joinedAt: z.string(),
 	name: z.string(),
 	role: z.string(),
@@ -37,15 +38,8 @@ export const workspaceMembersTool = createTool({
 	outputSchema: workspaceMembersOutputSchema,
 	requestContextSchema: tenantAiContextSchema,
 	execute: async (inputData, context) => {
-		const organizationId = context?.requestContext?.get(
-			AI_CONTEXT_KEYS.organizationId
-		);
-		const userId = context?.requestContext?.get(AI_CONTEXT_KEYS.userId);
-		if (!(organizationId && userId)) {
-			throw new Error(
-				"Tenant organizationId and userId are required in requestContext"
-			);
-		}
+		const { canReadMemberEmails, organizationId } =
+			await requireTenantMembership(context?.requestContext);
 
 		const rows = await db
 			.select({
@@ -62,7 +56,7 @@ export const workspaceMembersTool = createTool({
 			.limit(inputData.limit ?? 20);
 
 		const members = rows.map((row) => ({
-			email: row.email,
+			...(canReadMemberEmails ? { email: row.email } : {}),
 			joinedAt:
 				row.createdAt instanceof Date
 					? row.createdAt.toISOString()

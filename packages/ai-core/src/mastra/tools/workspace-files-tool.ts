@@ -1,9 +1,10 @@
 import { createTool } from "@mastra/core/tools";
 import { db } from "@workspace/db";
 import { uploads } from "@workspace/db/schema";
-import { and, desc, eq, ilike } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { AI_CONTEXT_KEYS, tenantAiContextSchema } from "../../contracts";
+import { tenantAiContextSchema } from "../../contracts";
+import { escapeLikePattern, requireTenantMembership } from "./tenant-auth";
 
 const workspaceFilesInputSchema = z.object({
 	limit: z.number().int().min(1).max(50).optional().default(15),
@@ -53,22 +54,27 @@ export const workspaceFilesTool = createTool({
 	outputSchema: workspaceFilesOutputSchema,
 	requestContextSchema: tenantAiContextSchema,
 	execute: async (inputData, context) => {
-		const organizationId = context?.requestContext?.get(
-			AI_CONTEXT_KEYS.organizationId
+		const { canReadStorage, organizationId } = await requireTenantMembership(
+			context?.requestContext
 		);
-		const userId = context?.requestContext?.get(AI_CONTEXT_KEYS.userId);
-		if (!(organizationId && userId)) {
+		if (!canReadStorage) {
 			throw new Error(
-				"Tenant organizationId and userId are required in requestContext"
+				"Storage read permission is required to search workspace files"
 			);
 		}
 
 		const searchQuery = inputData.search?.trim();
-		const whereClause = searchQuery
+		const escapedPattern = searchQuery
+			? `%${escapeLikePattern(searchQuery)}%`
+			: undefined;
+		const whereClause = escapedPattern
 			? and(
 					eq(uploads.organizationId, organizationId),
 					eq(uploads.status, "committed"),
-					ilike(uploads.fileKey, `%${searchQuery}%`)
+					or(
+						sql`${uploads.fileKey} ILIKE ${escapedPattern} ESCAPE '\\'`,
+						sql`coalesce(${uploads.metadata}->>'originalName', '') ILIKE ${escapedPattern} ESCAPE '\\'`
+					)
 				)
 			: and(
 					eq(uploads.organizationId, organizationId),

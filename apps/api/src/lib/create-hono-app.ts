@@ -256,6 +256,7 @@ export function createApp() {
 			credentials: true,
 			exposeHeaders: [
 				"x-request-id",
+				"X-AI-Thread-Id",
 				"X-RateLimit-Limit",
 				"X-RateLimit-Remaining",
 				"X-RateLimit-Reset",

@@ -6,8 +6,19 @@ import {
 } from "@workspace/api/logger";
 import { z } from "zod";
 
-const REDIS_URL_REGEX = /^rediss?:\/\//iu;
 const VAPID_SUBJECT_REGEX = /^(?:mailto:|https?:\/\/)/iu;
+
+function isValidRedisUrl(value: string): boolean {
+	try {
+		const parsed = new URL(value);
+		return (
+			(parsed.protocol === "redis:" || parsed.protocol === "rediss:") &&
+			parsed.hostname.length > 0
+		);
+	} catch {
+		return false;
+	}
+}
 
 const workerEnvSchema = z
 	.object({
@@ -43,8 +54,9 @@ const workerEnvSchema = z
 			.string()
 			.trim()
 			.default("redis://localhost:6379")
-			.refine((val) => REDIS_URL_REGEX.test(val), {
-				message: "REDIS_URL must start with redis:// or rediss://",
+			.refine(isValidRedisUrl, {
+				message:
+					"REDIS_URL must be a valid URL starting with redis:// or rediss://",
 			}),
 		RESEND_API_KEY: z.string().trim().default(""),
 		VAPID_PRIVATE_KEY: z.string().trim().default(""),

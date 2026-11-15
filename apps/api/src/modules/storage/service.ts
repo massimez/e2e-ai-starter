@@ -5,17 +5,7 @@ import {
 	storageFolders,
 	uploads,
 } from "@workspace/db/schema";
-import {
-	and,
-	count,
-	desc,
-	eq,
-	gt,
-	inArray,
-	lt,
-	type SQL,
-	sql,
-} from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
 import { env } from "../../env";
 import { AppError, NotFoundError, ValidationError } from "../../lib/errors";
 import { logError } from "../../lib/logger";
@@ -30,7 +20,7 @@ import { STORAGE_CONFIG } from "./config";
 import {
 	deleteS3Object,
 	ensureDevBucketExists,
-	getS3ObjectBytes,
+	getS3ObjectStream,
 	hasConfiguredS3Credentials,
 	headS3Object,
 	isS3NotFoundError,
@@ -112,13 +102,6 @@ async function assertWithinStorageQuota(
 			"size"
 		);
 	}
-}
-
-export async function checkStorageQuota(
-	organizationId: string,
-	additionalBytes: number
-): Promise<void> {
-	await assertWithinStorageQuota(organizationId, additionalBytes);
 }
 
 export async function presignUpload(params: {
@@ -254,12 +237,20 @@ async function verifyUploadedObject(
 				"fileKeys"
 			);
 		}
-		if (
-			head.ContentType &&
-			!isAllowedContentType(head.ContentType.split(";")[0]?.trim() ?? "")
-		) {
+		const actualContentType =
+			head.ContentType?.split(";")[0]?.trim().toLowerCase() ?? "";
+		const expectedContentType =
+			uploadRow.contentType?.split(";")[0]?.trim().toLowerCase() ?? "";
+
+		if (!(actualContentType && isAllowedContentType(actualContentType))) {
 			throw new ValidationError(
-				`Uploaded Content-Type is not allowed for ${uploadRow.fileKey}`,
+				`Uploaded Content-Type is missing or not allowed for ${uploadRow.fileKey}`,
+				"contentType"
+			);
+		}
+		if (expectedContentType && actualContentType !== expectedContentType) {
+			throw new ValidationError(
+				`Uploaded Content-Type (${actualContentType}) does not match declared Content-Type (${expectedContentType})`,
 				"contentType"
 			);
 		}
@@ -543,17 +534,17 @@ export async function getUploadFileStream(params: {
 	);
 
 	try {
-		const bytes = await getS3ObjectBytes({
+		const stream = await getS3ObjectStream({
 			bucket: record.bucket,
 			fileKey: record.fileKey,
 		});
-		if (!bytes) {
+		if (!stream) {
 			throw new NotFoundError("File content");
 		}
 		return {
-			body: bytes,
 			contentType,
 			disposition: downloadDisposition,
+			stream,
 		};
 	} catch (error) {
 		if (isS3NotFoundError(error)) {
@@ -595,57 +586,71 @@ export async function deleteUpload(params: {
 		throw new ValidationError("Upload identifier is required");
 	}
 
-	return await db.transaction(async (tx) => {
-		const [existing] = await tx
-			.select()
-			.from(uploads)
-			.where(filter)
-			.for("update")
-			.limit(1);
+	const { deletedBucket, deletedFileKey, deletedId } = await db.transaction(
+		async (tx) => {
+			const [existing] = await tx
+				.select()
+				.from(uploads)
+				.where(filter)
+				.for("update")
+				.limit(1);
 
-		if (!existing) {
-			throw new NotFoundError("File not found or unauthorized");
+			if (!existing) {
+				throw new NotFoundError("File not found or unauthorized");
+			}
+
+			const [deleted] = await tx
+				.delete(uploads)
+				.where(withOrg(uploads, organizationId, eq(uploads.id, existing.id)))
+				.returning();
+
+			if (deleted?.size && deleted.status === "committed") {
+				await tx
+					.update(organizationStorageLimits)
+					.set({
+						currentUsage: sql`GREATEST(0, ${organizationStorageLimits.currentUsage} - ${deleted.size})`,
+						updatedAt: new Date(),
+					})
+					.where(eq(organizationStorageLimits.organizationId, organizationId));
+			}
+
+			return {
+				deletedBucket: existing.bucket,
+				deletedFileKey: existing.fileKey,
+				deletedId: existing.id,
+			};
 		}
+	);
 
-		try {
-			await deleteS3Object({
-				bucket: existing.bucket,
-				fileKey: existing.fileKey,
-			});
-		} catch (error) {
-			if (!isS3NotFoundError(error)) {
-				logError("deleteUpload:S3Delete", error, {
-					fileKey: existing.fileKey,
+	try {
+		await deleteS3Object({
+			bucket: deletedBucket,
+			fileKey: deletedFileKey,
+		});
+	} catch (error) {
+		if (!isS3NotFoundError(error)) {
+			try {
+				await deleteS3Object({
+					bucket: deletedBucket,
+					fileKey: deletedFileKey,
 				});
-				throw new AppError("Failed to delete file from object storage", {
-					cause: error,
-					code: "STORAGE_DELETE_FAILED",
-					statusCode: 502,
-				});
+			} catch (retryError) {
+				if (!isS3NotFoundError(retryError)) {
+					logError("deleteUpload:S3Orphan", retryError, {
+						bucket: deletedBucket,
+						fileKey: deletedFileKey,
+						uploadId: deletedId,
+					});
+				}
 			}
 		}
+	}
 
-		const [deleted] = await tx
-			.delete(uploads)
-			.where(withOrg(uploads, organizationId, eq(uploads.id, existing.id)))
-			.returning();
-
-		if (deleted?.size && deleted.status === "committed") {
-			await tx
-				.update(organizationStorageLimits)
-				.set({
-					currentUsage: sql`GREATEST(0, ${organizationStorageLimits.currentUsage} - ${deleted.size})`,
-					updatedAt: new Date(),
-				})
-				.where(eq(organizationStorageLimits.organizationId, organizationId));
-		}
-
-		return {
-			fileKey: existing.fileKey,
-			id: existing.id,
-			success: true,
-		};
-	});
+	return {
+		fileKey: deletedFileKey,
+		id: deletedId,
+		success: true,
+	};
 }
 
 export async function getStorageUsage(organizationId: string) {
@@ -671,12 +676,4 @@ export async function getStorageUsage(organizationId: string) {
 		storageLimit,
 		usagePercent,
 	};
-}
-
-export async function purgeExpiredPendingUploads(cutoff = new Date()) {
-	const deleted = await db
-		.delete(uploads)
-		.where(and(eq(uploads.status, "pending"), lt(uploads.expiresAt, cutoff)))
-		.returning({ id: uploads.id });
-	return deleted.length;
 }

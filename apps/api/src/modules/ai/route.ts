@@ -38,6 +38,7 @@ export const aiRoutes = createRouter()
 			const { organizationId, userId } = getActiveOrgContext(c);
 			const input = c.req.valid("json");
 			return await aiService.createAiChatResponse({
+				abortSignal: c.req.raw.signal,
 				input,
 				organizationId,
 				requestId: c.get("requestId"),
@@ -69,6 +70,21 @@ export const aiRoutes = createRouter()
 			const { organizationId, userId } = getActiveOrgContext(c);
 			const { id } = c.req.valid("param");
 			const result = await aiService.getAiThread({
+				organizationId,
+				threadId: id,
+				userId,
+			});
+			return c.json(createSuccessResponse(result));
+		}
+	)
+	.delete(
+		"/threads/:id",
+		hasOrgPermission("ai:execute"),
+		paramValidator(aiThreadIdParamSchema),
+		async (c) => {
+			const { organizationId, userId } = getActiveOrgContext(c);
+			const { id } = c.req.valid("param");
+			const result = await aiService.deleteAiThread({
 				organizationId,
 				threadId: id,
 				userId,

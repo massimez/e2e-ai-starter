@@ -5,6 +5,7 @@ import {
 	createRouter,
 	createSuccessResponse,
 } from "../../lib/create-hono-app";
+import { withTimeout } from "../../lib/queues";
 import { redis } from "../../lib/redis/client";
 import { rateLimiter } from "../../middleware/rate-limiter";
 
@@ -17,28 +18,6 @@ function buildLivenessPayload() {
 		timestamp: new Date().toISOString(),
 		uptime: process.uptime(),
 	});
-}
-
-async function withTimeout<T>(
-	promise: Promise<T>,
-	timeoutMs: number
-): Promise<T> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	try {
-		return await Promise.race([
-			promise,
-			new Promise<never>((_, reject) => {
-				timer = setTimeout(
-					() => reject(new Error("Readiness check timed out")),
-					timeoutMs
-				);
-			}),
-		]);
-	} finally {
-		if (timer) {
-			clearTimeout(timer);
-		}
-	}
 }
 
 export const healthRoutes = createRouter()

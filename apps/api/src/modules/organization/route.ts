@@ -8,7 +8,10 @@ import {
 import { NotFoundError } from "../../lib/errors";
 import { getActiveOrgContext } from "../../lib/tenant";
 import { authMiddleware } from "../../middleware/auth";
-import { hasOrgPermission } from "../../middleware/org-permission";
+import {
+	hasOrgPermission,
+	requireOrgOwner,
+} from "../../middleware/org-permission";
 import { rateLimiter } from "../../middleware/rate-limiter";
 import { tenantBoundaryMiddleware } from "../../middleware/tenant-boundary";
 import { roleRoutes } from "../roles/route";
@@ -81,7 +84,7 @@ export const organizationRoutes = createRouter()
 	// Transfer organization ownership atomically from current owner to an active admin
 	.post(
 		"/transfer-ownership",
-		hasOrgPermission("organization:update"),
+		requireOrgOwner(),
 		jsonValidator(transferOwnershipSchema),
 		async (c) => {
 			const { organizationId, userId } = getActiveOrgContext(c);

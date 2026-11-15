@@ -1,9 +1,18 @@
+import type { LookupAddress } from "node:dns";
+import { lookup } from "node:dns/promises";
+import { Agent as HttpsAgent } from "node:https";
+import {
+	isBlockedIpAddress,
+	validatePushEndpointUrl,
+} from "@workspace/api/queues";
 import { UnrecoverableError } from "bullmq";
 import { sendNotification, WebPushError } from "web-push";
 import { env } from "../env";
 import { logInfo, logWarning } from "./logger";
 
 export const pushTransport = {
+	lookup: (hostname: string): Promise<LookupAddress[]> =>
+		lookup(hostname, { all: true, verbatim: true }),
 	sendNotification,
 };
 
@@ -40,42 +49,76 @@ export class PushDeliveryError extends Error {
 const PERMANENT_PUSH_STATUSES = new Set([400, 401, 403]);
 const GONE_PUSH_STATUSES = new Set([404, 410]);
 
-function validatePushEndpoint(endpoint: string): void {
-	let parsed: URL;
+async function resolveSafePushAddresses(
+	endpoint: string
+): Promise<{ addresses: LookupAddress[]; url: URL }> {
+	const validation = validatePushEndpointUrl(endpoint);
+	if (!validation.ok) {
+		throw new PushDeliveryError(validation.reason, {
+			isGone: true,
+			statusCode: 400,
+		});
+	}
+
+	let addresses: LookupAddress[];
 	try {
-		parsed = new URL(endpoint);
+		addresses = await pushTransport.lookup(validation.url.hostname);
 	} catch (error) {
-		throw new PushDeliveryError("Invalid push endpoint URL", {
+		throw new PushDeliveryError("Push endpoint DNS resolution failed", {
 			cause: error,
-			isGone: true,
-			statusCode: 400,
+			isGone: false,
+			statusCode: 503,
 		});
 	}
 
-	if (parsed.protocol === "https:") {
-		return;
+	if (
+		addresses.length === 0 ||
+		addresses.some((entry) => isBlockedIpAddress(entry.address))
+	) {
+		throw new PushDeliveryError(
+			"Push endpoint resolved to a restricted network address",
+			{
+				isGone: true,
+				statusCode: 400,
+			}
+		);
 	}
 
-	const isLocalDevHttp =
-		env.NODE_ENV !== "production" &&
-		parsed.protocol === "http:" &&
-		(parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
+	return { addresses, url: validation.url };
+}
 
-	if (!isLocalDevHttp) {
-		throw new PushDeliveryError("Push subscription endpoint must use https", {
-			isGone: true,
-			statusCode: 400,
-		});
-	}
+function createPinnedPushAgent(addresses: LookupAddress[]): HttpsAgent {
+	const [primary] = addresses;
+	return new HttpsAgent({
+		keepAlive: false,
+		lookup: (_hostname, options, callback) => {
+			if (!primary) {
+				callback(new Error("No validated public IP for push endpoint"), "", 4);
+				return;
+			}
+			const wantAll =
+				typeof options === "object" && options !== null && options.all === true;
+			if (wantAll) {
+				callback(
+					null,
+					addresses as unknown as string,
+					undefined as unknown as number
+				);
+				return;
+			}
+			callback(null, primary.address, primary.family);
+		},
+	});
 }
 
 export async function sendWebPush(
 	sub: PushSubscriptionTarget,
 	payload: PushMessagePayload
 ): Promise<{ simulated: boolean; statusCode: number }> {
-	validatePushEndpoint(sub.endpoint);
+	const { addresses, url } = await resolveSafePushAddresses(sub.endpoint);
 
 	if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
+		const pinnedAgent = createPinnedPushAgent(addresses);
 		try {
 			const result = await pushTransport.sendNotification(
 				{
@@ -88,6 +131,7 @@ export async function sendWebPush(
 				JSON.stringify(payload),
 				{
 					TTL: 86_400,
+					agent: pinnedAgent,
 					timeout: 10_000,
 					vapidDetails: {
 						privateKey: env.VAPID_PRIVATE_KEY,
@@ -98,7 +142,7 @@ export async function sendWebPush(
 			);
 
 			logInfo("PushSender:VAPID", "Dispatched Web Push", {
-				endpointOrigin: new URL(sub.endpoint).origin,
+				endpointOrigin: url.origin,
 				statusCode: result.statusCode,
 			});
 
@@ -123,6 +167,8 @@ export async function sendWebPush(
 				);
 			}
 			throw error;
+		} finally {
+			pinnedAgent.destroy();
 		}
 	}
 
@@ -132,7 +178,7 @@ export async function sendWebPush(
 
 	await Promise.resolve();
 	logWarning("PushSender:Simulator", "Simulated Web Push dispatch (dev mode)", {
-		endpointOrigin: new URL(sub.endpoint).origin,
+		endpointOrigin: url.origin,
 		title: payload.title,
 	});
 

@@ -120,6 +120,8 @@ export function buildEmbeddingProviderOptions(
 }
 
 export const AI_CONTEXT_KEYS = {
+	canReadMemberEmails: "canReadMemberEmails",
+	canReadStorage: "canReadStorage",
 	organizationId: "organizationId",
 	requestId: "requestId",
 	userId: "userId",
@@ -127,6 +129,8 @@ export const AI_CONTEXT_KEYS = {
 } as const;
 
 export const tenantAiContextSchema = z.object({
+	canReadMemberEmails: z.boolean().optional(),
+	canReadStorage: z.boolean().optional(),
 	organizationId: z.string().min(1),
 	requestId: z.string().min(1).optional(),
 	userId: z.string().min(1),
@@ -180,11 +184,29 @@ export const aiAgentsResponseSchema = z.object({
 
 export type AiAgentsResponse = z.infer<typeof aiAgentsResponseSchema>;
 
+export const aiUserTextPartSchema = z
+	.object({
+		state: z.enum(["done", "streaming"]).optional(),
+		text: z.string().trim().min(1).max(32_000),
+		type: z.literal("text"),
+	})
+	.strict();
+
+export const aiChatUserMessageSchema = z
+	.object({
+		id: z.string().trim().min(1).max(128).optional(),
+		parts: z.array(aiUserTextPartSchema).min(1).max(32),
+		role: z.literal("user"),
+	})
+	.strict();
+
+export type AiChatUserMessage = z.infer<typeof aiChatUserMessageSchema>;
+
 export const aiChatRequestSchema = z.object({
 	agentId: z.string().trim().min(1).max(128).optional(),
 	id: z.string().trim().min(1).max(128).optional(),
 	messageId: z.string().trim().min(1).max(128).optional(),
-	messages: z.array(z.record(z.string(), z.unknown())).min(1).max(200),
+	messages: z.array(aiChatUserMessageSchema).min(1).max(1),
 	trigger: z.enum(["submit-message", "regenerate-message"]).optional(),
 });
 

@@ -241,6 +241,48 @@ describe("storage service controls and route guards", () => {
 		});
 	});
 
+	test("commitUploads rejects mismatched S3 HeadObject Content-Type", async () => {
+		const expiresAt = new Date(Date.now() + 60_000);
+		const pendingRow = {
+			bucket: "starter-uploads",
+			contentType: "image/png",
+			expiresAt,
+			fileKey: "org_1/uploads/spoofed.png",
+			id: "11111111-1111-4111-8111-111111111111",
+			metadata: { storageMode: "s3" },
+			organizationId: "org_1",
+			size: 2048,
+			status: "pending",
+		};
+
+		spyOn(db, "select").mockImplementation((() =>
+			createQueryChain([pendingRow])) as never);
+
+		spyOn(S3Client.prototype, "send").mockResolvedValueOnce({
+			ContentLength: 2048,
+			ContentType: "application/pdf",
+		} as never);
+
+		await expect(
+			commitUploads({
+				input: { fileKeys: [pendingRow.fileKey] },
+				organizationId: "org_1",
+			})
+		).rejects.toThrow("does not match declared Content-Type");
+
+		spyOn(S3Client.prototype, "send").mockResolvedValueOnce({
+			ContentLength: 2048,
+			ContentType: "text/html",
+		} as never);
+
+		await expect(
+			commitUploads({
+				input: { fileKeys: [pendingRow.fileKey] },
+				organizationId: "org_1",
+			})
+		).rejects.toThrow("Uploaded Content-Type is missing or not allowed");
+	});
+
 	test("presignUpload throws STORAGE_UNAVAILABLE when S3 credentials are missing", async () => {
 		let callIndex = 0;
 		spyOn(db, "select").mockImplementation((() => {

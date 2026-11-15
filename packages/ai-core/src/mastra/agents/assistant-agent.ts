@@ -1,4 +1,4 @@
-import { Agent } from "@mastra/core/agent";
+import { Agent, type ToolsInput } from "@mastra/core/agent";
 import type { MastraMemory } from "@mastra/core/memory";
 import {
 	AI_CONTEXT_KEYS,
@@ -21,7 +21,6 @@ export interface WorkspaceAssistantOptions {
 
 const BASE_INSTRUCTIONS = [
 	"You are the multi-tenant workspace assistant for E2E AI Starter.",
-	"Always ground answers about the user's current workspace, membership role, team roster, or committed files by calling get-workspace-context, list-workspace-members, or search-workspace-files instead of guessing.",
 	"Never claim access to other organizations, raw secrets, credentials, or host filesystem resources.",
 	"Keep responses clear, concise, and actionable.",
 ].join(" ");
@@ -43,21 +42,34 @@ export function createWorkspaceAssistantAgent(
 		instructions: ({ requestContext }) => {
 			const organizationId = requestContext.get(AI_CONTEXT_KEYS.organizationId);
 			const userRole = requestContext.get(AI_CONTEXT_KEYS.userRole);
+			const canReadStorage =
+				requestContext.get(AI_CONTEXT_KEYS.canReadStorage) === true;
+			const allowedTools = canReadStorage
+				? "get-workspace-context, list-workspace-members, or search-workspace-files"
+				: "get-workspace-context or list-workspace-members";
+			const groundingLine = `Always ground answers about the user's current workspace, membership role, team roster, or committed files by calling ${allowedTools} instead of guessing.`;
 
 			if (organizationId && userRole) {
-				return `${BASE_INSTRUCTIONS} Active context: organizationId=${organizationId}, callerRole=${userRole}.`;
+				return `${BASE_INSTRUCTIONS} ${groundingLine} Active context: organizationId=${organizationId}, callerRole=${userRole}.`;
 			}
-			return BASE_INSTRUCTIONS;
+			return `${BASE_INSTRUCTIONS} ${groundingLine}`;
 		},
 		memory: options.memory,
 		model: options.model ?? DEFAULT_CHAT_MODEL,
 		name: "Workspace Assistant",
 		outputProcessors: createOutputGuardrailProcessors(),
 		requestContextSchema: tenantAiContextSchema,
-		tools: {
-			workspaceContextTool,
-			workspaceFilesTool,
-			workspaceMembersTool,
+		tools: ({ requestContext }): ToolsInput => {
+			const canReadStorage =
+				requestContext.get(AI_CONTEXT_KEYS.canReadStorage) === true;
+			const tools: ToolsInput = {
+				workspaceContextTool,
+				workspaceMembersTool,
+			};
+			if (canReadStorage) {
+				tools.workspaceFilesTool = workspaceFilesTool;
+			}
+			return tools;
 		},
 	});
 }

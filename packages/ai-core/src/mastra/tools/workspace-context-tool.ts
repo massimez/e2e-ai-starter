@@ -8,7 +8,8 @@ import {
 } from "@workspace/db/schema";
 import { and, count, eq } from "drizzle-orm";
 import { z } from "zod";
-import { AI_CONTEXT_KEYS, tenantAiContextSchema } from "../../contracts";
+import { tenantAiContextSchema } from "../../contracts";
+import { requireTenantMembership } from "./tenant-auth";
 
 const workspaceContextInputSchema = z.object({
 	includeStorageSummary: z
@@ -43,15 +44,8 @@ export const workspaceContextTool = createTool({
 	outputSchema: workspaceContextOutputSchema,
 	requestContextSchema: tenantAiContextSchema,
 	execute: async (inputData, context) => {
-		const organizationId = context?.requestContext?.get(
-			AI_CONTEXT_KEYS.organizationId
-		);
-		const userId = context?.requestContext?.get(AI_CONTEXT_KEYS.userId);
-		if (!(organizationId && userId)) {
-			throw new Error(
-				"Tenant organizationId and userId are required in requestContext"
-			);
-		}
+		const { canReadStorage, memberRole, organizationId } =
+			await requireTenantMembership(context?.requestContext);
 
 		const [orgRow] = await db
 			.select({
@@ -67,21 +61,6 @@ export const workspaceContextTool = createTool({
 			throw new Error(`Workspace ${organizationId} was not found`);
 		}
 
-		const [membershipRow] = await db
-			.select({ role: member.role })
-			.from(member)
-			.where(
-				and(
-					eq(member.organizationId, organizationId),
-					eq(member.userId, userId)
-				)
-			)
-			.limit(1);
-
-		if (!membershipRow) {
-			throw new Error("Active user is not a member of the requested workspace");
-		}
-
 		const [memberStats] = await db
 			.select({ total: count() })
 			.from(member)
@@ -92,10 +71,10 @@ export const workspaceContextTool = createTool({
 			organizationId: orgRow.id,
 			organizationName: orgRow.name,
 			organizationSlug: orgRow.slug,
-			userRole: membershipRow.role,
+			userRole: memberRole,
 		};
 
-		if (inputData.includeStorageSummary) {
+		if (inputData.includeStorageSummary && canReadStorage) {
 			const [quotaRow] = await db
 				.select({
 					currentUsage: organizationStorageLimits.currentUsage,

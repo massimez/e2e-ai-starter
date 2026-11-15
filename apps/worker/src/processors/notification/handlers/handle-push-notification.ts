@@ -5,15 +5,25 @@ import { logError, logInfo, logWarning } from "../../../lib/logger";
 import { PushDeliveryError, sendWebPush } from "../../../lib/push-sender";
 import type { NotificationJobData } from "../types";
 
+export interface HandlePushNotificationOptions {
+	deliveredSubscriptionIds?: ReadonlySet<string>;
+	onSubscriptionDelivered?: (subscriptionId: string) => void;
+}
+
 export async function handlePushNotification(
-	data: NotificationJobData
+	data: NotificationJobData,
+	options: HandlePushNotificationOptions = {}
 ): Promise<void> {
 	const subs = await db
 		.select()
 		.from(pushSubscription)
 		.where(eq(pushSubscription.userId, data.userId));
 
-	if (subs.length === 0) {
+	const pendingSubs = options.deliveredSubscriptionIds
+		? subs.filter((sub) => !options.deliveredSubscriptionIds?.has(sub.id))
+		: subs;
+
+	if (pendingSubs.length === 0) {
 		return;
 	}
 
@@ -26,7 +36,7 @@ export async function handlePushNotification(
 	};
 
 	const results = await Promise.allSettled(
-		subs.map(async (sub) => {
+		pendingSubs.map(async (sub) => {
 			await sendWebPush(
 				{
 					auth: sub.keys.auth,
@@ -44,13 +54,14 @@ export async function handlePushNotification(
 	const retryableErrors: Error[] = [];
 
 	for (const [index, result] of results.entries()) {
-		const sub = subs[index];
+		const sub = pendingSubs[index];
 		if (!sub) {
 			continue;
 		}
 
 		if (result.status === "fulfilled") {
 			succeededCount += 1;
+			options.onSubscriptionDelivered?.(sub.id);
 			continue;
 		}
 
@@ -94,11 +105,17 @@ export async function handlePushNotification(
 		failedCount: retryableErrors.length,
 		removedCount,
 		succeededCount,
-		totalSubscriptions: subs.length,
+		totalSubscriptions: pendingSubs.length,
 		userId: data.userId,
 	});
 
-	if (succeededCount === 0 && retryableErrors.length > 0) {
+	if (retryableErrors.length === 1) {
 		throw retryableErrors[0];
+	}
+	if (retryableErrors.length > 1) {
+		throw new AggregateError(
+			retryableErrors,
+			`${retryableErrors.length} push subscription deliveries failed`
+		);
 	}
 }

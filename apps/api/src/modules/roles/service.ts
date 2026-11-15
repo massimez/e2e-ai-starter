@@ -76,59 +76,66 @@ async function clearDefaultRoleFlag(
 export async function ensureDefaultOrganizationRoles(
 	organizationId: string
 ): Promise<void> {
-	const existingDefault = await db
-		.select({ id: organizationRole.id })
-		.from(organizationRole)
-		.where(
-			and(
-				scopedWhere(organizationRole, organizationId),
-				eq(organizationRole.isDefault, true)
+	await db.transaction(async (tx) => {
+		const existingDefault = await tx
+			.select({ id: organizationRole.id })
+			.from(organizationRole)
+			.where(
+				and(
+					scopedWhere(organizationRole, organizationId),
+					eq(organizationRole.isDefault, true)
+				)
 			)
-		)
-		.limit(1);
+			.limit(1);
 
-	const hasDefaultAlready = existingDefault.length > 0;
+		const hasDefaultAlready = existingDefault.length > 0;
 
-	await Promise.all(
-		SYSTEM_ROLE_SLUGS.map(async (roleSlug) => {
-			const meta = SYSTEM_ROLE_META[roleSlug];
-			const statementsMap = roles[roleSlug]
-				.statements as PermissionStatementMap;
-			const permissionKeys = Object.entries(statementsMap).flatMap(
-				([resource, actions]) =>
-					actions.map((action) => formatPermissionKey({ action, resource }))
-			);
+		await Promise.all(
+			SYSTEM_ROLE_SLUGS.map(async (roleSlug) => {
+				const meta = SYSTEM_ROLE_META[roleSlug];
+				const statementsMap = roles[roleSlug]
+					.statements as PermissionStatementMap;
+				const permissionKeys = Object.entries(statementsMap).flatMap(
+					([resource, actions]) =>
+						actions.map((action) => formatPermissionKey({ action, resource }))
+				);
 
-			const [role] = await db
-				.insert(organizationRole)
-				.values({
-					description: meta.description,
-					isDefault: !hasDefaultAlready && roleSlug === "member",
-					isSystem: true,
-					name: meta.name,
-					organizationId,
-					slug: roleSlug,
-				})
-				.onConflictDoUpdate({
-					set: {
+				const [role] = await tx
+					.insert(organizationRole)
+					.values({
 						description: meta.description,
+						isDefault: !hasDefaultAlready && roleSlug === "member",
 						isSystem: true,
 						name: meta.name,
-					},
-					target: [organizationRole.organizationId, organizationRole.slug],
-				})
-				.returning();
+						organizationId,
+						slug: roleSlug,
+					})
+					.onConflictDoUpdate({
+						set: {
+							description: meta.description,
+							isSystem: true,
+							name: meta.name,
+						},
+						target: [organizationRole.organizationId, organizationRole.slug],
+					})
+					.returning();
 
-			if (!role) {
-				return;
-			}
+				if (!role) {
+					return;
+				}
 
-			await db
-				.delete(organizationRolePermission)
-				.where(eq(organizationRolePermission.roleId, role.id));
-			await insertRolePermissions(db, role.id, permissionKeys);
-			await invalidateRolePermissionCache(organizationId, roleSlug);
-		})
+				await tx
+					.delete(organizationRolePermission)
+					.where(eq(organizationRolePermission.roleId, role.id));
+				await insertRolePermissions(tx, role.id, permissionKeys);
+			})
+		);
+	});
+
+	await Promise.all(
+		SYSTEM_ROLE_SLUGS.map((roleSlug) =>
+			invalidateRolePermissionCache(organizationId, roleSlug)
+		)
 	);
 }
 

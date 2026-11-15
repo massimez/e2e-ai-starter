@@ -114,7 +114,7 @@ export const storageRoutes = createRouter()
 			const { organizationId } = getActiveOrgContext(c);
 			const { id } = c.req.valid("param");
 			const file = await getUploadFileStream({ id, organizationId });
-			return c.body(new Uint8Array(file.body), 200, {
+			return c.body(file.stream, 200, {
 				"Cache-Control": "private, max-age=300",
 				"Content-Disposition": file.disposition,
 				"Content-Type": file.contentType,

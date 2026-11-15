@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { db } from "@workspace/db";
 import {
 	member,
@@ -7,10 +8,13 @@ import {
 } from "@workspace/db/schema";
 import { and, count, desc, eq } from "drizzle-orm";
 import { parseMemberRoles } from "../../lib/auth/permissions";
+import { ValidationError } from "../../lib/errors";
 import {
+	isBlockedIpAddress,
 	NOTIFICATION_CATEGORIES,
 	NOTIFICATION_CHANNELS,
 	type NotificationJobData,
+	validatePushEndpointUrl,
 } from "../../lib/queues";
 import { rolesService } from "../roles/service";
 import { enqueueNotification, enqueueNotificationsBulk } from "./queue";
@@ -19,6 +23,37 @@ import type {
 	PushSubscriptionInput,
 	UpdatePreferenceInput,
 } from "./schema";
+
+export const pushEndpointResolver = {
+	lookup: (hostname: string) => lookup(hostname, { all: true, verbatim: true }),
+};
+
+async function assertSafePushEndpoint(endpoint: string): Promise<void> {
+	const validation = validatePushEndpointUrl(endpoint);
+	if (!validation.ok) {
+		throw new ValidationError(validation.reason, "INVALID_PUSH_ENDPOINT");
+	}
+
+	let addresses: Array<{ address: string; family: number }>;
+	try {
+		addresses = await pushEndpointResolver.lookup(validation.url.hostname);
+	} catch (error) {
+		throw new ValidationError("Push endpoint hostname could not be resolved", {
+			cause: error,
+			field: "endpoint",
+		});
+	}
+
+	if (
+		addresses.length === 0 ||
+		addresses.some((entry) => isBlockedIpAddress(entry.address))
+	) {
+		throw new ValidationError(
+			"Push endpoint resolved to a restricted network address",
+			"BLOCKED_PUSH_ENDPOINT"
+		);
+	}
+}
 
 export const notificationService = {
 	async deletePushSubscription(userId: string, endpoint: string) {
@@ -134,6 +169,7 @@ export const notificationService = {
 	},
 
 	async savePushSubscription(userId: string, input: PushSubscriptionInput) {
+		await assertSafePushEndpoint(input.endpoint);
 		const now = new Date();
 		const [sub] = await db
 			.insert(pushSubscription)

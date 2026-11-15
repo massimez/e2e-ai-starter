@@ -76,6 +76,20 @@ describe("worker environment validation", () => {
 				NODE_ENV: "development",
 			})
 		).toThrow("Invalid Worker environment variables");
+
+		expect(() =>
+			parseWorkerEnv({
+				NODE_ENV: "development",
+				REDIS_URL: "redis://",
+			})
+		).toThrow("Invalid Worker environment variables");
+
+		expect(() =>
+			parseWorkerEnv({
+				NODE_ENV: "development",
+				REDIS_URL: "https://redis.example.com:6379",
+			})
+		).toThrow("Invalid Worker environment variables");
 	});
 });
 
@@ -182,22 +196,99 @@ describe("web push delivery and notification processor", () => {
 		mock.restore();
 	});
 
-	test("rejects non-HTTPS Web Push endpoints", async () => {
+	test("rejects non-HTTPS, IP literals, localhost, and private DNS resolutions for Web Push endpoints", async () => {
+		const blockedEndpoints = [
+			"http://untrusted.example.com/push",
+			"https://localhost/push",
+			"https://127.0.0.1/push",
+			"https://169.254.169.254/latest/meta-data",
+			"https://[::1]/push",
+			"https://push.internal/v1/abc",
+			"https://push.example.com:8443/v1/abc",
+		];
+
+		await Promise.all(
+			blockedEndpoints.map((endpoint) =>
+				expect(
+					sendWebPush(
+						{
+							auth: "auth-key",
+							endpoint,
+							p256dh: "p256-key",
+						},
+						{ body: "hello", title: "alert" }
+					)
+				).rejects.toBeInstanceOf(PushDeliveryError)
+			)
+		);
+
+		// DNS rebinding / private resolved IP must be rejected before delivery
+		spyOn(pushTransport, "lookup").mockResolvedValueOnce([
+			{ address: "169.254.169.254", family: 4 },
+		]);
 		await expect(
 			sendWebPush(
 				{
 					auth: "auth-key",
-					endpoint: "http://untrusted.example.com/push",
+					endpoint: "https://rebind.example.com/push",
 					p256dh: "p256-key",
 				},
 				{ body: "hello", title: "alert" }
 			)
-		).rejects.toBeInstanceOf(PushDeliveryError);
+		).rejects.toThrow("restricted network address");
+
+		spyOn(pushTransport, "lookup").mockResolvedValueOnce([
+			{ address: "fd00::1", family: 6 },
+		]);
+		await expect(
+			sendWebPush(
+				{
+					auth: "auth-key",
+					endpoint: "https://ula.example.com/push",
+					p256dh: "p256-key",
+				},
+				{ body: "hello", title: "alert" }
+			)
+		).rejects.toThrow("restricted network address");
+	});
+
+	test("pins validated public IP agent when dispatching Web Push", async () => {
+		(env as { VAPID_PUBLIC_KEY: string }).VAPID_PUBLIC_KEY = "vapid-pub";
+		(env as { VAPID_PRIVATE_KEY: string }).VAPID_PRIVATE_KEY = "vapid-priv";
+
+		spyOn(pushTransport, "lookup").mockResolvedValueOnce([
+			{ address: "93.184.216.34", family: 4 },
+		]);
+		const sendSpy = spyOn(
+			pushTransport,
+			"sendNotification"
+		).mockResolvedValueOnce({
+			body: "",
+			headers: {},
+			statusCode: 201,
+		});
+
+		const result = await sendWebPush(
+			{
+				auth: "auth-key",
+				endpoint: "https://push.example.com/v1/ok",
+				p256dh: "p256-key",
+			},
+			{ body: "hello", title: "alert" }
+		);
+
+		expect(result).toEqual({ simulated: false, statusCode: 201 });
+		const requestOptions = sendSpy.mock.calls[0]?.[2];
+		expect(requestOptions?.agent).toBeDefined();
 	});
 
 	test("deletes expired 410 push subscriptions and continues fan-out", async () => {
 		(env as { VAPID_PUBLIC_KEY: string }).VAPID_PUBLIC_KEY = "vapid-pub";
 		(env as { VAPID_PRIVATE_KEY: string }).VAPID_PRIVATE_KEY = "vapid-priv";
+
+		spyOn(pushTransport, "lookup").mockResolvedValue([
+			{ address: "93.184.216.34", family: 4 },
+		]);
 
 		spyOn(db, "select").mockImplementation((() =>
 			createQueryChain([
@@ -284,5 +375,150 @@ describe("web push delivery and notification processor", () => {
 
 		expect(res.deliveredChannels).toEqual(["in_app"]);
 		expect(insertedValues?.idempotencyKey).toBe("in_app:user_42:notif-job-9");
+	});
+
+	test("throws retryable error on partial push failure and skips already-delivered channels/subscriptions on retry", async () => {
+		(env as { VAPID_PUBLIC_KEY: string }).VAPID_PUBLIC_KEY = "vapid-pub";
+		(env as { VAPID_PRIVATE_KEY: string }).VAPID_PRIVATE_KEY = "vapid-priv";
+
+		spyOn(pushTransport, "lookup").mockResolvedValue([
+			{ address: "93.184.216.34", family: 4 },
+		]);
+
+		// 1. Direct handlePushNotification partial failure must still throw retryable error even when succeededCount > 0
+		spyOn(db, "select").mockImplementation((() =>
+			createQueryChain([
+				{
+					endpoint: "https://push.example.com/sub-1",
+					id: "sub_1",
+					keys: { auth: "a1", p256dh: "p1" },
+					userId: "user_1",
+				},
+				{
+					endpoint: "https://push.example.com/sub-2",
+					id: "sub_2",
+					keys: { auth: "a2", p256dh: "p2" },
+					userId: "user_1",
+				},
+			])) as never);
+
+		spyOn(pushTransport, "sendNotification")
+			.mockResolvedValueOnce({ body: "", headers: {}, statusCode: 201 })
+			.mockRejectedValueOnce(
+				new WebPushError(
+					"Service Unavailable",
+					503,
+					{},
+					"retry later",
+					"https://push.example.com/sub-2"
+				)
+			);
+
+		await expect(
+			handlePushNotification({
+				category: "team",
+				content: "Partial push test",
+				title: "Update",
+				type: "invite",
+				userId: "user_1",
+			})
+		).rejects.toThrow("Push service transient error (503)");
+
+		mock.restore();
+		(env as { VAPID_PUBLIC_KEY: string }).VAPID_PUBLIC_KEY = "vapid-pub";
+		(env as { VAPID_PRIVATE_KEY: string }).VAPID_PRIVATE_KEY = "vapid-priv";
+		spyOn(pushTransport, "lookup").mockResolvedValue([
+			{ address: "93.184.216.34", family: 4 },
+		]);
+
+		// 2. processNotificationJob checkpoints completed channels & pushSubscriptionIds, then skips them on retry
+		let jobData: Record<string, unknown> = {
+			category: "team",
+			channels: ["in_app", "push"],
+			content: "Retry deduplication",
+			title: "Update",
+			type: "invite",
+			userId: "user_99",
+		};
+
+		let inAppCalls = 0;
+		const pushEndpointsAttempted: string[] = [];
+
+		const prefsRows = [
+			{ channel: "in_app", enabled: true },
+			{ channel: "push", enabled: true },
+		];
+		const subsRows = [
+			{
+				endpoint: "https://push.example.com/sub-ok",
+				id: "sub_ok",
+				keys: { auth: "a1", p256dh: "p1" },
+				userId: "user_99",
+			},
+			{
+				endpoint: "https://push.example.com/sub-flaky",
+				id: "sub_flaky",
+				keys: { auth: "a2", p256dh: "p2" },
+				userId: "user_99",
+			},
+		];
+
+		let selectCallCount = 0;
+		spyOn(db, "select").mockImplementation((() => {
+			selectCallCount += 1;
+			// Odd calls in each attempt query notificationPreference; even calls query pushSubscription
+			return createQueryChain(selectCallCount % 2 === 1 ? prefsRows : subsRows);
+		}) as never);
+
+		spyOn(db, "insert").mockImplementation((() => ({
+			values: () => {
+				inAppCalls += 1;
+				return createQueryChain(undefined);
+			},
+		})) as never);
+
+		spyOn(pushTransport, "sendNotification").mockImplementation(((sub) => {
+			pushEndpointsAttempted.push(sub.endpoint);
+			if (
+				sub.endpoint === "https://push.example.com/sub-flaky" &&
+				pushEndpointsAttempted.filter((e) => e.endsWith("sub-flaky")).length ===
+					1
+			) {
+				return Promise.reject(
+					new WebPushError("Timeout", 503, {}, "busy", sub.endpoint)
+				);
+			}
+			return Promise.resolve({ body: "", headers: {}, statusCode: 201 });
+		}) as typeof pushTransport.sendNotification);
+
+		const mockJob = {
+			get data() {
+				return jobData as NotificationJobData;
+			},
+			id: "notif-retry-1",
+			updateData: (nextData: NotificationJobData) => {
+				jobData = nextData as unknown as Record<string, unknown>;
+				return Promise.resolve();
+			},
+		} as unknown as Job<NotificationJobData>;
+
+		await expect(processNotificationJob(mockJob)).rejects.toThrow(
+			"Push service transient error (503)"
+		);
+		expect(inAppCalls).toBe(1);
+		expect(pushEndpointsAttempted).toEqual([
+			"https://push.example.com/sub-ok",
+			"https://push.example.com/sub-flaky",
+		]);
+
+		// Retry attempt: in_app and sub_ok must NOT run again!
+		const retryResult = await processNotificationJob(mockJob);
+		expect(retryResult.deliveredChannels).toEqual(["in_app", "push"]);
+		expect(inAppCalls).toBe(1);
+		expect(pushEndpointsAttempted).toEqual([
+			"https://push.example.com/sub-ok",
+			"https://push.example.com/sub-flaky",
+			"https://push.example.com/sub-flaky",
+		]);
 	});
 });

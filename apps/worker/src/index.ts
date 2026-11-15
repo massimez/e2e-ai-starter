@@ -1,3 +1,4 @@
+import { withTimeout } from "@workspace/api/queues";
 import { closeDb, db } from "@workspace/db";
 import type { Worker } from "bullmq";
 import { sql } from "drizzle-orm";
@@ -69,28 +70,6 @@ logInfo("WorkerService", "Workers registered", {
 });
 
 let isShuttingDown = false;
-
-async function withTimeout<T>(
-	promise: Promise<T>,
-	timeoutMs: number
-): Promise<T> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	try {
-		return await Promise.race([
-			promise,
-			new Promise<never>((_, reject) => {
-				timer = setTimeout(
-					() => reject(new Error("Readiness check timed out")),
-					timeoutMs
-				);
-			}),
-		]);
-	} finally {
-		if (timer) {
-			clearTimeout(timer);
-		}
-	}
-}
 
 const healthServer =
 	env.WORKER_HEALTH_PORT > 0

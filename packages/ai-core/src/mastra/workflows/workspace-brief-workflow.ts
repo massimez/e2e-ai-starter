@@ -1,6 +1,10 @@
 import { createStep, createWorkflow } from "@mastra/core/workflows";
+import { db } from "@workspace/db";
+import { member } from "@workspace/db/schema";
+import { count, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
+	AI_CONTEXT_KEYS,
 	DEFAULT_AI_AGENT_ID,
 	tenantAiContextSchema,
 	type WorkspaceBriefMetrics,
@@ -10,50 +14,96 @@ import {
 } from "../../contracts";
 import { workspaceContextTool } from "../tools/workspace-context-tool";
 import { workspaceFilesTool } from "../tools/workspace-files-tool";
-import { workspaceMembersTool } from "../tools/workspace-members-tool";
 
 const gatheredStepOutputSchema = z.object({
 	focus: z.string().optional(),
 	metrics: workspaceBriefMetricsSchema,
 });
 
+function extractToolErrorMessage(result: unknown): string | undefined {
+	if (
+		typeof result === "object" &&
+		result !== null &&
+		"error" in result &&
+		result.error
+	) {
+		const record = result as Record<string, unknown>;
+		if (
+			typeof record.message === "string" &&
+			record.message.trim().length > 0
+		) {
+			return record.message.trim();
+		}
+		if (typeof record.error === "string" && record.error.trim().length > 0) {
+			return record.error.trim();
+		}
+		return "Workspace tool returned an error";
+	}
+	return undefined;
+}
+
 const gatherWorkspaceMetricsStep = createStep({
 	description:
-		"Deterministically queries verified workspace summary, members, and recent committed files in parallel.",
+		"Deterministically queries verified workspace summary, role breakdown, and recent committed files in parallel.",
 	id: "gather-workspace-metrics",
 	inputSchema: workspaceBriefRequestSchema,
 	outputSchema: gatheredStepOutputSchema,
 	requestContextSchema: tenantAiContextSchema,
 	execute: async ({ inputData, requestContext }) => {
 		const contextExecute = workspaceContextTool.execute;
-		const membersExecute = workspaceMembersTool.execute;
 		const filesExecute = workspaceFilesTool.execute;
 
-		if (!(contextExecute && membersExecute && filesExecute)) {
+		if (!(contextExecute && filesExecute)) {
 			throw new Error("Workspace tools are missing execute implementations");
 		}
 
-		const [summaryResult, membersResult, filesResult] = await Promise.all([
-			contextExecute({ includeStorageSummary: true }, { requestContext }),
-			membersExecute({ limit: 50 }, { requestContext }),
-			filesExecute({ limit: 5 }, { requestContext }),
+		const canReadStorage =
+			requestContext.get(AI_CONTEXT_KEYS.canReadStorage) === true;
+
+		const [summaryResult, filesResult] = await Promise.all([
+			contextExecute(
+				{ includeStorageSummary: canReadStorage },
+				{ requestContext }
+			),
+			canReadStorage
+				? filesExecute({ limit: 5 }, { requestContext })
+				: Promise.resolve(null),
 		]);
 
-		if (
-			!summaryResult ||
-			"error" in summaryResult ||
-			!membersResult ||
-			"error" in membersResult ||
-			!filesResult ||
-			"error" in filesResult
-		) {
-			throw new Error("Failed to gather workspace metrics from tenant tools");
+		const summaryError = extractToolErrorMessage(summaryResult);
+		if (!summaryResult || summaryError || "error" in summaryResult) {
+			throw new Error(
+				summaryError ?? "Failed to gather workspace summary from tenant tool"
+			);
 		}
 
-		const roleBreakdown: Record<string, number> = {};
-		for (const item of membersResult.members) {
-			roleBreakdown[item.role] = (roleBreakdown[item.role] ?? 0) + 1;
+		if (canReadStorage) {
+			const filesError = extractToolErrorMessage(filesResult);
+			if (!filesResult || filesError || "error" in filesResult) {
+				throw new Error(
+					filesError ?? "Failed to gather workspace files from tenant tool"
+				);
+			}
 		}
+
+		const roleRows = await db
+			.select({
+				role: member.role,
+				total: count(),
+			})
+			.from(member)
+			.where(eq(member.organizationId, summaryResult.organizationId))
+			.groupBy(member.role);
+
+		const roleBreakdown: Record<string, number> = {};
+		for (const row of roleRows) {
+			roleBreakdown[row.role] = row.total;
+		}
+
+		const recentFileNames =
+			canReadStorage && filesResult && !("error" in filesResult)
+				? filesResult.files.map((file) => file.originalName)
+				: [];
 
 		const metrics: WorkspaceBriefMetrics = {
 			committedUploadCount: summaryResult.committedUploadCount ?? 0,
@@ -61,7 +111,7 @@ const gatherWorkspaceMetricsStep = createStep({
 			organizationId: summaryResult.organizationId,
 			organizationName: summaryResult.organizationName,
 			organizationSlug: summaryResult.organizationSlug,
-			recentFileNames: filesResult.files.map((file) => file.originalName),
+			recentFileNames,
 			roleBreakdown,
 			storageCurrentUsageBytes: summaryResult.storageCurrentUsageBytes ?? 0,
 			storageLimitBytes: summaryResult.storageLimitBytes ?? 0,
@@ -97,6 +147,7 @@ const synthesizeWorkspaceBriefStep = createStep({
 			{
 				maxSteps: 1,
 				requestContext,
+				toolChoice: "none",
 			}
 		);
 

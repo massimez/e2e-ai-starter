@@ -1,9 +1,6 @@
-import { hc } from "hono/client";
+import type { hc } from "hono/client";
 import type { AppType } from "../../app";
 
 export type { InferRequestType, InferResponseType } from "hono/client";
 export type { AppType } from "../../app";
 export type Client = ReturnType<typeof hc<AppType>>;
-
-export const hcWithType = (...args: Parameters<typeof hc>): Client =>
-	hc<AppType>(...args);

@@ -8,6 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../../env";
+import { logWarning } from "../../lib/logger";
 
 export const s3Client = new S3Client({
 	credentials:
@@ -28,6 +29,24 @@ export function hasConfiguredS3Credentials(): boolean {
 
 let devBucketChecked = false;
 
+function isBucketAlreadyExistsError(error: unknown): boolean {
+	if (!error || typeof error !== "object") {
+		return false;
+	}
+	const err = error as {
+		$metadata?: { httpStatusCode?: number };
+		Code?: string;
+		name?: string;
+	};
+	return (
+		err.name === "BucketAlreadyOwnedByYou" ||
+		err.name === "BucketAlreadyExists" ||
+		err.Code === "BucketAlreadyOwnedByYou" ||
+		err.Code === "BucketAlreadyExists" ||
+		err.$metadata?.httpStatusCode === 409
+	);
+}
+
 export async function ensureDevBucketExists(): Promise<void> {
 	if (
 		devBucketChecked ||
@@ -37,11 +56,18 @@ export async function ensureDevBucketExists(): Promise<void> {
 	) {
 		return;
 	}
-	devBucketChecked = true;
 	try {
 		await s3Client.send(new CreateBucketCommand({ Bucket: env.S3_BUCKET }));
-	} catch {
-		// Bucket already exists or MinIO unavailable
+		devBucketChecked = true;
+	} catch (error) {
+		if (isBucketAlreadyExistsError(error)) {
+			devBucketChecked = true;
+			return;
+		}
+		logWarning("Storage:S3", "Failed to verify or create dev S3 bucket", {
+			bucket: env.S3_BUCKET,
+			error: error instanceof Error ? error.message : String(error),
+		});
 	}
 }
 
@@ -105,17 +131,17 @@ export async function headS3Object(params: {
 	);
 }
 
-export async function getS3ObjectBytes(params: {
+export async function getS3ObjectStream(params: {
 	bucket: string;
 	fileKey: string;
-}): Promise<Uint8Array | undefined> {
+}): Promise<ReadableStream<Uint8Array> | undefined> {
 	const object = await s3Client.send(
 		new GetObjectCommand({
 			Bucket: params.bucket,
 			Key: params.fileKey,
 		})
 	);
-	return await object.Body?.transformToByteArray();
+	return object.Body?.transformToWebStream();
 }
 
 export async function deleteS3Object(params: {

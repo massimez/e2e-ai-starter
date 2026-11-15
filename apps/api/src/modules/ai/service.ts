@@ -24,8 +24,10 @@ import { member } from "@workspace/db/schema";
 import { createUIMessageStreamResponse } from "ai";
 import { and, eq } from "drizzle-orm";
 import { env } from "../../env";
+import { isOrgAdminRole } from "../../lib/auth/permissions";
 import { AppError, ForbiddenError, NotFoundError } from "../../lib/errors";
-import { logWarning } from "../../lib/logger";
+import { logError, logWarning } from "../../lib/logger";
+import { rolesService } from "../roles/service";
 
 const SSE_HEARTBEAT_MS = 15_000;
 
@@ -145,7 +147,89 @@ export function listAiAgents(): AiAgentsResponse {
 	};
 }
 
+async function resolveTenantAiContext(params: {
+	organizationId: string;
+	requestId?: string;
+	userId: string;
+}) {
+	const userRole = await resolveMemberRole(
+		params.organizationId,
+		params.userId
+	);
+	const [canReadStorage, canUpdateOrganization] = await Promise.all([
+		rolesService.userHasOrganizationPermission({
+			memberRole: userRole,
+			organizationId: params.organizationId,
+			permission: "storage:read",
+			userId: params.userId,
+		}),
+		rolesService.userHasOrganizationPermission({
+			memberRole: userRole,
+			organizationId: params.organizationId,
+			permission: "organization:update",
+			userId: params.userId,
+		}),
+	]);
+	const canReadMemberEmails = isOrgAdminRole(userRole) || canUpdateOrganization;
+
+	return createTenantRequestContext({
+		canReadMemberEmails,
+		canReadStorage,
+		organizationId: params.organizationId,
+		requestId: params.requestId,
+		userId: params.userId,
+		userRole,
+	});
+}
+
+function sanitizeUserMessages(messages: AiChatRequest["messages"]) {
+	return messages.map((msg) => ({
+		...(msg.id ? { id: msg.id } : {}),
+		parts: msg.parts.map((part) => ({
+			...(part.state ? { state: part.state } : {}),
+			text: part.text,
+			type: "text" as const,
+		})),
+		role: "user" as const,
+	}));
+}
+
+async function requireOwnedThread(
+	runtime: MastraRuntime,
+	organizationId: string,
+	userId: string,
+	threadId: string,
+	actionDescription: string
+) {
+	if (!runtime.memory) {
+		throw new NotFoundError("Conversation thread not found");
+	}
+	await ensureStorageInitialized(runtime);
+
+	const resourceId = formatTenantMemoryResourceId(organizationId, userId);
+	const thread = await runtime.memory.getThreadById({ threadId });
+	if (!thread) {
+		throw new NotFoundError("Conversation thread not found");
+	}
+	if (thread.resourceId !== resourceId) {
+		logWarning(
+			"AIService",
+			`Rejected cross-tenant AI thread ${actionDescription}`,
+			{
+				organizationId,
+				threadId,
+				userId,
+			}
+		);
+		throw new ForbiddenError(
+			"Conversation thread does not belong to active tenant"
+		);
+	}
+	return { memory: runtime.memory, resourceId, thread };
+}
+
 export interface CreateAiChatParams {
+	abortSignal?: AbortSignal;
 	input: AiChatRequest;
 	organizationId: string;
 	requestId?: string;
@@ -170,10 +254,11 @@ export async function createAiChatResponse(
 		throw new NotFoundError(`AI agent '${agentId}' was not found`);
 	}
 
-	const userRole = await resolveMemberRole(
-		params.organizationId,
-		params.userId
-	);
+	const requestContext = await resolveTenantAiContext({
+		organizationId: params.organizationId,
+		requestId: params.requestId,
+		userId: params.userId,
+	});
 	await ensureStorageInitialized(runtime);
 
 	const resourceId = formatTenantMemoryResourceId(
@@ -198,12 +283,7 @@ export async function createAiChatResponse(
 		}
 	}
 
-	const requestContext = createTenantRequestContext({
-		organizationId: params.organizationId,
-		requestId: params.requestId,
-		userId: params.userId,
-		userRole,
-	});
+	const sanitizedMessages = sanitizeUserMessages(params.input.messages);
 
 	const stream = await handleChatStream({
 		agentId,
@@ -211,13 +291,24 @@ export async function createAiChatResponse(
 			maxSteps: 5,
 		},
 		mastra: runtime.mastra,
+		onError: (error) => {
+			logError("AIService:ChatStream", error, {
+				agentId,
+				organizationId: params.organizationId,
+				requestId: params.requestId,
+				threadId,
+				userId: params.userId,
+			});
+			return "An error occurred while generating the AI response.";
+		},
 		params: {
+			...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
 			id: threadId,
 			memory: {
 				resource: resourceId,
 				thread: threadId,
 			},
-			messages: params.input.messages as unknown as Parameters<
+			messages: sanitizedMessages as unknown as Parameters<
 				typeof handleChatStream
 			>[0]["params"]["messages"],
 			requestContext,
@@ -291,29 +382,15 @@ export async function getAiThread(
 	params: GetAiThreadParams
 ): Promise<AiThreadDetailResponse> {
 	const runtime = getAiRuntime();
-	if (!runtime.memory) {
-		throw new NotFoundError("Conversation thread not found");
-	}
-
-	await ensureStorageInitialized(runtime);
-	const resourceId = formatTenantMemoryResourceId(
+	const { memory, resourceId, thread } = await requireOwnedThread(
+		runtime,
 		params.organizationId,
-		params.userId
+		params.userId,
+		params.threadId,
+		"access"
 	);
-	const thread = await runtime.memory.getThreadById({
-		threadId: params.threadId,
-	});
 
-	if (!thread) {
-		throw new NotFoundError("Conversation thread not found");
-	}
-	if (thread.resourceId !== resourceId) {
-		throw new ForbiddenError(
-			"Conversation thread does not belong to active tenant"
-		);
-	}
-
-	const recalled = await runtime.memory.recall({
+	const recalled = await memory.recall({
 		perPage: false,
 		resourceId,
 		threadId: params.threadId,
@@ -324,6 +401,28 @@ export async function getAiThread(
 		messages: messages as unknown as Record<string, unknown>[],
 		thread: serializeThread(thread),
 	};
+}
+
+export interface DeleteAiThreadParams {
+	organizationId: string;
+	threadId: string;
+	userId: string;
+}
+
+export async function deleteAiThread(
+	params: DeleteAiThreadParams
+): Promise<{ deleted: true; id: string }> {
+	const runtime = getAiRuntime();
+	const { memory } = await requireOwnedThread(
+		runtime,
+		params.organizationId,
+		params.userId,
+		params.threadId,
+		"deletion"
+	);
+
+	await memory.deleteThread(params.threadId);
+	return { deleted: true, id: params.threadId };
 }
 
 export interface RunWorkspaceBriefParams {
@@ -346,18 +445,12 @@ export async function runWorkspaceBrief(
 	}
 
 	const runtime = getAiRuntime();
-	const userRole = await resolveMemberRole(
-		params.organizationId,
-		params.userId
-	);
-	await ensureStorageInitialized(runtime);
-
-	const requestContext = createTenantRequestContext({
+	const requestContext = await resolveTenantAiContext({
 		organizationId: params.organizationId,
 		requestId: params.requestId,
 		userId: params.userId,
-		userRole,
 	});
+	await ensureStorageInitialized(runtime);
 
 	const workflow = runtime.mastra.getWorkflowById("workspace-brief");
 	const run = await workflow.createRun();
@@ -380,6 +473,7 @@ export async function runWorkspaceBrief(
 export const aiService = {
 	closeAiRuntime,
 	createAiChatResponse,
+	deleteAiThread,
 	getAiThread,
 	listAiAgents,
 	listAiThreads,

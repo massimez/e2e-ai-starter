@@ -4,7 +4,12 @@ import { Hono } from "hono";
 import type { AppEnv } from "../src/lib/create-hono-app";
 import { notificationQueue } from "../src/modules/notification/queue";
 import { notificationRoutes } from "../src/modules/notification/route";
-import { notificationService } from "../src/modules/notification/service";
+import {
+	notificationService,
+	pushEndpointResolver,
+} from "../src/modules/notification/service";
+import { organizationRoutes } from "../src/modules/organization/route";
+import { updateOrganizationSchema } from "../src/modules/organization/schema";
 import { transferOwnership } from "../src/modules/organization/service";
 import { rolesService } from "../src/modules/roles/service";
 
@@ -255,6 +260,114 @@ describe("notification routes and fan-out controls", () => {
 		});
 		expect(validPushRes.status).toBe(201);
 		expect(saveSpy).toHaveBeenCalledTimes(1);
+
+		const ssrfEndpoints = [
+			"http://push.example.com/v1/abc",
+			"https://localhost/push",
+			"https://127.0.0.1/push",
+			"https://169.254.169.254/latest/meta-data",
+			"https://[::1]/push",
+			"https://user:pass@push.example.com/v1/abc",
+			"https://push.example.com:8443/v1/abc",
+			"https://push.internal/v1/abc",
+		];
+
+		const rejectedResponses = await Promise.all(
+			ssrfEndpoints.map((endpoint) =>
+				app.request("/notifications/push/subscribe", {
+					body: JSON.stringify({
+						endpoint,
+						keys: { auth: "auth-token", p256dh: "public-key" },
+					}),
+					headers: { "content-type": "application/json" },
+					method: "POST",
+				})
+			)
+		);
+		for (const rejected of rejectedResponses) {
+			expect(rejected.status).toBe(400);
+		}
+		expect(saveSpy).toHaveBeenCalledTimes(1);
+	});
+
+	test("savePushSubscription rejects hostnames resolving to private or metadata IPs", async () => {
+		spyOn(pushEndpointResolver, "lookup").mockResolvedValueOnce([
+			{ address: "169.254.169.254", family: 4 },
+		]);
+
+		await expect(
+			notificationService.savePushSubscription("user_1", {
+				endpoint: "https://rebind.example.com/v1/sub",
+				keys: { auth: "auth-token", p256dh: "public-key" },
+			})
+		).rejects.toThrow("restricted network address");
+
+		spyOn(pushEndpointResolver, "lookup").mockResolvedValueOnce([
+			{ address: "10.0.0.5", family: 4 },
+		]);
+
+		await expect(
+			notificationService.savePushSubscription("user_1", {
+				endpoint: "https://internal-dns.example.com/v1/sub",
+				keys: { auth: "auth-token", p256dh: "public-key" },
+			})
+		).rejects.toThrow("restricted network address");
+	});
+
+	test("updateOrganizationSchema restricts logo to https://, /api/, empty, or null and transfer-ownership requires owner role", async () => {
+		expect(
+			updateOrganizationSchema.safeParse({
+				logo: "https://cdn.example.com/a.png",
+			}).success
+		).toBe(true);
+		expect(
+			updateOrganizationSchema.safeParse({ logo: "/api/storage/files/123" })
+				.success
+		).toBe(true);
+		expect(updateOrganizationSchema.safeParse({ logo: "" }).success).toBe(true);
+		expect(updateOrganizationSchema.safeParse({ logo: null }).success).toBe(
+			true
+		);
+
+		expect(
+			updateOrganizationSchema.safeParse({ logo: "javascript:alert(1)" })
+				.success
+		).toBe(false);
+		expect(
+			updateOrganizationSchema.safeParse({
+				logo: "http://insecure.example.com/a.png",
+			}).success
+		).toBe(false);
+		expect(
+			updateOrganizationSchema.safeParse({ logo: "//evil.example.com/a.png" })
+				.success
+		).toBe(false);
+
+		const orgApp = new Hono<AppEnv>()
+			.use("*", async (c, next) => {
+				c.set("user", {
+					email: "admin@example.com",
+					id: "user_admin",
+					name: "Admin",
+				} as never);
+				c.set("session", {
+					activeOrganizationId: "org_1",
+					id: "sess_1",
+					userId: "user_admin",
+				} as never);
+				await next();
+			})
+			.route("/organizations", organizationRoutes);
+
+		spyOn(db, "select").mockImplementation((() =>
+			createQueryChain([{ role: "admin" }])) as never);
+
+		const res = await orgApp.request("/organizations/transfer-ownership", {
+			body: JSON.stringify({ newOwnerUserId: "user_other" }),
+			headers: { "content-type": "application/json" },
+			method: "POST",
+		});
+		expect(res.status).toBe(403);
 	});
 
 	test("sendToOrganizationAdmins deduplicates and fans out to owners and roles with notification:manage", async () => {
