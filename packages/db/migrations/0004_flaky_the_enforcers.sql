@@ -1,0 +1,1 @@
+ALTER TABLE "organization_role" ADD COLUMN "is_system" boolean DEFAULT false NOT NULL;

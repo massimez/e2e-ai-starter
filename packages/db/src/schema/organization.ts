@@ -72,6 +72,7 @@ export const organizationRole = pgTable(
 		slug: varchar("slug", { length: 80 }).notNull(),
 		name: varchar("name", { length: 120 }).notNull(),
 		description: text("description"),
+		isSystem: boolean("is_system").default(false).notNull(),
 		isDefault: boolean("is_default").default(false).notNull(),
 		...timestamps,
 	},
@@ -108,3 +109,6 @@ export const organizationRolePermission = pgTable(
 export type Organization = typeof organization.$inferSelect;
 export type Member = typeof member.$inferSelect;
 export type Invitation = typeof invitation.$inferSelect;
+export type OrganizationRole = typeof organizationRole.$inferSelect;
+export type OrganizationRolePermission =
+	typeof organizationRolePermission.$inferSelect;

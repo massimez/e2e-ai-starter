@@ -6,9 +6,102 @@ import {
 	NOTIFICATION_CHANNELS,
 	notificationPreference,
 	organization,
+	organizationRole,
+	organizationRolePermission,
 	organizationStorageLimits,
 	user,
 } from "./schema";
+
+interface SeedRoleDefinition {
+	description: string;
+	isDefault: boolean;
+	name: string;
+	permissions: Record<string, readonly string[]>;
+	slug: "owner" | "admin" | "member" | "viewer";
+}
+
+const DEFAULT_SYSTEM_ROLES: readonly SeedRoleDefinition[] = [
+	{
+		description:
+			"Full administrative authority over workspace billing, ownership, roles, and deletion.",
+		isDefault: false,
+		name: "Owner",
+		permissions: {
+			ac: ["create", "read", "update", "delete"],
+			ai: ["read", "execute", "manage"],
+			apiKey: ["create", "read", "revoke"],
+			audit: ["read", "export"],
+			billing: ["read", "manage"],
+			document: ["create", "read", "update", "delete"],
+			invitation: ["create", "cancel"],
+			member: ["create", "update", "delete", "invite", "remove"],
+			notification: ["read", "manage"],
+			organization: ["update", "delete"],
+			project: ["create", "read", "update", "delete"],
+			role: ["create", "read", "update", "delete", "assign"],
+			setting: ["read", "update"],
+			storage: ["create", "read", "update", "delete"],
+			team: ["create", "update", "delete"],
+		},
+		slug: "owner",
+	},
+	{
+		description:
+			"Manages team members, invitations, projects, storage, and workspace profile.",
+		isDefault: false,
+		name: "Admin",
+		permissions: {
+			ac: ["create", "read", "update", "delete"],
+			ai: ["read", "execute", "manage"],
+			apiKey: ["create", "read", "revoke"],
+			audit: ["read"],
+			billing: ["read"],
+			document: ["create", "read", "update", "delete"],
+			invitation: ["create", "cancel"],
+			member: ["create", "update", "delete", "invite", "remove"],
+			notification: ["read", "manage"],
+			organization: ["update"],
+			project: ["create", "read", "update"],
+			role: ["read"],
+			setting: ["read", "update"],
+			storage: ["create", "read", "update", "delete"],
+			team: ["create", "update", "delete"],
+		},
+		slug: "admin",
+	},
+	{
+		description:
+			"Standard collaborator who can create and modify projects and upload storage assets.",
+		isDefault: true,
+		name: "Member",
+		permissions: {
+			ai: ["read", "execute"],
+			document: ["create", "read", "update"],
+			notification: ["read"],
+			project: ["create", "read", "update"],
+			role: ["read"],
+			setting: ["read"],
+			storage: ["create", "read"],
+		},
+		slug: "member",
+	},
+	{
+		description:
+			"Read-only access across workspace documents, projects, and notifications.",
+		isDefault: false,
+		name: "Viewer",
+		permissions: {
+			ai: ["read"],
+			document: ["read"],
+			notification: ["read"],
+			project: ["read"],
+			role: ["read"],
+			setting: ["read"],
+			storage: ["read"],
+		},
+		slug: "viewer",
+	},
+];
 
 async function seed() {
 	if (
@@ -91,10 +184,76 @@ async function seed() {
 				.insert(notificationPreference)
 				.values(prefRows)
 				.onConflictDoNothing();
+
+			const existingDefaultRoles = await tx
+				.select({ id: organizationRole.id })
+				.from(organizationRole)
+				.where(
+					and(
+						eq(organizationRole.organizationId, demoOrgId),
+						eq(organizationRole.isDefault, true)
+					)
+				)
+				.limit(1);
+
+			const hasDefaultRole = existingDefaultRoles.length > 0;
+
+			await Promise.all(
+				DEFAULT_SYSTEM_ROLES.map(async (roleDef) => {
+					const [seededRole] = await tx
+						.insert(organizationRole)
+						.values({
+							description: roleDef.description,
+							isDefault: !hasDefaultRole && roleDef.isDefault,
+							isSystem: true,
+							name: roleDef.name,
+							organizationId: demoOrgId,
+							slug: roleDef.slug,
+						})
+						.onConflictDoUpdate({
+							set: {
+								description: roleDef.description,
+								isSystem: true,
+								name: roleDef.name,
+							},
+							target: [organizationRole.organizationId, organizationRole.slug],
+						})
+						.returning({ id: organizationRole.id });
+
+					if (!seededRole) {
+						return;
+					}
+
+					const permissionRows = Object.entries(roleDef.permissions).flatMap(
+						([resource, actions]) =>
+							actions.map((action) => ({
+								action,
+								resource,
+								roleId: seededRole.id,
+							}))
+					);
+
+					if (permissionRows.length > 0) {
+						await tx
+							.insert(organizationRolePermission)
+							.values(permissionRows)
+							.onConflictDoNothing({
+								target: [
+									organizationRolePermission.roleId,
+									organizationRolePermission.resource,
+									organizationRolePermission.action,
+								],
+							});
+					}
+				})
+			);
 		});
 
 		console.log("Demo user seeded: admin@acme.example (usr_demo_admin)");
 		console.log("Organization seeded: Acme Corporation (org_demo_acme)");
+		console.log(
+			"System roles & permissions seeded: owner, admin, member, viewer"
+		);
 		console.log("Storage quota allocated: 1 GB for Acme Corporation");
 		console.log(
 			"Notification preferences initialized for system/security/team/project/billing"
