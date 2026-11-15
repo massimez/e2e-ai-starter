@@ -16,6 +16,7 @@ import { AppError, ForbiddenError, NotFoundError } from "../src/lib/errors";
 import { redis } from "../src/lib/redis/client";
 import { resetMemoryRateLimiter } from "../src/middleware/rate-limiter";
 import { aiService } from "../src/modules/ai/service";
+import { rolesService } from "../src/modules/roles/service";
 
 function mockSession({
 	activeOrganizationId = "org_1",
@@ -129,10 +130,9 @@ describe("/api/ai routes security and behavior", () => {
 
 	test("returns 403 when RBAC denies ai:execute for viewer role", async () => {
 		mockSession({ activeOrganizationId: "org_1", userId: "user_viewer" });
-		spyOn(auth.api, "hasPermission").mockResolvedValue({
-			error: null,
-			success: false,
-		} as never);
+		spyOn(rolesService, "userHasOrganizationPermission").mockResolvedValue(
+			false
+		);
 		const chatSpy = spyOn(aiService, "createAiChatResponse");
 
 		const res = await app.request("/api/ai/chat", {
@@ -155,10 +155,9 @@ describe("/api/ai routes security and behavior", () => {
 
 	test("returns 400 when chat request body fails Zod validation", async () => {
 		mockSession();
-		spyOn(auth.api, "hasPermission").mockResolvedValue({
-			error: null,
-			success: true,
-		} as never);
+		spyOn(rolesService, "userHasOrganizationPermission").mockResolvedValue(
+			true
+		);
 
 		const res = await app.request("/api/ai/chat", {
 			body: JSON.stringify({ messages: [] }),
@@ -183,10 +182,9 @@ describe("/api/ai routes security and behavior", () => {
 		env.OPENAI_API_KEY = undefined;
 		try {
 			mockSession();
-			spyOn(auth.api, "hasPermission").mockResolvedValue({
-				error: null,
-				success: true,
-			} as never);
+			spyOn(rolesService, "userHasOrganizationPermission").mockResolvedValue(
+				true
+			);
 
 			const agentsRes = await app.request("/api/ai/agents");
 			expect(agentsRes.status).toBe(200);
@@ -248,10 +246,9 @@ describe("/api/ai routes security and behavior", () => {
 
 	test("scopes thread listing and thread detail strictly to active tenant and user", async () => {
 		mockSession({ activeOrganizationId: "org_alpha", userId: "user_alice" });
-		spyOn(auth.api, "hasPermission").mockResolvedValue({
-			error: null,
-			success: true,
-		} as never);
+		spyOn(rolesService, "userHasOrganizationPermission").mockResolvedValue(
+			true
+		);
 
 		const listSpy = spyOn(aiService, "listAiThreads").mockResolvedValue({
 			hasMore: false,
@@ -290,10 +287,9 @@ describe("/api/ai routes security and behavior", () => {
 
 	test("passes through streamed Response from createAiChatResponse on valid chat", async () => {
 		mockSession({ activeOrganizationId: "org_1", userId: "user_1" });
-		spyOn(auth.api, "hasPermission").mockResolvedValue({
-			error: null,
-			success: true,
-		} as never);
+		spyOn(rolesService, "userHasOrganizationPermission").mockResolvedValue(
+			true
+		);
 		spyOn(aiService, "createAiChatResponse").mockResolvedValue(
 			new Response("data: ok\n\n", {
 				headers: { "content-type": "text/event-stream" },
@@ -323,10 +319,9 @@ describe("/api/ai routes security and behavior", () => {
 
 	test("maps AppError subclasses cleanly if service throws", async () => {
 		mockSession();
-		spyOn(auth.api, "hasPermission").mockResolvedValue({
-			error: null,
-			success: true,
-		} as never);
+		spyOn(rolesService, "userHasOrganizationPermission").mockResolvedValue(
+			true
+		);
 		spyOn(aiService, "createAiChatResponse").mockRejectedValue(
 			new AppError("Backend AI overloaded", 503, "AI_UNAVAILABLE")
 		);
@@ -350,10 +345,9 @@ describe("/api/ai routes security and behavior", () => {
 
 	test("executes POST /api/ai/workflows/workspace-brief behind ai:execute RBAC", async () => {
 		mockSession({ activeOrganizationId: "org_1", userId: "user_1" });
-		spyOn(auth.api, "hasPermission").mockResolvedValue({
-			error: null,
-			success: true,
-		} as never);
+		spyOn(rolesService, "userHasOrganizationPermission").mockResolvedValue(
+			true
+		);
 		const briefSpy = spyOn(aiService, "runWorkspaceBrief").mockResolvedValue({
 			generatedAt: "2026-11-13T12:00:00.000Z",
 			metrics: {

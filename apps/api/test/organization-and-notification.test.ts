@@ -6,6 +6,7 @@ import { notificationQueue } from "../src/modules/notification/queue";
 import { notificationRoutes } from "../src/modules/notification/route";
 import { notificationService } from "../src/modules/notification/service";
 import { transferOwnership } from "../src/modules/organization/service";
+import { rolesService } from "../src/modules/roles/service";
 
 function createQueryChain<T>(result: T) {
 	const chain = {
@@ -256,15 +257,19 @@ describe("notification routes and fan-out controls", () => {
 		expect(saveSpy).toHaveBeenCalledTimes(1);
 	});
 
-	test("sendToOrganizationAdmins deduplicates and fans out only to owners and admins", async () => {
+	test("sendToOrganizationAdmins deduplicates and fans out to owners and roles with notification:manage", async () => {
 		spyOn(db, "select").mockImplementation((() =>
 			createQueryChain([
 				{ role: "owner", userId: "user_1" },
 				{ role: "admin, member", userId: "user_2" },
 				{ role: "admin", userId: "user_1" },
-				{ role: "member", userId: "user_3" },
+				{ role: "ops-lead", userId: "user_3" },
 				{ role: "viewer", userId: "user_4" },
 			])) as never);
+		spyOn(rolesService, "getRoleSlugsWithPermission").mockResolvedValue([
+			"admin",
+			"ops-lead",
+		]);
 
 		const addBulkSpy = spyOn(notificationQueue, "addBulk").mockResolvedValue(
 			[] as never
@@ -281,7 +286,11 @@ describe("notification routes and fan-out controls", () => {
 		const jobs = addBulkSpy.mock.calls[0]?.[0] as Array<{
 			data: { organizationId?: string; userId: string };
 		}>;
-		expect(jobs.map((j) => j.data.userId)).toEqual(["user_1", "user_2"]);
+		expect(jobs.map((j) => j.data.userId)).toEqual([
+			"user_1",
+			"user_2",
+			"user_3",
+		]);
 		expect(jobs.every((j) => j.data.organizationId === "org_1")).toBe(true);
 	});
 });

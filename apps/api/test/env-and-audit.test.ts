@@ -149,4 +149,43 @@ describe("audit path detection and access audit middleware", () => {
 		expect(recorded[1]?.organizationId).toBe("org_1");
 		expect(recorded[1]?.userId).toBe("user_1");
 	});
+
+	test("extracts entityType and entityId from nested organization role paths", async () => {
+		const recorded: AuditLogRecord[] = [];
+		const roleId = "12345678-1234-4234-8234-123456789012";
+		const app = new Hono<AppEnv>()
+			.use("*", async (c, next) => {
+				c.set("user", { id: "user_1" } as never);
+				c.set("session", { activeOrganizationId: "org_1" } as never);
+				await next();
+			})
+			.use(
+				"*",
+				createAccessAuditMiddleware({
+					scope: "app",
+					writeAuditLog: (record) => {
+						recorded.push(record);
+						return Promise.resolve();
+					},
+				})
+			)
+			.put("/api/organizations/roles/:id", (c) => c.json({ ok: true }))
+			.post("/api/organizations/roles/:id/clone", (c) =>
+				c.json({ ok: true }, 201)
+			);
+
+		await app.request(`/api/organizations/roles/${roleId}`, { method: "PUT" });
+		await app.request(`/api/organizations/roles/${roleId}/clone`, {
+			method: "POST",
+		});
+		await drainAuditLogs();
+
+		expect(recorded).toHaveLength(2);
+		expect(recorded[0]?.entityType).toBe("organizations/roles");
+		expect(recorded[0]?.entityId).toBe(roleId);
+		expect(recorded[0]?.action).toBe("app.organizations/roles.update");
+		expect(recorded[1]?.entityType).toBe("organizations/roles");
+		expect(recorded[1]?.entityId).toBe(roleId);
+		expect(recorded[1]?.action).toBe("app.organizations/roles.create");
+	});
 });
