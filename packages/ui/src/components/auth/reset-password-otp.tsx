@@ -11,7 +11,7 @@ import { Input } from "@workspace/ui/components/input";
 import OtpInput from "@workspace/ui/components/inputs/otp";
 import { Label } from "@workspace/ui/components/label";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
 import type defaultTranslations from "./translations.json";
 
 export interface ResetPasswordOtpProps {
@@ -32,25 +32,34 @@ export const ResetPasswordOtp = ({
 	translations,
 }: ResetPasswordOtpProps) => {
 	const newPasswordId = useId();
+	const errorId = useId();
+	const otpContainerRef = useRef<HTMLDivElement>(null);
+	const newPasswordRef = useRef<HTMLInputElement>(null);
 	const [otp, setOtp] = useState("");
 	const [newPassword, setNewPassword] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [resendLoading, setResendLoading] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [formError, setFormError] = useState<string | null>(null);
+	const [errorField, setErrorField] = useState<"otp" | "password" | null>(null);
 
 	const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
 		if (otp.length !== 6) {
 			setFormError("Please enter the 6-digit verification code.");
+			setErrorField("otp");
+			otpContainerRef.current?.querySelector("input")?.focus();
 			return;
 		}
 		if (newPassword.length < 8) {
 			setFormError("Password must be at least 8 characters.");
+			setErrorField("password");
+			newPasswordRef.current?.focus();
 			return;
 		}
 
 		setFormError(null);
+		setErrorField(null);
 		setLoading(true);
 		try {
 			await handleResetPassword(email, otp, newPassword);
@@ -84,17 +93,23 @@ export const ResetPasswordOtp = ({
 					<span className="block text-sm leading-none font-medium">
 						{translations.otp_label}
 					</span>
-					<div>
+					<div ref={otpContainerRef}>
 						<OtpInput
 							numInputs={6}
 							onChange={(nextOtp) => {
 								setOtp(nextOtp);
 								if (formError) {
 									setFormError(null);
+									setErrorField(null);
 								}
 							}}
 							renderInput={(props) => (
-								<Input {...props} className="h-12 text-center" />
+								<Input
+									{...props}
+									aria-describedby={errorField === "otp" ? errorId : undefined}
+									aria-invalid={errorField === "otp" ? true : undefined}
+									className="h-12 text-center"
+								/>
 							)}
 							value={otp}
 						/>
@@ -107,17 +122,21 @@ export const ResetPasswordOtp = ({
 					</Label>
 					<div className="relative">
 						<Input
+							aria-describedby={errorField === "password" ? errorId : undefined}
+							aria-invalid={errorField === "password" ? true : undefined}
 							autoComplete="new-password"
-							className="h-12 pe-10"
+							className="h-12 pe-12"
 							id={newPasswordId}
 							minLength={8}
 							onChange={(e) => {
 								setNewPassword(e.target.value);
 								if (formError) {
 									setFormError(null);
+									setErrorField(null);
 								}
 							}}
 							placeholder={translations.new_password_label}
+							ref={newPasswordRef}
 							required
 							type={showPassword ? "text" : "password"}
 							value={newPassword}
@@ -125,21 +144,21 @@ export const ResetPasswordOtp = ({
 						<button
 							aria-label={showPassword ? "Hide password" : "Show password"}
 							aria-pressed={showPassword}
-							className="text-muted-foreground hover:text-foreground absolute inset-e-3 top-1/2 -translate-y-1/2"
+							className="text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute inset-e-1 top-1/2 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:outline-none"
 							onClick={() => setShowPassword(!showPassword)}
 							type="button"
 						>
 							{showPassword ? (
-								<EyeOff className="h-5 w-5" />
+								<EyeOff aria-hidden="true" className="h-5 w-5" />
 							) : (
-								<Eye className="h-5 w-5" />
+								<Eye aria-hidden="true" className="h-5 w-5" />
 							)}
 						</button>
 					</div>
 				</div>
 
 				{formError ? (
-					<p className="text-destructive text-sm" role="alert">
+					<p className="text-destructive text-sm" id={errorId} role="alert">
 						{formError}
 					</p>
 				) : null}

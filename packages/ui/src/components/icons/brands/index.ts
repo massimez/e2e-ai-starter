@@ -1,0 +1,11 @@
+export { AppleIcon } from "./apple-icon";
+export { FacebookIcon } from "./facebook-icon";
+export { GitHubIcon } from "./github-icon";
+export { GoogleIcon } from "./google-icon";
+export { InstagramIcon } from "./instagram-icon";
+export { LinkedInIcon, LinkedinIcon } from "./linkedin-icon";
+export { TelegramIcon } from "./telegram-icon";
+export { TikTokIcon } from "./tiktok-icon";
+export { WhatsAppIcon, WhatsappIcon } from "./whatsapp-icon";
+export { XIcon } from "./x-icon";
+export { YouTubeIcon, YoutubeIcon } from "./youtube-icon";

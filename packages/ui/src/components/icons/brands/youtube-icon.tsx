@@ -13,3 +13,5 @@ export function YoutubeIcon({ className }: { className?: string }) {
 		</svg>
 	);
 }
+
+export { YoutubeIcon as YouTubeIcon };

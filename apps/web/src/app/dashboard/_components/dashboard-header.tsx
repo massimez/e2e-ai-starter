@@ -5,18 +5,40 @@ import {
 	type OrganizationItem,
 	OrganizationSwitcher,
 } from "@workspace/ui/components/organization-switcher";
-import { useRouter } from "next/navigation";
+import { cn } from "@workspace/ui/lib/utils";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { UserAccountMenu } from "@/components/user-account-menu";
-import { publicWebEnv } from "@/env";
+import {
+	type AccountMenuUser,
+	UserAccountMenu,
+} from "@/components/user-account-menu";
+import type { ServerOrganization } from "@/lib/auth-server";
 import {
 	useCurrentOrganization,
 	useOrganizationMutations,
 } from "@/lib/organization-hooks";
 
-export function DashboardHeader() {
+const DASHBOARD_NAV_ITEMS = [
+	{ href: "/dashboard", label: "Overview", exact: true },
+	{ href: "/dashboard/ai", label: "AI Assistant", exact: false },
+	{ href: "/dashboard/settings", label: "Settings", exact: false },
+] as const;
+
+interface DashboardHeaderProps {
+	initialActiveOrgId?: string | null;
+	initialOrganizations?: ServerOrganization[];
+	initialUser?: AccountMenuUser | null;
+}
+
+export function DashboardHeader({
+	initialActiveOrgId = null,
+	initialOrganizations = [],
+	initialUser = null,
+}: DashboardHeaderProps) {
 	const router = useRouter();
+	const pathname = usePathname();
 	const { activeOrgId, currentUserRole, organizations, session } =
 		useCurrentOrganization();
 	const { createOrganization, setActiveOrganization } =
@@ -24,7 +46,12 @@ export function DashboardHeader() {
 			showToasts: false,
 		});
 
-	const orgItems: OrganizationItem[] = organizations.map((org) => ({
+	const resolvedUser = session?.user ?? initialUser;
+	const resolvedOrganizations =
+		organizations.length > 0 ? organizations : initialOrganizations;
+	const resolvedActiveOrgId = activeOrgId ?? initialActiveOrgId;
+
+	const orgItems: OrganizationItem[] = resolvedOrganizations.map((org) => ({
 		id: org.id,
 		logo: org.logo,
 		name: org.name,
@@ -47,11 +74,12 @@ export function DashboardHeader() {
 				<>
 					<ThemeToggle />
 					<NotificationCenter
-						apiUrl={publicWebEnv.apiUrl}
+						apiUrl=""
+						enabled={Boolean(resolvedUser)}
 						onNavigate={(path) => router.push(path)}
 					/>
 					<OrganizationSwitcher
-						activeOrgId={activeOrgId}
+						activeOrgId={resolvedActiveOrgId}
 						onCreateOrg={handleCreateOrg}
 						onSelectOrg={handleSelectOrg}
 						organizations={orgItems}
@@ -59,11 +87,38 @@ export function DashboardHeader() {
 					<UserAccountMenu
 						redirectAfterSignOut="/"
 						role={currentUserRole}
-						user={session?.user}
+						user={resolvedUser}
 					/>
 				</>
 			}
 			brandHref="/dashboard"
+			nav={
+				<nav
+					aria-label="Workspace navigation"
+					className="hidden items-center gap-1 md:flex"
+				>
+					{DASHBOARD_NAV_ITEMS.map((item) => {
+						const isActive = item.exact
+							? pathname === item.href
+							: pathname.startsWith(item.href);
+						return (
+							<Link
+								aria-current={isActive ? "page" : undefined}
+								className={cn(
+									"focus-visible:ring-ring rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none",
+									isActive
+										? "bg-muted text-foreground"
+										: "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+								)}
+								href={item.href}
+								key={item.href}
+							>
+								{item.label}
+							</Link>
+						);
+					})}
+				</nav>
+			}
 		/>
 	);
 }

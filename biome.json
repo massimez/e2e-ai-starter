@@ -24,7 +24,6 @@
       "!packages/db/migrations/meta/*.json",
       "!**/.agents",
       "!**/.claude",
-      "!**/graphify-out",
       "!**/.mastra"
     ]
   },

@@ -26,16 +26,29 @@ describe("onboarding redirect safety", () => {
 	});
 });
 
-describe("proxy onboarding gate protection", () => {
-	test("protects both /dashboard/:path* and /onboarding", () => {
-		expect(proxyConfig.matcher).toEqual(["/dashboard/:path*", "/onboarding"]);
+describe("proxy onboarding gate protection and CSP", () => {
+	test("protects both /dashboard/:path* and /onboarding and sets CSP header", () => {
+		expect(proxyConfig.matcher).toEqual([
+			"/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+		]);
 
-		const unauthResponse = proxy(
+		const unauthOnboardingResponse = proxy(
 			new NextRequest("http://localhost:3000/onboarding")
 		);
-		expect(unauthResponse.status).toBe(307);
-		expect(unauthResponse.headers.get("location")).toBe(
+		expect(unauthOnboardingResponse.status).toBe(307);
+		expect(unauthOnboardingResponse.headers.get("location")).toBe(
 			"http://localhost:3000/?auth=signin&callbackUrl=%2Fonboarding"
+		);
+		expect(
+			unauthOnboardingResponse.headers.get("Content-Security-Policy")
+		).toBeTruthy();
+
+		const unauthDashboardResponse = proxy(
+			new NextRequest("http://localhost:3000/dashboard/ai")
+		);
+		expect(unauthDashboardResponse.status).toBe(307);
+		expect(unauthDashboardResponse.headers.get("location")).toBe(
+			"http://localhost:3000/?auth=signin&callbackUrl=%2Fdashboard%2Fai"
 		);
 
 		const authRequest = new NextRequest("http://localhost:3000/onboarding", {
@@ -45,5 +58,10 @@ describe("proxy onboarding gate protection", () => {
 		});
 		const authResponse = proxy(authRequest);
 		expect(authResponse.status).toBe(200);
+		expect(authResponse.headers.get("Content-Security-Policy")).toBeTruthy();
+
+		const publicResponse = proxy(new NextRequest("http://localhost:3000/"));
+		expect(publicResponse.status).toBe(200);
+		expect(publicResponse.headers.get("Content-Security-Policy")).toBeTruthy();
 	});
 });

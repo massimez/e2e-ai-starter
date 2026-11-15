@@ -9,7 +9,7 @@
       "forgot_password": "Forgot Password?",
       "submit": "Sign in",
       "no_account": "Don't have an account?",
-      "register": "Register for free",
+      "register": "Create an account",
       "loading": "Sign in"
     },
     "signUp": {
@@ -29,7 +29,7 @@
     "forgetPassword": {
       "title": "Forgot Password",
       "email_label": "Email Address",
-      "submit": "Send Reset Link",
+      "submit": "Send Reset Code",
       "remember_password": "Remember your password?",
       "sign_in": "Sign in"
     },
@@ -95,7 +95,7 @@
     "forgetPassword": {
       "title": "Mot de passe oublié",
       "email_label": "Adresse email",
-      "submit": "Envoyer le lien de réinitialisation",
+      "submit": "Envoyer le code de réinitialisation",
       "remember_password": "Vous vous souvenez de votre mot de passe ?",
       "sign_in": "Se connecter"
     },
@@ -161,7 +161,7 @@
     "forgetPassword": {
       "title": "نسيت كلمة المرور",
       "email_label": "عنوان البريد الإلكتروني",
-      "submit": "إرسال رابط إعادة التعيين",
+      "submit": "إرسال رمز إعادة التعيين",
       "remember_password": "تذكرت كلمة المرور؟",
       "sign_in": "تسجيل الدخول"
     },

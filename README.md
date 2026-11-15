@@ -3,9 +3,9 @@
 > **Production-Ready Multi-Tenant SaaS Starter**: Next.js 16 App Router · Hono API on Bun · Mastra AI Agents with pgvector · Better Auth RBAC · Drizzle ORM · BullMQ · Tailwind CSS v4 · Turborepo
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-7.0.2-blue.svg)](https://www.typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
-[![Bun](https://img.shields.io/badge/Bun-1.3+-fbf0df.svg)](https://bun.sh/)
+[![Bun](https://img.shields.io/badge/Bun-1.4+-fbf0df.svg)](https://bun.sh/)
 [![Hono](https://img.shields.io/badge/Hono-API-e36002.svg)](https://hono.dev/)
 [![Mastra AI](https://img.shields.io/badge/Mastra-AI%20Agents-purple.svg)](https://mastra.ai/)
 [![Better Auth](https://img.shields.io/badge/Better%20Auth-Multi--Tenant-red.svg)](https://better-auth.com/)
@@ -32,7 +32,7 @@ A TypeScript Turborepo monorepo template powered by **Next.js 16 (App Router)**,
 | Domain | Technology |
 |---|---|
 | **Runtime & Monorepo** | [Bun](https://bun.sh) (workspaces, `isolated` linker, package catalog) & [Turborepo](https://turbo.build) |
-| **API Subpath Contracts** | `@workspace/api/{permissions,queues,storage,hc}` (RBAC roles, queue names, notification categories/channels, storage allowlists, Hono RPC) |
+| **API Subpath Contracts** | `@workspace/api/{config,hc,logger,permissions,queues,storage}` (app branding, Hono RPC, structured logger, RBAC roles, queue names, notification categories/channels, storage allowlists) |
 | **Backend API** | [Hono](https://hono.dev) (running natively on Bun at `http://localhost:3001`) |
 | **Frontend Web** | [Next.js 16](https://nextjs.org) (App Router, React 19 at `http://localhost:3000`, `src/proxy.ts`) |
 | **Authentication** | [Better Auth](https://better-auth.com) (Drizzle adapter, Email/Password, Email OTP, optional Google OAuth, Organizations, RBAC) |
@@ -53,13 +53,15 @@ e2e-ai-starter/
 │   │   ├── src/app.ts              # App composition mounting domain routes, CORS & audit logging
 │   │   ├── src/env.ts              # Zod runtime env validation (fail-fast in production)
 │   │   ├── src/lib/
+│   │   │   ├── app-config.ts       # Canonical APP_CONFIG defaults (`@workspace/api/config`)
 │   │   │   ├── auth/               # Better Auth setup & RBAC permissions (`@workspace/api/permissions`)
-│   │   │   ├── hc/                 # hcWithType RPC client exporter
-│   │   │   ├── redis/              # Shared IORedis client, BullMQ queues & atomic rate-limit scripts
+│   │   │   ├── hc/                 # Hono RPC client exporter (`@workspace/api/hc`)
+│   │   │   ├── redis/              # Shared IORedis client, BullMQ producer & atomic rate-limit scripts
 │   │   │   ├── audit.ts            # Client IP resolution & fire-and-forget PostgreSQL audit logs
 │   │   │   ├── create-hono-app.ts  # Standard response envelopes, secure headers & CORS
 │   │   │   ├── errors.ts           # Typed AppError subclasses
-│   │   │   ├── logger.ts           # Unified pretty/JSON logger & redaction (@workspace/api/logger)
+│   │   │   ├── logger.ts           # Unified pretty/JSON logger & redaction (`@workspace/api/logger`)
+│   │   │   ├── queues.ts           # Queue names, notification categories/channels & schemas (`@workspace/api/queues`)
 │   │   │   ├── storage.ts          # Safe key generation & storage allowlist/size helpers
 │   │   │   └── tenant.ts           # Drizzle tenant query helpers (withOrg, scopedWhere)
 │   │   ├── src/middleware/         # Request ID, auth/ban, rate limit, tenant boundary, RBAC, audit
@@ -69,13 +71,17 @@ e2e-ai-starter/
 │   │       ├── email/              # Typed BullMQ email queue producer
 │   │       ├── health/             # /api/health, /api/health/live, /api/health/ready
 │   │       ├── notification/       # In-app notifications, preferences, Web Push & BullMQ producer
-│   │       ├── organization/       # Active org lookup & atomic ownership transfer
+│   │       ├── organization/       # Active org lookup, profile updates & atomic ownership transfer
+│   │       ├── roles/              # Dynamic organization RBAC, role permissions & invitations
 │   │       └── storage/            # Private S3/R2/MinIO presign, commit, stream/URL, quota & delete
 │   ├── web/                        # Next.js 16 App Router web app (Port 3000)
 │   │   ├── public/sw.js            # Web Push Service Worker (push + safe notification click)
 │   │   ├── src/app/dashboard/ai/   # Tenant-scoped Mastra streaming chat UI (@ai-sdk/react)
+│   │   ├── src/app/dashboard/settings/ # Workspace settings (general, members, roles, notifications, advanced)
+│   │   ├── src/app/onboarding/     # New-user workspace creation onboarding flow
+│   │   ├── src/components/         # AppHeader, BrandMark & SiteFooter (renders all 11 brand icons)
 │   │   ├── src/env.ts              # Browser-safe publicWebEnv & server env validation
-│   │   ├── src/proxy.ts            # Optimistic cookie guard redirecting /dashboard/*
+│   │   ├── src/proxy.ts            # Optimistic cookie guard matching /dashboard/:path* and /onboarding
 │   │   ├── src/lib/                # Hono RPC client, Better Auth client, server session & org hooks
 │   │   ├── src/providers/          # ThemeProvider, QueryProvider & AuthModalProvider
 │   │   └── next.config.ts          # /api/* rewrite, security headers & CSP
@@ -88,7 +94,7 @@ e2e-ai-starter/
 ├── packages/
 │   ├── ai-core/                    # Mastra agents, tools, workflows, @mastra/pg & browser contracts
 │   ├── db/                         # Drizzle ORM schemas (public), pgvector init/migrations & seed
-│   └── ui/                         # Tailwind CSS v4 tokens, components, auth flows, notifications & dropzone
+│   └── ui/                         # Tailwind CSS v4 tokens, components, auth flows, brand icons & notifications
 ├── .github/workflows/ci.yml        # CI pipeline (check, check-types, test, build)
 ├── Dockerfile.api / web / worker   # Multi-stage non-root Alpine Dockerfiles using turbo prune
 └── docker-compose.yml              # Localhost-bound pgvector/pgvector:pg16, Redis 7 & MinIO services
@@ -99,7 +105,7 @@ e2e-ai-starter/
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
-- **Bun** (`v1.3+`): `curl -fsSL https://bun.sh/install | bash`
+- **Bun** (`v1.4+`): `curl -fsSL https://bun.sh/install | bash`
 - **PostgreSQL 16 with `pgvector`** (`pgvector/pgvector:pg16`), **Redis 7**, and optional **MinIO** (or start locally via `docker compose up -d`)
 
 ### 2. Install Dependencies
@@ -165,11 +171,12 @@ The Mastra workspace (`packages/ai-core`) uses Mastra's `provider/model` router 
 
 ## 🏛️ Key Architecture Notes
 
-1. **Shared API Contracts (`@workspace/api/permissions`, `@workspace/api/queues`, `@workspace/api/storage`)**:
-   - Concrete `apps/api` modules (`src/lib/auth/permissions.ts`, `src/lib/queues.ts`, `src/modules/storage/config.ts`) exported as pure TypeScript subpath entrypoints (no Node/DB/Redis runtime dependencies) defining Better Auth access control (`ac`, `roles`: `owner`, `admin`, `member`, `viewer`, `PERMISSION_MATRIX`), queue identifiers, notification categories (`system`, `security`, `team`, `project`, `billing`) and channels (`in_app`, `email`, `push`), plus upload limits and MIME allowlists (excluding SVG).
+1. **Shared API Contracts (`@workspace/api/{config,hc,logger,permissions,queues,storage}`)**:
+   - Concrete `apps/api` modules (`src/lib/app-config.ts`, `src/lib/hc/hc.ts`, `src/lib/logger.ts`, `src/lib/auth/permissions.ts`, `src/lib/queues.ts`, `src/modules/storage/config.ts`) exported as pure TypeScript subpath entrypoints (no Node/DB/Redis runtime dependencies) defining `APP_CONFIG` branding defaults, typed Hono RPC contracts, structured logger helpers, Better Auth access control (`ac`, `roles`: `owner`, `admin`, `member`, `viewer`, `PERMISSION_MATRIX`), queue identifiers, notification categories (`system`, `security`, `team`, `project`, `billing`) and channels (`in_app`, `email`, `push`), plus upload limits and MIME allowlists (excluding SVG).
 2. **Authentication, Tenant Isolation & Governance**:
    - `apps/api/src/lib/auth/index.ts` configures Better Auth with Drizzle ORM, Redis `secondaryStorage`, hashed Email OTPs (`storeOTP: "hashed"`), `requireEmailVerification: true`, and asynchronous queued verification, reset-password, and organization invitation emails.
    - `createTenantBoundaryMiddleware` enforces strict active-organization matching across route params, query strings, `x-organization-id`, and JSON bodies.
+   - `apps/api/src/modules/roles/` implements dynamic organization roles, permission assignments, and member invitations mounted under `/api/organizations/roles` and `/api/organizations/invitations`.
    - `POST /api/organizations/transfer-ownership` executes an atomic transaction transferring ownership from the current `owner` to an active `admin` and demoting the previous owner to `admin`.
 3. **Private Multi-Tenant Storage (`apps/api/src/modules/storage/`)**:
    - `POST /api/storage/presign`, `POST /api/storage/commit`, `GET /api/storage`, `GET /api/storage/usage`, `GET /api/storage/files/:id` (authenticated file stream), `GET /api/storage/files/:id/url` (short-lived presigned URL), `DELETE /api/storage/files/:id`, and `DELETE /api/storage`.
@@ -178,8 +185,9 @@ The Mastra workspace (`packages/ai-core`) uses Mastra's `provider/model` router 
    - `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`, `GET/PATCH /api/notifications/preferences`, `POST /api/notifications/push/subscribe`, `DELETE /api/notifications/push/unsubscribe`.
    - `apps/web/src/app/dashboard/settings/notifications/page.tsx` + `apps/web/public/sw.js` wire category/channel preferences and Web Push subscriptions when `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and worker VAPID keys are configured.
 5. **Web Routing & Next.js Boundaries**:
-   - `apps/web/src/proxy.ts` performs optimistic session cookie checks for `/dashboard/:path*`, while Server Components in `apps/web/src/app/dashboard/layout.tsx` validate sessions via `getServerSession()`.
-   - `/accept-invitation` completes email organization invitations end-to-end.
+   - `apps/web/src/proxy.ts` performs optimistic session cookie checks for `["/dashboard/:path*", "/onboarding"]`, while Server Components in `apps/web/src/app/dashboard/layout.tsx` and `apps/web/src/app/onboarding/page.tsx` validate sessions via `getServerSession()`.
+   - `/dashboard/settings/{general,members,roles,notifications,advanced}` manage workspace profile, member roles/invitations, dynamic RBAC roles, notification preferences, and workspace deletion/ownership transfer; `/onboarding` handles workspace creation for users without an organization; `/accept-invitation` completes email organization invitations end-to-end.
+   - `apps/web/src/components/site-footer.tsx` (`SiteFooter`) renders all 11 brand icons exported by `@workspace/ui/components/icons/brands/*`.
    - `next.config.ts` rewrites `/api/*` to `INTERNAL_API_URL || NEXT_PUBLIC_API_URL || "http://localhost:3001"` and applies CSP and security response headers.
 6. **Mastra AI, Tenant Memory & `pgvector` Isolation (`packages/ai-core`, `/api/ai/*`, `/dashboard/ai`)**:
    - `packages/ai-core` (`@workspace/ai-core` and browser-safe `@workspace/ai-core/contracts`) defines the provider-agnostic `workspace-assistant` agent (model from `MASTRA_DEFAULT_MODEL`), the `AI_PROVIDERS` registry, `workspace-brief` workflow, and read-only `get-workspace-context` Drizzle tool reading `organizationId` and `userId` strictly from Mastra `RequestContext`.

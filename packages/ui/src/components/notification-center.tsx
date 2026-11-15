@@ -35,6 +35,7 @@ export interface NotificationItem {
 
 export interface NotificationCenterProps {
 	apiUrl?: string;
+	enabled?: boolean;
 	onNavigate?: (path: string) => void;
 }
 
@@ -51,6 +52,7 @@ function getNotificationLink(item: NotificationItem): string | null {
 
 export function NotificationCenter({
 	apiUrl = "",
+	enabled = true,
 	onNavigate,
 }: NotificationCenterProps) {
 	const [unreadCount, setUnreadCount] = useState<number>(0);
@@ -59,6 +61,7 @@ export function NotificationCenter({
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [isOpen, setIsOpen] = useState<boolean>(false);
 	const abortControllerRef = useRef<AbortController | null>(null);
+	const isAuthBlockedRef = useRef<boolean>(false);
 
 	const navigateTo = useCallback(
 		(path: string) => {
@@ -75,6 +78,9 @@ export function NotificationCenter({
 
 	const fetchUnreadCount = useCallback(
 		async (signal?: AbortSignal) => {
+			if (!enabled || isAuthBlockedRef.current) {
+				return;
+			}
 			if (
 				typeof document !== "undefined" &&
 				document.visibilityState === "hidden"
@@ -86,7 +92,13 @@ export function NotificationCenter({
 					credentials: "include",
 					signal,
 				});
+				if (res.status === 401 || res.status === 403) {
+					isAuthBlockedRef.current = true;
+					setUnreadCount(0);
+					return;
+				}
 				if (res.ok) {
+					isAuthBlockedRef.current = false;
 					const json = (await res.json()) as {
 						data: { unreadCount: number };
 						success: boolean;
@@ -99,10 +111,13 @@ export function NotificationCenter({
 				// Ignore offline, unauthenticated, or aborted polling ticks
 			}
 		},
-		[apiUrl]
+		[apiUrl, enabled]
 	);
 
 	const fetchNotifications = useCallback(async () => {
+		if (!enabled) {
+			return;
+		}
 		abortControllerRef.current?.abort();
 		const controller = new AbortController();
 		abortControllerRef.current = controller;
@@ -123,6 +138,7 @@ export function NotificationCenter({
 				success: boolean;
 			};
 			if (json.success) {
+				isAuthBlockedRef.current = false;
 				setNotifications(json.data.items);
 			}
 		} catch (error) {
@@ -133,9 +149,15 @@ export function NotificationCenter({
 		} finally {
 			setIsLoading(false);
 		}
-	}, [apiUrl]);
+	}, [apiUrl, enabled]);
 
 	useEffect(() => {
+		if (!enabled) {
+			setUnreadCount(0);
+			setNotifications([]);
+			return;
+		}
+		isAuthBlockedRef.current = false;
 		const controller = new AbortController();
 		void fetchUnreadCount(controller.signal);
 
@@ -156,7 +178,7 @@ export function NotificationCenter({
 			controller.abort();
 			abortControllerRef.current?.abort();
 		};
-	}, [fetchUnreadCount]);
+	}, [enabled, fetchUnreadCount]);
 
 	const handleOpenChange = (open: boolean) => {
 		setIsOpen(open);
@@ -309,13 +331,13 @@ export function NotificationCenter({
 					{!n.isRead && (
 						<Button
 							aria-label="Mark as read"
-							className="text-muted-foreground hover:text-foreground h-6 w-6 shrink-0 p-0"
+							className="text-muted-foreground hover:text-foreground size-8 shrink-0 p-0"
 							onClick={() => void handleMarkAsRead(n.id)}
 							size="sm"
 							type="button"
 							variant="ghost"
 						>
-							<Check className="h-3 w-3" />
+							<Check className="h-3.5 w-3.5" />
 						</Button>
 					)}
 				</div>
@@ -373,7 +395,7 @@ export function NotificationCenter({
 					</div>
 				) : null}
 
-				<div className="max-h-80 divide-y overflow-y-auto">
+				<div className="max-h-80 divide-y overflow-y-auto overscroll-contain">
 					{renderContent()}
 				</div>
 

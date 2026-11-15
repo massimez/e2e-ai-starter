@@ -6,7 +6,7 @@ import {
 	type NotificationCategory,
 	type NotificationChannel,
 } from "@workspace/api/queues";
-import { cn } from "@workspace/ui/lib/utils";
+import { Switch } from "@workspace/ui/components/switch";
 import {
 	AlertCircle,
 	type Bell,
@@ -160,25 +160,16 @@ export function PreferenceMatrixContent({
 									const isCellPending = pendingKey === cellKey;
 									return (
 										<td className="px-4 py-4 text-center" key={channel}>
-											<button
-												aria-checked={enabled}
-												aria-label={`${meta.label} via ${CHANNEL_METADATA[channel].label}`}
-												className={cn(
-													"focus-visible:ring-ring inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
-													enabled ? "bg-primary" : "bg-muted-foreground/30"
-												)}
-												disabled={isCellPending}
-												onClick={() => onToggle(category, channel, !enabled)}
-												role="switch"
-												type="button"
-											>
-												<span
-													className={cn(
-														"bg-background pointer-events-none block h-5 w-5 rounded-full shadow-xs ring-0 transition-transform",
-														enabled ? "translate-x-5" : "translate-x-0"
-													)}
+											<div className="flex justify-center">
+												<Switch
+													aria-label={`${meta.label} via ${CHANNEL_METADATA[channel].label}`}
+													checked={enabled}
+													disabled={isCellPending}
+													onCheckedChange={(checked) =>
+														onToggle(category, channel, checked)
+													}
 												/>
-											</button>
+											</div>
 										</td>
 									);
 								})}

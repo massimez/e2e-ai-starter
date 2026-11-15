@@ -19,9 +19,16 @@ import {
 	TableHeader,
 	TableRow,
 } from "@workspace/ui/components/table";
+import {
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
+} from "@workspace/ui/components/tabs";
 import { ArrowDown, Check, Minus } from "lucide-react";
 import type { Metadata } from "next";
 import { CopyButton } from "@/components/copy-button";
+import { HeroWorkspaceCta } from "@/components/hero-workspace-cta";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
@@ -343,7 +350,7 @@ function PermissionMatrixTable({
 }
 
 export default function HomePage() {
-	const _contractsContent = (
+	const contractsContent = (
 		<div className="space-y-6">
 			<Table>
 				<TableHeader>
@@ -468,7 +475,7 @@ export default function HomePage() {
 		</div>
 	);
 
-	const _rbacContent = (
+	const rbacContent = (
 		<div className="space-y-3">
 			<p className="text-muted-foreground text-sm leading-relaxed">
 				Live capability mapping imported from{" "}
@@ -490,7 +497,7 @@ export default function HomePage() {
 		</div>
 	);
 
-	const _setupContent = (
+	const setupContent = (
 		<div className="space-y-6">
 			<div className="border-border/70 bg-card divide-border/70 divide-y rounded-xl border">
 				{ENV_GROUPS.map((group) => (
@@ -567,20 +574,24 @@ export default function HomePage() {
 		<div className="flex min-h-screen flex-col">
 			<SiteHeader />
 
-			<main className="mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6">
+			<main
+				className="mx-auto w-full max-w-6xl flex-1 px-4 outline-none sm:px-6"
+				id="main-content"
+				tabIndex={-1}
+			>
 				<section className="py-12 sm:py-20 lg:py-24">
 					<div className="max-w-4xl">
 						<h1 className="text-foreground text-3xl font-bold tracking-tight text-balance sm:text-5xl sm:leading-[1.08]">
-							Multi-tenant TypeScript starter for teams, storage, and background
-							jobs.
+							Multi-tenant AI starter for teams, storage, and background jobs.
 						</h1>
 						<p className="text-muted-foreground mt-5 max-w-[58ch] text-base leading-relaxed text-pretty sm:text-lg">
-							Better Auth organizations, Drizzle ORM on Postgres, private S3/R2
-							uploads, and BullMQ email and push workers sharing one workspace
-							contract.
+							Better Auth organizations, Mastra AI with pgvector semantic
+							memory, Drizzle ORM on Postgres, private S3/R2 uploads, and BullMQ
+							workers sharing one workspace contract.
 						</p>
 						<div className="mt-8 flex flex-wrap items-center gap-3">
-							<Button asChild autoHeight size="md" variant="primary">
+							<HeroWorkspaceCta />
+							<Button asChild autoHeight size="md" variant="outline">
 								<a href="#architecture">
 									<span>Explore architecture</span>
 									<ArrowDown aria-hidden="true" />
@@ -656,6 +667,38 @@ export default function HomePage() {
 							</div>
 						))}
 					</div>
+				</section>
+
+				<section
+					className="border-border/70 scroll-mt-20 border-t py-14 sm:py-16"
+					id="reference"
+				>
+					<div className="mb-8 max-w-2xl">
+						<h2 className="text-foreground text-2xl font-semibold tracking-tight sm:text-3xl">
+							Contracts, RBAC matrix, and runtime setup
+						</h2>
+						<p className="text-muted-foreground mt-2 text-sm leading-relaxed sm:text-base">
+							Live values imported directly from the workspace packages and API
+							subpath exports.
+						</p>
+					</div>
+
+					<Tabs defaultValue="contracts">
+						<TabsList className="w-full justify-start sm:w-fit">
+							<TabsTrigger value="contracts">Shared Contracts</TabsTrigger>
+							<TabsTrigger value="rbac">RBAC Matrix</TabsTrigger>
+							<TabsTrigger value="setup">Env & Scripts</TabsTrigger>
+						</TabsList>
+						<TabsContent className="pt-4" value="contracts">
+							{contractsContent}
+						</TabsContent>
+						<TabsContent className="pt-4" value="rbac">
+							{rbacContent}
+						</TabsContent>
+						<TabsContent className="pt-4" value="setup">
+							{setupContent}
+						</TabsContent>
+					</Tabs>
 				</section>
 			</main>
 

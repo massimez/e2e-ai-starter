@@ -138,6 +138,9 @@ export function AuthModalProvider({
 	const translations = getLocaleTranslations(locale, translationsProp);
 
 	const [view, setView] = useState<ViewType>(defaultView);
+	const [verificationOrigin, setVerificationOrigin] = useState<
+		"signIn" | "signUp"
+	>("signUp");
 	const [otpProps, setOtpProps] = useState<OtpVerificationProps | null>(null);
 	const [resetPasswordProps, setResetPasswordProps] =
 		useState<ResetPasswordOtpProps | null>(null);
@@ -159,13 +162,16 @@ export function AuthModalProvider({
 
 	const handleVerification = ({
 		email,
+		origin,
 		password,
 		onVerificationSuccess,
 	}: {
 		email: string;
+		origin: "signIn" | "signUp";
 		password: string;
 		onVerificationSuccess?: () => Promise<void> | void;
 	}) => {
+		setVerificationOrigin(origin);
 		setOtpProps({
 			title: translations.otpVerification.title,
 			description: translations.otpVerification.description.replace(
@@ -181,8 +187,9 @@ export function AuthModalProvider({
 				});
 
 				if (error) {
-					toast.error(formatAuthError(error, "Verification failed"));
-					return;
+					const message = formatAuthError(error, "Verification failed");
+					toast.error(message);
+					return { error: message };
 				}
 
 				toast.success(translations.notifications.email_verified);
@@ -191,12 +198,11 @@ export function AuthModalProvider({
 					password,
 				});
 				if (signInRes.error) {
-					toast.error(
-						formatAuthError(
-							signInRes.error,
-							"Email verified, but automatic sign-in failed. Please sign in manually."
-						)
+					const message = formatAuthError(
+						signInRes.error,
+						"Email verified, but automatic sign-in failed. Please sign in manually."
 					);
+					toast.error(message);
 					setView("signIn");
 					return;
 				}
@@ -253,6 +259,7 @@ export function AuthModalProvider({
 						}
 						handleVerification({
 							email,
+							origin: "signIn",
 							password,
 							onVerificationSuccess: onSignInSuccess,
 						});
@@ -306,6 +313,7 @@ export function AuthModalProvider({
 				onSuccess: () => {
 					handleVerification({
 						email: data.email,
+						origin: "signUp",
 						password: data.password,
 						onVerificationSuccess: onSignUpSuccess,
 					});
@@ -377,7 +385,7 @@ export function AuthModalProvider({
 		} else if (view === "resetPasswordOtp") {
 			setView("forgetPassword");
 		} else if (view === "verificationOtp") {
-			setView("signUp");
+			setView(verificationOrigin);
 		}
 	};
 
@@ -444,11 +452,11 @@ export function AuthModalProvider({
 				{/* Back Button - Only on mobile */}
 				<button
 					aria-label="Go back"
-					className="hover:bg-accent absolute inset-s-4 top-4 z-10 rounded-full p-2 transition-colors sm:hidden"
+					className="hover:bg-accent focus-visible:ring-ring absolute inset-s-3 top-3 z-10 inline-flex size-11 items-center justify-center rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden sm:hidden"
 					onClick={handleBack}
 					type="button"
 				>
-					<ArrowLeft className="h-6 w-6 rtl:rotate-180" />
+					<ArrowLeft aria-hidden="true" className="h-5 w-5 rtl:rotate-180" />
 				</button>
 
 				{/* Content Container with scroll on mobile */}

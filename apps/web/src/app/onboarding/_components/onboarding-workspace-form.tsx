@@ -137,7 +137,11 @@ export function OnboardingWorkspaceForm({
 				</div>
 			</header>
 
-			<main className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-4 py-12 sm:px-6">
+			<main
+				className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-4 py-12 outline-none sm:px-6"
+				id="main-content"
+				tabIndex={-1}
+			>
 				<div className="border-border/70 bg-card/85 rounded-2xl border p-6 shadow-sm backdrop-blur-xs sm:p-8">
 					<div className="mb-6 flex items-start gap-3.5">
 						<div className="border-border/70 bg-muted/50 text-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border">
@@ -149,7 +153,7 @@ export function OnboardingWorkspaceForm({
 							</h1>
 							<p className="text-muted-foreground text-sm leading-relaxed">
 								Welcome{userName ? `, ${userName}` : ""}. Organizations isolate
-								your projects, files, and team access. This workspace will be
+								your AI threads, files, and team access. This workspace will be
 								set active and saved as your default.
 							</p>
 						</div>

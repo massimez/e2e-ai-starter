@@ -13,3 +13,5 @@ export function LinkedinIcon({ className }: { className?: string }) {
 		</svg>
 	);
 }
+
+export { LinkedinIcon as LinkedInIcon };

@@ -12,20 +12,6 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 /**
- * Safely retrieves a nested property from an object using dot notation.
- */
-export function getProperty(obj: unknown, key: string): unknown {
-	let current: unknown = obj;
-	for (const segment of key.split(".")) {
-		if (current === null || typeof current !== "object") {
-			return undefined;
-		}
-		current = (current as Record<string, unknown>)[segment];
-	}
-	return current;
-}
-
-/**
  * Extracts a human-readable error message from a Fetch API Response.
  */
 export async function extractErrorMessage(
@@ -72,30 +58,6 @@ export async function extractErrorMessage(
 	} catch {
 		return rawText.slice(0, 200) || fallback;
 	}
-}
-
-export function removeNulls<T>(obj: T): T {
-	if (Array.isArray(obj)) {
-		return obj
-			.map((item) => removeNulls(item))
-			.filter((item) => item !== null && item !== undefined) as unknown as T;
-	}
-
-	if (obj !== null && typeof obj === "object") {
-		const result: Record<string, unknown> = {};
-		for (const [key, value] of Object.entries(obj)) {
-			if (value === null || value === undefined) {
-				continue;
-			}
-			const cleaned = removeNulls(value);
-			if (cleaned !== null && cleaned !== undefined) {
-				result[key] = cleaned;
-			}
-		}
-		return result as T;
-	}
-
-	return obj;
 }
 
 /**

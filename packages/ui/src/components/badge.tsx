@@ -73,25 +73,25 @@ const badgeVariants = cva(
 				variant: "success",
 				appearance: "light",
 				className:
-					"bg-(--color-success-soft,var(--color-green-100)) text-(--color-success-accent,var(--color-green-800)) dark:bg-(--color-success-soft,var(--color-green-950)) dark:text-(--color-success-soft,var(--color-green-600))",
+					"bg-(--color-success-soft,var(--color-green-100)) text-(--color-success-accent,var(--color-green-800)) dark:bg-(--color-success-soft,var(--color-green-950)) dark:text-(--color-success-accent,var(--color-green-400))",
 			},
 			{
 				variant: "warning",
 				appearance: "light",
 				className:
-					"bg-(--color-warning-soft,var(--color-yellow-100)) text-(--color-warning-accent,var(--color-yellow-700)) dark:bg-(--color-warning-soft,var(--color-yellow-950)) dark:text-(--color-warning-soft,var(--color-yellow-600))",
+					"bg-(--color-warning-soft,var(--color-yellow-100)) text-(--color-warning-accent,var(--color-yellow-700)) dark:bg-(--color-warning-soft,var(--color-yellow-950)) dark:text-(--color-warning-accent,var(--color-yellow-400))",
 			},
 			{
 				variant: "info",
 				appearance: "light",
 				className:
-					"bg-(--color-info-soft,var(--color-violet-100)) text-(--color-info-accent,var(--color-violet-700)) dark:bg-(--color-info-soft,var(--color-violet-950)) dark:text-(--color-info-soft,var(--color-violet-400))",
+					"bg-(--color-info-soft,var(--color-violet-100)) text-(--color-info-accent,var(--color-violet-700)) dark:bg-(--color-info-soft,var(--color-violet-950)) dark:text-(--color-info-accent,var(--color-violet-400))",
 			},
 			{
 				variant: "destructive",
 				appearance: "light",
 				className:
-					"bg-(--color-destructive-soft,var(--color-red-50)) text-(--color-destructive-accent,var(--color-red-700)) dark:bg-(--color-destructive-soft,var(--color-red-950)) dark:text-(--color-destructive-soft,var(--color-red-600))",
+					"bg-(--color-destructive-soft,var(--color-red-50)) text-(--color-destructive-accent,var(--color-red-700)) dark:bg-(--color-destructive-soft,var(--color-red-950)) dark:text-(--color-destructive-accent,var(--color-red-400))",
 			},
 			/* Outline */
 			{
@@ -104,25 +104,25 @@ const badgeVariants = cva(
 				variant: "success",
 				appearance: "outline",
 				className:
-					"border-(--color-success-soft,var(--color-green-200)) bg-(--color-success-soft,var(--color-green-50)) text-(--color-success-accent,var(--color-green-700)) dark:border-(--color-success-soft,var(--color-green-900)) dark:bg-(--color-success-soft,var(--color-green-950)) dark:text-(--color-success-soft,var(--color-green-600))",
+					"border-(--color-success-soft,var(--color-green-200)) bg-(--color-success-soft,var(--color-green-50)) text-(--color-success-accent,var(--color-green-700)) dark:border-(--color-success-soft,var(--color-green-900)) dark:bg-(--color-success-soft,var(--color-green-950)) dark:text-(--color-success-accent,var(--color-green-400))",
 			},
 			{
 				variant: "warning",
 				appearance: "outline",
 				className:
-					"border-(--color-warning-soft,var(--color-yellow-200)) bg-(--color-warning-soft,var(--color-yellow-50)) text-(--color-warning-accent,var(--color-yellow-700)) dark:border-(--color-warning-soft,var(--color-yellow-900)) dark:bg-(--color-warning-soft,var(--color-yellow-950)) dark:text-(--color-warning-soft,var(--color-yellow-600))",
+					"border-(--color-warning-soft,var(--color-yellow-200)) bg-(--color-warning-soft,var(--color-yellow-50)) text-(--color-warning-accent,var(--color-yellow-700)) dark:border-(--color-warning-soft,var(--color-yellow-900)) dark:bg-(--color-warning-soft,var(--color-yellow-950)) dark:text-(--color-warning-accent,var(--color-yellow-400))",
 			},
 			{
 				variant: "info",
 				appearance: "outline",
 				className:
-					"border-(--color-info-soft,var(--color-violet-100)) bg-(--color-info-soft,var(--color-violet-50)) text-(--color-info-accent,var(--color-violet-700)) dark:border-(--color-info-soft,var(--color-violet-900)) dark:bg-(--color-info-soft,var(--color-violet-950)) dark:text-(--color-info-soft,var(--color-violet-400))",
+					"border-(--color-info-soft,var(--color-violet-100)) bg-(--color-info-soft,var(--color-violet-50)) text-(--color-info-accent,var(--color-violet-700)) dark:border-(--color-info-soft,var(--color-violet-900)) dark:bg-(--color-info-soft,var(--color-violet-950)) dark:text-(--color-info-accent,var(--color-violet-400))",
 			},
 			{
 				variant: "destructive",
 				appearance: "outline",
 				className:
-					"border-(--color-destructive-soft,var(--color-red-100)) bg-(--color-destructive-soft,var(--color-red-50)) text-(--color-destructive-accent,var(--color-red-700)) dark:border-(--color-destructive-soft,var(--color-red-900)) dark:bg-(--color-destructive-soft,var(--color-red-950)) dark:text-(--color-destructive-soft,var(--color-red-600))",
+					"border-(--color-destructive-soft,var(--color-red-100)) bg-(--color-destructive-soft,var(--color-red-50)) text-(--color-destructive-accent,var(--color-red-700)) dark:border-(--color-destructive-soft,var(--color-red-900)) dark:bg-(--color-destructive-soft,var(--color-red-950)) dark:text-(--color-destructive-accent,var(--color-red-400))",
 			},
 			/* Ghost */
 			{

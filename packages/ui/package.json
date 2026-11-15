@@ -12,6 +12,8 @@
     "./components/*": "./src/components/*.tsx",
     "./components/auth/*": "./src/components/auth/*.tsx",
     "./components/inputs/*": "./src/components/inputs/*.tsx",
+    "./components/icons/brands": "./src/components/icons/brands/index.ts",
+    "./components/icons/brands/*": "./src/components/icons/brands/*.tsx",
     "./components/icons/*": "./src/components/icons/*.tsx",
     "./lib/*": "./src/lib/*.ts",
     "./styles/*": "./src/styles/*"

@@ -50,7 +50,7 @@ export default async function DashboardPage() {
 						title="AI Assistant"
 					/>
 					<DashboardTile
-						description="Configure workspace name, vanity URL slug, and cloud logo branding."
+						description="Configure workspace name, workspace slug, and cloud logo branding."
 						href="/dashboard/settings/general"
 						icon={Building2}
 						title="General Profile"
@@ -74,7 +74,7 @@ export default async function DashboardPage() {
 						title="Notification Preferences"
 					/>
 					<DashboardTile
-						description="Ownership transfer workflows and permanent workspace destruction."
+						description="Ownership transfer workflows and permanent workspace deletion."
 						href="/dashboard/settings/advanced"
 						icon={AlertTriangle}
 						title="Danger Zone"

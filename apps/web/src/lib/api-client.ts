@@ -100,22 +100,6 @@ export const client: TypedApiClient = hc<AppType>(getBrowserApiBaseUrl(), {
 		}),
 });
 
-export function createServerApiClient(cookieHeader?: string): TypedApiClient {
-	return hc<AppType>(getInternalApiUrl(), {
-		fetch: (input: RequestInfo | URL, init?: RequestInit) => {
-			const headers = new Headers(init?.headers);
-			if (cookieHeader && !headers.has("cookie")) {
-				headers.set("cookie", cookieHeader);
-			}
-			return fetchWithTimeout(input, {
-				...init,
-				cache: init?.cache ?? "no-store",
-				headers,
-			});
-		},
-	});
-}
-
 export async function parseApiResponse<T>(response: Response): Promise<T> {
 	let body: unknown = null;
 	try {

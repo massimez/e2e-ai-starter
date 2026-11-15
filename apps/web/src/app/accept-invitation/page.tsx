@@ -1,7 +1,6 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { APP_CONFIG } from "@workspace/api/config";
 import { Badge } from "@workspace/ui/components/badge";
 import { Button } from "@workspace/ui/components/button";
 import {
@@ -13,6 +12,7 @@ import {
 	CardTitle,
 } from "@workspace/ui/components/card";
 import {
+	AlertTriangle,
 	Building2,
 	CheckCircle2,
 	Loader2,
@@ -24,6 +24,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AppHeader } from "@/components/app-header";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { authClient, useSession } from "@/lib/auth-client";
 import { syncOrganizationClientState } from "@/lib/organization-hooks";
@@ -270,11 +271,15 @@ function AcceptInvitationContent() {
 		);
 	}
 
+	const hasEmailMismatch =
+		Boolean(invitation?.email) &&
+		session.user.email.toLowerCase() !== invitation?.email.toLowerCase();
+
 	return (
 		<Card className="w-full max-w-md">
 			<CardHeader>
 				<div className="bg-primary/10 text-primary mb-2 flex h-11 w-11 items-center justify-center rounded-xl">
-					<Building2 className="h-6 w-6" />
+					<Building2 aria-hidden="true" className="h-6 w-6" />
 				</div>
 				<CardTitle className="text-xl">Workspace Invitation</CardTitle>
 				<CardDescription>
@@ -286,19 +291,25 @@ function AcceptInvitationContent() {
 			<CardContent className="space-y-3 text-sm">
 				<div className="bg-muted/40 space-y-2 rounded-xl border p-4">
 					{invitation?.organizationName ? (
-						<div className="flex items-center justify-between">
+						<div className="flex items-center justify-between gap-3">
 							<span className="text-muted-foreground">Organization</span>
 							<span className="font-semibold">
 								{invitation.organizationName}
 							</span>
 						</div>
 					) : null}
-					<div className="flex items-center justify-between">
+					{invitation?.email ? (
+						<div className="flex items-center justify-between gap-3">
+							<span className="text-muted-foreground">Invited email</span>
+							<span className="truncate font-medium">{invitation.email}</span>
+						</div>
+					) : null}
+					<div className="flex items-center justify-between gap-3">
 						<span className="text-muted-foreground">Signed in as</span>
-						<span className="font-medium">{session.user.email}</span>
+						<span className="truncate font-medium">{session.user.email}</span>
 					</div>
 					{invitation?.role ? (
-						<div className="flex items-center justify-between">
+						<div className="flex items-center justify-between gap-3">
 							<span className="text-muted-foreground">Assigned role</span>
 							<Badge className="capitalize" variant="outline">
 								{invitation.role}
@@ -306,6 +317,25 @@ function AcceptInvitationContent() {
 						</div>
 					) : null}
 				</div>
+
+				{hasEmailMismatch ? (
+					<div
+						className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300"
+						role="alert"
+					>
+						<AlertTriangle
+							aria-hidden="true"
+							className="mt-0.5 h-4 w-4 shrink-0"
+						/>
+						<p className="leading-relaxed">
+							This invitation was sent to{" "}
+							<strong className="font-semibold">{invitation?.email}</strong>,
+							but you are currently signed in as{" "}
+							<strong className="font-semibold">{session.user.email}</strong>.
+							Accepting may fail unless you sign in with the invited email.
+						</p>
+					</div>
+				) : null}
 			</CardContent>
 			<CardFooter className="flex flex-col gap-2.5 sm:flex-row">
 				<Button
@@ -339,13 +369,12 @@ function AcceptInvitationContent() {
 export default function AcceptInvitationPage() {
 	return (
 		<div className="bg-muted/20 flex min-h-screen flex-col">
-			<header className="flex items-center justify-between px-6 py-4">
-				<Link className="text-sm font-bold tracking-tight" href="/">
-					{APP_CONFIG.name}
-				</Link>
-				<ThemeToggle />
-			</header>
-			<main className="flex flex-1 items-center justify-center p-6">
+			<AppHeader actions={<ThemeToggle />} brandHref="/" />
+			<main
+				className="flex flex-1 items-center justify-center p-6 outline-none"
+				id="main-content"
+				tabIndex={-1}
+			>
 				<Suspense
 					fallback={
 						<div className="flex items-center gap-2 text-sm">

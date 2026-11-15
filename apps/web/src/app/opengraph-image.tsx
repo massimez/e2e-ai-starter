@@ -1,7 +1,7 @@
 import { APP_CONFIG } from "@workspace/api/config";
 import { ImageResponse } from "next/og";
 
-export const alt = `${APP_CONFIG.name}: Multi-tenant TypeScript starter for teams, storage, and background jobs`;
+export const alt = `${APP_CONFIG.name}: Multi-tenant AI starter for teams, storage, and background jobs`;
 
 export const size = {
 	height: 630,
@@ -14,6 +14,7 @@ const WORKSPACES = [
 	"apps/web",
 	"apps/api",
 	"apps/worker",
+	"packages/ai-core",
 	"packages/db",
 	"packages/ui",
 ] as const;
@@ -103,8 +104,7 @@ export default function OpenGraphImage() {
 						lineHeight: 1.12,
 					}}
 				>
-					Multi-tenant TypeScript starter for teams, storage, and background
-					jobs.
+					Multi-tenant AI starter for teams, storage, and background jobs.
 				</div>
 				<div
 					style={{
@@ -114,8 +114,9 @@ export default function OpenGraphImage() {
 						lineHeight: 1.45,
 					}}
 				>
-					Better Auth organizations, Drizzle ORM on Postgres, Hono typed RPC,
-					private S3/R2 uploads, and BullMQ email and push workers.
+					Better Auth organizations, Mastra AI with pgvector memory, Drizzle ORM
+					on Postgres, Hono typed RPC, private S3/R2 uploads, and BullMQ
+					workers.
 				</div>
 			</div>
 

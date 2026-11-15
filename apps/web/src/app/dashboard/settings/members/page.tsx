@@ -192,7 +192,6 @@ export default function MembersSettingsPage() {
 				) : null
 			}
 			description="Manage workspace team members, role assignments, and pending invitations."
-			headingLevel="h2"
 			title="Team Members & Collaboration"
 		>
 			<SettingsSection>

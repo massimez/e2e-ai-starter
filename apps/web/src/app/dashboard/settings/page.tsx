@@ -11,7 +11,7 @@ const settingsCategories = [
 	{
 		badge: "Core",
 		description:
-			"Configure workspace brand identity, custom URL slug, and cloud logo imagery.",
+			"Configure workspace brand identity, workspace slug, and cloud logo imagery.",
 		href: "/dashboard/settings/general",
 		icon: Building2,
 		title: "General Profile & Branding",
@@ -53,6 +53,16 @@ const settingsCategories = [
 export default function SettingsIndexPage() {
 	return (
 		<div className="space-y-6">
+			<header>
+				<h1 className="text-foreground text-xl font-semibold tracking-tight sm:text-2xl">
+					Workspace Settings
+				</h1>
+				<p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+					Manage your organization profile, team access, roles, notification
+					channels, and governance controls.
+				</p>
+			</header>
+
 			{/* Category Cards Grid */}
 			<div className="grid grid-cols-1 gap-5 md:grid-cols-2">
 				{settingsCategories.map((cat) => (

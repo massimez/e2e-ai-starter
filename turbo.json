@@ -6,11 +6,15 @@
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "env": [
+        "ANALYZE",
         "NEXT_PUBLIC_APP_URL",
         "NEXT_PUBLIC_API_URL",
+        "NEXT_PUBLIC_STORAGE_ORIGIN",
         "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
         "NEXT_PUBLIC_GOOGLE_AUTH_ENABLED",
-        "INTERNAL_API_URL"
+        "INTERNAL_API_URL",
+        "S3_ENDPOINT",
+        "S3_PUBLIC_URL"
       ],
       "outputs": [
         "dist/**",
@@ -37,35 +41,69 @@
       "cache": false,
       "persistent": true,
       "passThroughEnv": [
+        "ANTHROPIC_API_KEY",
         "DATABASE_URL",
+        "GOOGLE_API_KEY",
         "GOOGLE_GENERATIVE_AI_API_KEY",
         "MASTRA_DB_SCHEMA",
         "MASTRA_DEFAULT_MODEL",
         "MASTRA_EMBEDDING_MODEL",
         "MASTRA_EMBEDDING_DIMENSIONS",
-        "NODE_ENV"
+        "NODE_ENV",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY"
       ]
     },
     "db:push": {
       "cache": false,
-      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+      "passThroughEnv": [
+        "ALLOW_SEED",
+        "DATABASE_SSL",
+        "DATABASE_URL",
+        "DB_MAX_CONNECTIONS",
+        "NODE_ENV"
+      ]
     },
     "db:studio": {
       "cache": false,
       "persistent": true,
-      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+      "passThroughEnv": [
+        "ALLOW_SEED",
+        "DATABASE_SSL",
+        "DATABASE_URL",
+        "DB_MAX_CONNECTIONS",
+        "NODE_ENV"
+      ]
     },
     "db:migrate": {
       "cache": false,
-      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+      "passThroughEnv": [
+        "ALLOW_SEED",
+        "DATABASE_SSL",
+        "DATABASE_URL",
+        "DB_MAX_CONNECTIONS",
+        "NODE_ENV"
+      ]
     },
     "db:generate": {
       "cache": false,
-      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+      "passThroughEnv": [
+        "ALLOW_SEED",
+        "DATABASE_SSL",
+        "DATABASE_URL",
+        "DB_MAX_CONNECTIONS",
+        "NODE_ENV"
+      ]
     },
     "db:seed": {
       "cache": false,
-      "passThroughEnv": ["DATABASE_URL", "NODE_ENV"]
+      "passThroughEnv": [
+        "ALLOW_SEED",
+        "DATABASE_SSL",
+        "DATABASE_URL",
+        "DB_MAX_CONNECTIONS",
+        "NODE_ENV"
+      ]
     },
     "start": {
       "dependsOn": ["^build"],

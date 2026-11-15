@@ -15,18 +15,72 @@ export default function GlobalError({
 
 	return (
 		<html lang="en">
-			<body className="bg-background text-foreground flex min-h-screen flex-col items-center justify-center p-6 text-center font-sans antialiased">
-				<h1 className="mb-2 text-2xl font-bold">Application Error</h1>
-				<p className="text-muted-foreground mb-6 max-w-md text-sm">
-					A critical unexpected error interrupted the application.
-				</p>
-				<button
-					className="bg-primary text-primary-foreground inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-medium"
-					onClick={() => reset()}
-					type="button"
+			<body
+				style={{
+					alignItems: "center",
+					backgroundColor: "#ffffff",
+					color: "#09090b",
+					colorScheme: "light dark",
+					display: "flex",
+					flexDirection: "column",
+					fontFamily:
+						'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+					justifyContent: "center",
+					margin: 0,
+					minHeight: "100vh",
+					padding: "24px",
+					textAlign: "center",
+				}}
+			>
+				<main
+					style={{
+						backgroundColor: "#fafafa",
+						border: "1px solid #e4e4e7",
+						borderRadius: "16px",
+						boxShadow: "0 1px 3px rgba(0, 0, 0, 0.08)",
+						maxWidth: "420px",
+						padding: "32px 24px",
+						width: "100%",
+					}}
 				>
-					Reload Application
-				</button>
+					<h1
+						style={{
+							fontSize: "24px",
+							fontWeight: 700,
+							lineHeight: 1.2,
+							margin: "0 0 8px",
+						}}
+					>
+						Application Error
+					</h1>
+					<p
+						style={{
+							color: "#52525b",
+							fontSize: "14px",
+							lineHeight: 1.5,
+							margin: "0 0 24px",
+						}}
+					>
+						A critical unexpected error interrupted the application.
+					</p>
+					<button
+						onClick={() => reset()}
+						style={{
+							backgroundColor: "#18181b",
+							border: "none",
+							borderRadius: "8px",
+							color: "#fafafa",
+							cursor: "pointer",
+							fontSize: "14px",
+							fontWeight: 500,
+							height: "44px",
+							padding: "0 20px",
+						}}
+						type="button"
+					>
+						Reload Application
+					</button>
+				</main>
 			</body>
 		</html>
 	);

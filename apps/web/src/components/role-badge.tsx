@@ -21,7 +21,7 @@ export const ROLE_DISPLAY_LIST: readonly RoleDisplayMeta[] = [
 			"border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400",
 		borderClass: "hover:border-amber-500/40",
 		description:
-			"Full administrative authority over workspace billing, ownership, and deletion.",
+			"Full administrative authority over workspace roles, ownership transfer, and deletion.",
 		icon: Crown,
 		key: "owner",
 		name: "Owner",
@@ -32,7 +32,7 @@ export const ROLE_DISPLAY_LIST: readonly RoleDisplayMeta[] = [
 			"border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400",
 		borderClass: "hover:border-blue-500/40",
 		description:
-			"Manages team members, invitations, projects, storage, and workspace profile.",
+			"Manages team members, invitations, AI usage, storage, and workspace profile.",
 		icon: Shield,
 		key: "admin",
 		name: "Admin",
@@ -43,7 +43,7 @@ export const ROLE_DISPLAY_LIST: readonly RoleDisplayMeta[] = [
 			"border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
 		borderClass: "hover:border-emerald-500/40",
 		description:
-			"Standard collaborator who can create and modify projects and upload storage assets.",
+			"Standard collaborator who can run AI chats, upload storage assets, and manage workspace items.",
 		icon: User,
 		key: "member",
 		name: "Member",
@@ -53,7 +53,7 @@ export const ROLE_DISPLAY_LIST: readonly RoleDisplayMeta[] = [
 		badgeClass: "border-muted-foreground/20 bg-muted/60 text-muted-foreground",
 		borderClass: "hover:border-border",
 		description:
-			"Read-only access across workspace documents, projects, and notifications.",
+			"Read-only access across workspace files, members, AI history, and notifications.",
 		icon: Eye,
 		key: "viewer",
 		name: "Viewer",
