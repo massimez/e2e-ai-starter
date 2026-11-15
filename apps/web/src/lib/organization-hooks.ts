@@ -2,8 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+	type EffectiveOrganizationPermissions,
 	isOrgAdminRole,
-	type OrganizationRoleName,
+	type OrganizationPermissionGroup,
+	type OrganizationRoleSummary,
 	parseMemberRoles,
 } from "@workspace/api/permissions";
 import { toast } from "sonner";
@@ -49,7 +51,76 @@ export const organizationKeys = {
 	detail: (organizationId: string) =>
 		[...organizationKeys.all, "detail", organizationId] as const,
 	list: () => [...organizationKeys.all, "list"] as const,
+	myPermissions: (organizationId: string) =>
+		[...organizationKeys.all, "roles", organizationId, "me"] as const,
+	permissionCatalog: (organizationId: string) =>
+		[...organizationKeys.all, "roles", organizationId, "permissions"] as const,
+	roles: (organizationId: string) =>
+		[...organizationKeys.all, "roles", organizationId] as const,
 };
+
+function orgHeadersInit(organizationId?: string) {
+	return organizationId
+		? { init: { headers: { "x-organization-id": organizationId } } }
+		: undefined;
+}
+
+export function useMyOrganizationPermissions(organizationId?: string) {
+	return useQuery<EffectiveOrganizationPermissions | null>({
+		enabled: Boolean(organizationId),
+		queryFn: async () => {
+			if (!organizationId) {
+				return null;
+			}
+			const response = await client.api.organizations.roles.me.$get(
+				undefined,
+				orgHeadersInit(organizationId)
+			);
+			return await parseApiResponse<EffectiveOrganizationPermissions>(response);
+		},
+		queryKey: organizationKeys.myPermissions(organizationId ?? "none"),
+		staleTime: 30_000,
+	});
+}
+
+export function useOrganizationRoles(organizationId?: string) {
+	return useQuery<OrganizationRoleSummary[]>({
+		enabled: Boolean(organizationId),
+		queryFn: async () => {
+			if (!organizationId) {
+				return [];
+			}
+			const response = await client.api.organizations.roles.$get(
+				undefined,
+				orgHeadersInit(organizationId)
+			);
+			return await parseApiResponse<OrganizationRoleSummary[]>(response);
+		},
+		queryKey: organizationKeys.roles(organizationId ?? "none"),
+		staleTime: 30_000,
+	});
+}
+
+export function useOrganizationPermissionsCatalog(
+	organizationId?: string,
+	enabled = true
+) {
+	return useQuery<OrganizationPermissionGroup[]>({
+		enabled: Boolean(organizationId) && enabled,
+		queryFn: async () => {
+			if (!organizationId) {
+				return [];
+			}
+			const response = await client.api.organizations.roles.permissions.$get(
+				undefined,
+				orgHeadersInit(organizationId)
+			);
+			return await parseApiResponse<OrganizationPermissionGroup[]>(response);
+		},
+		queryKey: organizationKeys.permissionCatalog(organizationId ?? "none"),
+		staleTime: 5 * 60_000,
+	});
+}
 
 export function useCurrentOrganization() {
 	const session = authClient.useSession();
@@ -78,6 +149,8 @@ export function useCurrentOrganization() {
 		staleTime: 30_000,
 	});
 
+	const myPermissionsQuery = useMyOrganizationPermissions(activeOrgId);
+
 	const fullOrg = fullOrgQuery.data ?? null;
 	const currentUserId = session.data?.user.id;
 	const currentMember = fullOrg?.members.find(
@@ -85,29 +158,50 @@ export function useCurrentOrganization() {
 	);
 	const currentUserRole: string | null = currentMember?.role ?? null;
 	const roles = parseMemberRoles(currentUserRole);
+	const effectivePermissions = myPermissionsQuery.data ?? null;
 
-	const isOwner = roles.includes("owner");
+	const isOwner =
+		roles.includes("owner") || Boolean(effectivePermissions?.isOwner);
 	const isAdmin = isOrgAdminRole(currentUserRole);
-	const canManageMembers = isAdmin;
-	const canManageSettings = isAdmin;
-	const canDeleteWorkspace = isOwner;
+
+	const hasPermission = (permission: string): boolean => {
+		if (isOwner) {
+			return true;
+		}
+		return effectivePermissions?.permissions.includes(permission) ?? false;
+	};
+
+	const canManageMembers = effectivePermissions
+		? hasPermission("member:invite") ||
+			hasPermission("member:remove") ||
+			hasPermission("member:delete")
+		: isAdmin;
+	const canManageSettings = effectivePermissions
+		? hasPermission("organization:update") || hasPermission("setting:update")
+		: isAdmin;
+	const canDeleteWorkspace = isOwner || hasPermission("organization:delete");
+	const canManageRoles = isOwner;
 
 	return {
 		activeOrg: activeOrg.data,
 		activeOrgId,
 		canDeleteWorkspace,
 		canManageMembers,
+		canManageRoles,
 		canManageSettings,
 		currentMember,
 		currentUserRole,
+		effectivePermissions,
 		error: fullOrgQuery.error,
 		fullOrg,
+		hasPermission,
 		isAdmin,
 		isError: fullOrgQuery.isError,
 		isListPending: listOrgs.isPending,
 		isLoading:
 			activeOrg.isPending || (Boolean(activeOrgId) && fullOrgQuery.isPending),
 		isOwner,
+		isPermissionsPending: Boolean(activeOrgId) && myPermissionsQuery.isPending,
 		organizations: listOrgs.data ?? [],
 		refetch: fullOrgQuery.refetch,
 		session: session.data,
@@ -214,7 +308,7 @@ export function useOrganizationMutations(
 			slug?: string;
 		}) => {
 			const payloadData: {
-				logo?: string;
+				logo?: string | null;
 				metadata?: Record<string, unknown>;
 				name?: string;
 				slug?: string;
@@ -230,19 +324,20 @@ export function useOrganizationMutations(
 				payloadData.metadata = metadata;
 			}
 			if (logo !== undefined) {
-				// Passing empty string/null clears logo cleanly through adapter
-				payloadData.logo = (logo ?? "") as string;
+				payloadData.logo = logo;
 			}
 
-			const res = await authClient.organization.update({
-				data: payloadData,
-				organizationId,
-			});
-
-			if (res.error) {
-				throw new Error(res.error.message || "Failed to update organization");
-			}
-			return res.data;
+			const response = await client.api.organizations.current.$patch(
+				{ json: payloadData },
+				orgHeadersInit(organizationId)
+			);
+			return await parseApiResponse<{
+				id: string;
+				logo: string | null;
+				metadata: string | null;
+				name: string;
+				slug: string | null;
+			}>(response);
 		},
 		onError: (error) => {
 			notifyError(error, "Failed to update organization");
@@ -257,46 +352,56 @@ export function useOrganizationMutations(
 		mutationFn: async ({
 			email,
 			organizationId,
+			resend,
 			role,
 		}: {
 			email: string;
 			organizationId: string;
-			role: OrganizationRoleName;
+			resend?: boolean;
+			role: string;
 		}) => {
-			const res = await authClient.organization.inviteMember({
-				email,
-				organizationId,
-				role,
-			});
-			if (res.error) {
-				throw new Error(res.error.message || "Failed to invite member");
-			}
-			return res.data;
+			const response = await client.api.organizations.invitations.$post(
+				{ json: { email, resend, role } },
+				orgHeadersInit(organizationId)
+			);
+			return await parseApiResponse<
+				OrganizationInvitation & { resent: boolean }
+			>(response);
 		},
 		onError: (error) => {
 			notifyError(error, "Failed to invite member");
 		},
-		onSuccess: async (_data, variables) => {
+		onSuccess: async (data, variables) => {
 			await invalidateAll(variables.organizationId);
-			notifySuccess(`Invitation sent to ${variables.email}`);
+			notifySuccess(
+				data.resent
+					? `Invitation resent to ${variables.email}`
+					: `Invitation sent to ${variables.email}`
+			);
 		},
 	});
 
 	const cancelInvitationMutation = useMutation({
-		mutationFn: async ({ invitationId }: { invitationId: string }) => {
-			const res = await authClient.organization.cancelInvitation({
-				invitationId,
-			});
-			if (res.error) {
-				throw new Error(res.error.message || "Failed to cancel invitation");
-			}
-			return res.data;
+		mutationFn: async ({
+			invitationId,
+			organizationId,
+		}: {
+			invitationId: string;
+			organizationId?: string;
+		}) => {
+			const response = await client.api.organizations.invitations[
+				":id"
+			].$delete(
+				{ param: { id: invitationId } },
+				orgHeadersInit(organizationId)
+			);
+			return await parseApiResponse<{ deletedId: string }>(response);
 		},
 		onError: (error) => {
 			notifyError(error, "Failed to cancel invitation");
 		},
-		onSuccess: async () => {
-			await invalidateAll();
+		onSuccess: async (_data, variables) => {
+			await invalidateAll(variables.organizationId);
 			notifySuccess("Invitation canceled");
 		},
 	});
@@ -309,17 +414,15 @@ export function useOrganizationMutations(
 		}: {
 			memberId: string;
 			organizationId: string;
-			role: OrganizationRoleName;
+			role: string;
 		}) => {
-			const res = await authClient.organization.updateMemberRole({
-				memberId,
-				organizationId,
-				role,
-			});
-			if (res.error) {
-				throw new Error(res.error.message || "Failed to update member role");
-			}
-			return res.data;
+			const response = await client.api.organizations.roles.members[
+				":memberId"
+			].$patch(
+				{ json: { roleSlug: role }, param: { memberId } },
+				orgHeadersInit(organizationId)
+			);
+			return await parseApiResponse<OrganizationMember>(response);
 		},
 		onError: (error) => {
 			notifyError(error, "Failed to update member role");
@@ -338,14 +441,17 @@ export function useOrganizationMutations(
 			memberId: string;
 			organizationId: string;
 		}) => {
-			const res = await authClient.organization.removeMember({
-				memberIdOrEmail: memberId,
-				organizationId,
-			});
-			if (res.error) {
-				throw new Error(res.error.message || "Failed to remove member");
-			}
-			return res.data;
+			const response = await client.api.organizations.members[
+				":memberId"
+			].$delete({ param: { memberId } }, orgHeadersInit(organizationId));
+			return await parseApiResponse<{
+				member: {
+					id: string;
+					organizationId: string;
+					role: string;
+					userId: string;
+				};
+			}>(response);
 		},
 		onError: (error) => {
 			notifyError(error, "Failed to remove member");
@@ -460,4 +566,150 @@ export function useOrganizationMutations(
 		updateMemberRole: updateMemberRoleMutation.mutateAsync,
 		updateOrganization: updateOrgMutation.mutateAsync,
 	};
+}
+
+function useInvalidateOrganizationRoles(organizationId?: string) {
+	const queryClient = useQueryClient();
+	return async () => {
+		if (!organizationId) {
+			await queryClient.invalidateQueries({ queryKey: organizationKeys.all });
+			return;
+		}
+		await Promise.all([
+			queryClient.invalidateQueries({
+				queryKey: organizationKeys.roles(organizationId),
+			}),
+			queryClient.invalidateQueries({
+				queryKey: organizationKeys.myPermissions(organizationId),
+			}),
+			queryClient.invalidateQueries({
+				queryKey: organizationKeys.detail(organizationId),
+			}),
+		]);
+	};
+}
+
+function useOrganizationRoleMutation<TData, TVariables>(params: {
+	errorFallback: string;
+	mutationFn: (orgId: string, variables: TVariables) => Promise<TData>;
+	organizationId?: string;
+	successMessage: (data: TData) => string;
+}) {
+	const invalidateRoles = useInvalidateOrganizationRoles(params.organizationId);
+	return useMutation({
+		mutationFn: async (variables: TVariables) => {
+			if (!params.organizationId) {
+				throw new Error("No active organization selected");
+			}
+			return await params.mutationFn(params.organizationId, variables);
+		},
+		onError: (error) => {
+			toast.error(
+				error instanceof Error ? error.message : params.errorFallback
+			);
+		},
+		onSuccess: async (data) => {
+			await invalidateRoles();
+			toast.success(params.successMessage(data));
+		},
+	});
+}
+
+export function useCreateOrganizationRole(organizationId?: string) {
+	return useOrganizationRoleMutation({
+		errorFallback: "Failed to create role",
+		mutationFn: async (
+			orgId,
+			input: {
+				description?: string;
+				isDefault?: boolean;
+				name: string;
+				permissions: string[];
+				slug?: string;
+			}
+		) => {
+			const response = await client.api.organizations.roles.$post(
+				{ json: input },
+				orgHeadersInit(orgId)
+			);
+			return await parseApiResponse<OrganizationRoleSummary>(response);
+		},
+		organizationId,
+		successMessage: (role) => `Role "${role.name}" created`,
+	});
+}
+
+export function useUpdateOrganizationRole(organizationId?: string) {
+	return useOrganizationRoleMutation({
+		errorFallback: "Failed to update role",
+		mutationFn: async (
+			orgId,
+			{
+				id,
+				...input
+			}: {
+				description?: string | null;
+				id: string;
+				isDefault?: boolean;
+				name?: string;
+				permissions?: string[];
+				slug?: string;
+			}
+		) => {
+			const response = await client.api.organizations.roles[":id"].$put(
+				{ json: input, param: { id } },
+				orgHeadersInit(orgId)
+			);
+			return await parseApiResponse<OrganizationRoleSummary>(response);
+		},
+		organizationId,
+		successMessage: (role) => `Role "${role.name}" updated`,
+	});
+}
+
+export function useDeleteOrganizationRole(organizationId?: string) {
+	return useOrganizationRoleMutation({
+		errorFallback: "Failed to delete role",
+		mutationFn: async (orgId, { id }: { id: string }) => {
+			const response = await client.api.organizations.roles[":id"].$delete(
+				{ param: { id } },
+				orgHeadersInit(orgId)
+			);
+			return await parseApiResponse<{
+				deletedBy: string;
+				deletedRoleId: string;
+				deletedRoleSlug: string;
+			}>(response);
+		},
+		organizationId,
+		successMessage: () => "Role deleted",
+	});
+}
+
+export function useCloneOrganizationRole(organizationId?: string) {
+	return useOrganizationRoleMutation({
+		errorFallback: "Failed to clone role",
+		mutationFn: async (
+			orgId,
+			{
+				description,
+				id,
+				name,
+				slug,
+			}: {
+				description?: string;
+				id: string;
+				name: string;
+				slug?: string;
+			}
+		) => {
+			const response = await client.api.organizations.roles[":id"].clone.$post(
+				{ json: { description, name, slug }, param: { id } },
+				orgHeadersInit(orgId)
+			);
+			return await parseApiResponse<OrganizationRoleSummary>(response);
+		},
+		organizationId,
+		successMessage: (role) => `Role "${role.name}" cloned`,
+	});
 }

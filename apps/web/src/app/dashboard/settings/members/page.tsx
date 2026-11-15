@@ -1,6 +1,5 @@
 "use client";
 
-import type { OrganizationRoleName } from "@workspace/api/permissions";
 import { Button } from "@workspace/ui/components/button";
 import { DeleteConfirmationDialog } from "@workspace/ui/components/delete-confirmation-dialog";
 import { Input } from "@workspace/ui/components/input";
@@ -18,12 +17,13 @@ import {
 } from "@workspace/ui/components/tabs";
 import { Loader2, Mail, Plus, Search, UserPlus, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
 	type OrganizationInvitation,
 	type OrganizationMember,
 	useCurrentOrganization,
 	useOrganizationMutations,
+	useOrganizationRoles,
 } from "@/lib/organization-hooks";
 import { InvitationsTable } from "./_components/invitations-table";
 import { InviteMemberDialog } from "./_components/invite-member-dialog";
@@ -53,6 +53,30 @@ export default function MembersSettingsPage() {
 		onSuccessNavigate: (path) => router.push(path),
 	});
 
+	const rolesQuery = useOrganizationRoles(activeOrgId);
+	const roles = rolesQuery.data ?? [];
+
+	const assignableRoles = useMemo(
+		() =>
+			roles.filter(
+				(role) => role.slug !== "owner" && (isOwner || role.slug !== "admin")
+			),
+		[isOwner, roles]
+	);
+
+	const defaultRoleSlug = useMemo(
+		() =>
+			assignableRoles.find((role) => role.isDefault)?.slug ??
+			assignableRoles[0]?.slug ??
+			"member",
+		[assignableRoles]
+	);
+
+	const roleNameBySlug = useMemo(
+		() => new Map(roles.map((role) => [role.slug, role.name])),
+		[roles]
+	);
+
 	const [searchQuery, setSearchQuery] = useState("");
 	const [isInviteOpen, setIsInviteOpen] = useState(false);
 	const [memberToRemove, setMemberToRemove] =
@@ -74,10 +98,7 @@ export default function MembersSettingsPage() {
 			m.role?.toLowerCase().includes(query)
 	);
 
-	const handleInvite = async (input: {
-		email: string;
-		role: OrganizationRoleName;
-	}) => {
+	const handleInvite = async (input: { email: string; role: string }) => {
 		if (!activeOrgId) {
 			return;
 		}
@@ -88,10 +109,7 @@ export default function MembersSettingsPage() {
 		});
 	};
 
-	const handleRoleChange = async (
-		memberId: string,
-		role: OrganizationRoleName
-	) => {
+	const handleRoleChange = async (memberId: string, role: string) => {
 		if (!activeOrgId) {
 			return;
 		}
@@ -128,6 +146,7 @@ export default function MembersSettingsPage() {
 		try {
 			await cancelInvitation({
 				invitationId: invitationToCancel.id,
+				organizationId: activeOrgId,
 			});
 			setInvitationToCancel(null);
 		} catch {
@@ -208,6 +227,7 @@ export default function MembersSettingsPage() {
 
 						<TabsContent className="pt-3" value="members">
 							<MembersTable
+								assignableRoles={assignableRoles}
 								canManageMembers={canManageMembers}
 								currentUserId={session?.user.id}
 								isOwner={isOwner}
@@ -215,6 +235,7 @@ export default function MembersSettingsPage() {
 								onLeave={() => setIsLeaveOpen(true)}
 								onRemove={setMemberToRemove}
 								onRoleChange={handleRoleChange}
+								roleNameBySlug={roleNameBySlug}
 							/>
 						</TabsContent>
 
@@ -237,6 +258,7 @@ export default function MembersSettingsPage() {
 								canManageMembers={canManageMembers}
 								invitations={invitations}
 								onRevoke={setInvitationToCancel}
+								roleNameBySlug={roleNameBySlug}
 							/>
 						</TabsContent>
 					</Tabs>
@@ -244,6 +266,9 @@ export default function MembersSettingsPage() {
 			</SettingsSection>
 
 			<InviteMemberDialog
+				assignableRoles={assignableRoles}
+				canAssignAdmin={isOwner}
+				defaultRoleSlug={defaultRoleSlug}
 				isSubmitting={isSubmitting}
 				onInvite={handleInvite}
 				onOpenChange={setIsInviteOpen}

@@ -1,6 +1,6 @@
 "use client";
 
-import type { OrganizationRoleName } from "@workspace/api/permissions";
+import type { OrganizationRoleSummary } from "@workspace/api/permissions";
 import {
 	Avatar,
 	AvatarFallback,
@@ -28,45 +28,58 @@ import { RoleBadge } from "@/components/role-badge";
 import type { OrganizationMember } from "@/lib/organization-hooks";
 
 interface MembersTableProps {
+	assignableRoles: OrganizationRoleSummary[];
 	canManageMembers: boolean;
 	currentUserId?: string;
 	isOwner: boolean;
 	members: OrganizationMember[];
 	onLeave: () => void;
 	onRemove: (member: OrganizationMember) => void;
-	onRoleChange: (memberId: string, role: OrganizationRoleName) => void;
+	onRoleChange: (memberId: string, role: string) => void;
+	roleNameBySlug?: ReadonlyMap<string, string>;
 }
 
 function MemberRoleCell({
+	assignableRoles,
 	canEdit,
 	memberId,
 	onRoleChange,
 	role,
+	roleLabel,
 }: {
+	assignableRoles: OrganizationRoleSummary[];
 	canEdit: boolean;
 	memberId: string;
-	onRoleChange: (id: string, role: OrganizationRoleName) => void;
+	onRoleChange: (id: string, role: string) => void;
 	role: string;
+	roleLabel?: string;
 }) {
 	if (role === "owner" || !canEdit) {
-		return <RoleBadge className="px-2.5 py-0.5" role={role} />;
+		return (
+			<RoleBadge className="px-2.5 py-0.5" label={roleLabel} role={role} />
+		);
 	}
 
 	return (
-		<div className="w-32">
-			<Select
-				onValueChange={(val) =>
-					onRoleChange(memberId, val as OrganizationRoleName)
-				}
-				value={role}
-			>
+		<div className="w-40">
+			<Select onValueChange={(val) => onRoleChange(memberId, val)} value={role}>
 				<SelectTrigger className="h-8 text-xs font-medium">
 					<SelectValue />
 				</SelectTrigger>
 				<SelectContent>
-					<SelectItem value="admin">Admin</SelectItem>
-					<SelectItem value="member">Member</SelectItem>
-					<SelectItem value="viewer">Viewer</SelectItem>
+					{assignableRoles.length > 0 ? (
+						assignableRoles.map((option) => (
+							<SelectItem key={option.id} value={option.slug}>
+								{option.name}
+							</SelectItem>
+						))
+					) : (
+						<>
+							<SelectItem value="admin">Admin</SelectItem>
+							<SelectItem value="member">Member</SelectItem>
+							<SelectItem value="viewer">Viewer</SelectItem>
+						</>
+					)}
 				</SelectContent>
 			</Select>
 		</div>
@@ -120,6 +133,7 @@ function MemberActionsCell({
 }
 
 export function MembersTable({
+	assignableRoles,
 	canManageMembers,
 	currentUserId,
 	isOwner,
@@ -127,6 +141,7 @@ export function MembersTable({
 	onLeave,
 	onRemove,
 	onRoleChange,
+	roleNameBySlug,
 }: MembersTableProps) {
 	return (
 		<div className="border-border/60 overflow-hidden rounded-2xl border">
@@ -158,6 +173,7 @@ export function MembersTable({
 							const isMemberOwner = member.role === "owner";
 							const canManageOther =
 								canManageMembers && !isMemberOwner && !isMe;
+							const canAssignRole = isOwner && !isMemberOwner && !isMe;
 
 							return (
 								<TableRow className="hover:bg-muted/30" key={member.id}>
@@ -196,10 +212,12 @@ export function MembersTable({
 									</TableCell>
 									<TableCell>
 										<MemberRoleCell
-											canEdit={canManageOther}
+											assignableRoles={assignableRoles}
+											canEdit={canAssignRole}
 											memberId={member.id}
 											onRoleChange={onRoleChange}
 											role={member.role}
+											roleLabel={roleNameBySlug?.get(member.role)}
 										/>
 									</TableCell>
 									<TableCell className="text-muted-foreground hidden font-mono text-xs md:table-cell">

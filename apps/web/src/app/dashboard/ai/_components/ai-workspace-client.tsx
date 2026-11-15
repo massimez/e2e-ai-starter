@@ -8,12 +8,6 @@ import type {
 	AiThreadsResponse,
 	WorkspaceBriefResponse,
 } from "@workspace/ai-core/contracts";
-import {
-	type OrganizationRoleName,
-	parseMemberRoles,
-	roleAllows,
-	roles,
-} from "@workspace/api/permissions";
 import { Badge } from "@workspace/ui/components/badge";
 import { Button } from "@workspace/ui/components/button";
 import {
@@ -59,16 +53,6 @@ const STARTER_PROMPTS = [
 
 function createThreadId(): string {
 	return crypto.randomUUID();
-}
-
-function getUserCanExecuteAi(roleValue: string | null): boolean {
-	if (!roleValue) {
-		return false;
-	}
-	const parsed = parseMemberRoles(roleValue);
-	return parsed
-		.filter((role): role is OrganizationRoleName => role in roles)
-		.some((role) => roleAllows(role, "ai", "execute"));
 }
 
 interface AiChatSessionPaneProps {
@@ -598,7 +582,9 @@ export function AiWorkspaceClient() {
 		activeOrg,
 		activeOrgId,
 		currentUserRole,
+		hasPermission,
 		isLoading: orgLoading,
+		isPermissionsPending,
 	} = useCurrentOrganization();
 
 	const [activeThreadId, setActiveThreadId] = useState<string>(() =>
@@ -665,8 +651,9 @@ export function AiWorkspaceClient() {
 		setActiveThreadId(threadId);
 	};
 
-	const isRoleResolved = !orgLoading && currentUserRole !== null;
-	const canExecuteAi = getUserCanExecuteAi(currentUserRole);
+	const isRoleResolved =
+		!(orgLoading || isPermissionsPending) && currentUserRole !== null;
+	const canExecuteAi = hasPermission("ai:execute");
 	const {
 		apiKeyEnvVars,
 		defaultAgentId,

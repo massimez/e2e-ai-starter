@@ -11,18 +11,21 @@ import {
 	TableRow,
 } from "@workspace/ui/components/table";
 import { Clock, Mail } from "lucide-react";
+import { RoleBadge } from "@/components/role-badge";
 import type { OrganizationInvitation } from "@/lib/organization-hooks";
 
 interface InvitationsTableProps {
 	canManageMembers: boolean;
 	invitations: OrganizationInvitation[];
 	onRevoke: (invitation: OrganizationInvitation) => void;
+	roleNameBySlug?: ReadonlyMap<string, string>;
 }
 
 export function InvitationsTable({
 	canManageMembers,
 	invitations,
 	onRevoke,
+	roleNameBySlug,
 }: InvitationsTableProps) {
 	return (
 		<div className="border-border/60 overflow-hidden rounded-2xl border">
@@ -56,12 +59,10 @@ export function InvitationsTable({
 									{invite.email}
 								</TableCell>
 								<TableCell>
-									<Badge
-										className="text-xs font-medium capitalize"
-										variant="outline"
-									>
-										{invite.role}
-									</Badge>
+									<RoleBadge
+										label={roleNameBySlug?.get(invite.role)}
+										role={invite.role}
+									/>
 								</TableCell>
 								<TableCell>
 									<Badge

@@ -1,6 +1,6 @@
 "use client";
 
-import type { OrganizationRoleName } from "@workspace/api/permissions";
+import type { OrganizationRoleSummary } from "@workspace/api/permissions";
 import { Button } from "@workspace/ui/components/button";
 import {
 	Dialog,
@@ -20,19 +20,22 @@ import {
 	SelectValue,
 } from "@workspace/ui/components/select";
 import { Loader2 } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 interface InviteMemberDialogProps {
+	assignableRoles: OrganizationRoleSummary[];
+	canAssignAdmin?: boolean;
+	defaultRoleSlug: string;
 	isSubmitting: boolean;
-	onInvite: (input: {
-		email: string;
-		role: OrganizationRoleName;
-	}) => Promise<void>;
+	onInvite: (input: { email: string; role: string }) => Promise<void>;
 	onOpenChange: (open: boolean) => void;
 	open: boolean;
 }
 
 export function InviteMemberDialog({
+	assignableRoles,
+	canAssignAdmin = false,
+	defaultRoleSlug,
 	isSubmitting,
 	onInvite,
 	onOpenChange,
@@ -41,7 +44,13 @@ export function InviteMemberDialog({
 	const emailId = useId();
 	const roleId = useId();
 	const [email, setEmail] = useState("");
-	const [role, setRole] = useState<OrganizationRoleName>("member");
+	const [role, setRole] = useState<string>(defaultRoleSlug);
+
+	useEffect(() => {
+		if (open) {
+			setRole(defaultRoleSlug);
+		}
+	}, [defaultRoleSlug, open]);
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -53,7 +62,7 @@ export function InviteMemberDialog({
 			await onInvite({ email: trimmed, role });
 			onOpenChange(false);
 			setEmail("");
-			setRole("member");
+			setRole(defaultRoleSlug);
 		} catch {
 			// Toast handled in mutation
 		}
@@ -92,23 +101,27 @@ export function InviteMemberDialog({
 						<Label className="text-xs font-medium" htmlFor={roleId}>
 							Access Role
 						</Label>
-						<Select
-							onValueChange={(value) => setRole(value as OrganizationRoleName)}
-							value={role}
-						>
+						<Select onValueChange={setRole} value={role}>
 							<SelectTrigger id={roleId}>
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="admin">
-									Admin (Manage team, settings & resources)
-								</SelectItem>
-								<SelectItem value="member">
-									Member (Standard create & edit permissions)
-								</SelectItem>
-								<SelectItem value="viewer">
-									Viewer (Read-only access)
-								</SelectItem>
+								{assignableRoles.length > 0 ? (
+									assignableRoles.map((option) => (
+										<SelectItem key={option.id} value={option.slug}>
+											{option.name}
+											{option.isDefault ? " (Default)" : ""}
+										</SelectItem>
+									))
+								) : (
+									<>
+										{canAssignAdmin ? (
+											<SelectItem value="admin">Admin</SelectItem>
+										) : null}
+										<SelectItem value="member">Member</SelectItem>
+										<SelectItem value="viewer">Viewer</SelectItem>
+									</>
+								)}
 							</SelectContent>
 						</Select>
 					</div>
