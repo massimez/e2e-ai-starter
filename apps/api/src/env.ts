@@ -84,6 +84,8 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 					}
 				),
 			TRUSTED_PROXY_CIDRS: z.string().default(""),
+			TURNSTILE_SECRET_KEY: z.string().trim().default(""),
+			TURNSTILE_ALLOWED_HOSTNAMES: z.string().default(""),
 			GOOGLE_CLIENT_ID: z.string().default(""),
 			GOOGLE_CLIENT_SECRET: z.string().default(""),
 			S3_BUCKET: z.string().min(1).default(APP_CONFIG.defaultBucketName),
@@ -195,6 +197,11 @@ export function parseApiEnv(
 			.filter(Boolean),
 		TRUSTED_PROXY_CIDRS_LIST: rawEnv.TRUSTED_PROXY_CIDRS.split(",")
 			.map((cidr) => cidr.trim())
+			.filter(Boolean),
+		TURNSTILE_ALLOWED_HOSTNAMES_LIST: rawEnv.TURNSTILE_ALLOWED_HOSTNAMES.split(
+			","
+		)
+			.map((hostname) => hostname.trim())
 			.filter(Boolean),
 	};
 }

@@ -28,6 +28,7 @@ const serverWebEnvSchema = z.object({
 		.optional()
 		.default("false"),
 	NEXT_PUBLIC_STORAGE_ORIGIN: optionalUrlSchema,
+	NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().trim().optional().default(""),
 	NEXT_PUBLIC_VAPID_PUBLIC_KEY: z.string().optional().default(""),
 });
 
@@ -40,6 +41,7 @@ export const publicWebEnv = {
 	apiUrl: process.env.NEXT_PUBLIC_API_URL || "",
 	appUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
 	googleAuthEnabled: process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED === "true",
+	turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "",
 	vapidPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "",
 } as const;
 
