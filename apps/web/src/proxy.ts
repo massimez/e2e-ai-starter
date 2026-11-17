@@ -17,14 +17,25 @@ function extractOrigin(rawUrl: string | undefined): string | null {
 	}
 }
 
+const CLOUDFLARE_TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
+
 function buildContentSecurityPolicy(nonce: string, prodEnv: boolean): string {
+	const turnstileEnabled = Boolean(
+		process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim()
+	);
 	const connectSources = new Set<string>(["'self'"]);
+	const frameSources = new Set<string>(["'self'"]);
 	const imageSources = new Set<string>([
 		"'self'",
 		"data:",
 		"blob:",
 		"https://lh3.googleusercontent.com",
 	]);
+
+	if (turnstileEnabled) {
+		connectSources.add(CLOUDFLARE_TURNSTILE_ORIGIN);
+		frameSources.add(CLOUDFLARE_TURNSTILE_ORIGIN);
+	}
 
 	for (const candidate of [
 		process.env.NEXT_PUBLIC_API_URL,
@@ -47,9 +58,12 @@ function buildContentSecurityPolicy(nonce: string, prodEnv: boolean): string {
 		imageSources.add("http://127.0.0.1:9000");
 	}
 
+	const scriptTurnstileSource = turnstileEnabled
+		? ` ${CLOUDFLARE_TURNSTILE_ORIGIN}`
+		: "";
 	const scriptDirectives = prodEnv
-		? `'self' 'nonce-${nonce}' 'strict-dynamic'`
-		: "'self' 'unsafe-inline' 'unsafe-eval'";
+		? `'self' 'nonce-${nonce}' 'strict-dynamic'${scriptTurnstileSource}`
+		: `'self' 'unsafe-inline' 'unsafe-eval'${scriptTurnstileSource}`;
 
 	return [
 		"default-src 'self'",
@@ -58,6 +72,7 @@ function buildContentSecurityPolicy(nonce: string, prodEnv: boolean): string {
 		`img-src ${Array.from(imageSources).join(" ")}`,
 		"font-src 'self' data:",
 		`connect-src ${Array.from(connectSources).join(" ")}`,
+		`frame-src ${Array.from(frameSources).join(" ")}`,
 		"worker-src 'self'",
 		"manifest-src 'self'",
 		"object-src 'none'",

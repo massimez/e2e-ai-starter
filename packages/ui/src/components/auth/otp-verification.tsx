@@ -8,7 +8,14 @@ import {
 } from "@workspace/ui/components/dialog";
 import { Input } from "@workspace/ui/components/input";
 import OTPInput, { type InputProps } from "@workspace/ui/components/inputs/otp";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useId,
+	useRef,
+	useState,
+} from "react";
 import type defaultTranslations from "./translations.json";
 
 export interface OtpVerificationSubmitResult {
@@ -17,6 +24,7 @@ export interface OtpVerificationSubmitResult {
 
 export interface OtpVerificationProps {
 	autoSubmit?: boolean;
+	captchaSlot?: ReactNode;
 	description?: string;
 	isLoading?: boolean;
 	isResending?: boolean;
@@ -47,6 +55,7 @@ export interface OtpVerificationProps {
 }
 
 export const OtpVerification = ({
+	captchaSlot,
 	title,
 	description,
 	length = 6,
@@ -272,6 +281,8 @@ export const OtpVerification = ({
 						{errorMessage}
 					</p>
 				) : null}
+
+				{captchaSlot}
 
 				<Button
 					className="h-12 w-full text-base font-medium"

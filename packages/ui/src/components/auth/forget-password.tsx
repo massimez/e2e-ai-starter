@@ -10,16 +10,18 @@ import {
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Loader2 } from "lucide-react";
-import { type FormEvent, useId, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useRef, useState } from "react";
 import type defaultTranslations from "./translations.json";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
 export const ForgetPassword = ({
+	captchaSlot,
 	sentResetCode,
 	openSignIn,
 	translations,
 }: {
+	captchaSlot?: ReactNode;
 	sentResetCode: (email: string) => Promise<void>;
 	openSignIn: () => void;
 	translations: typeof defaultTranslations.en.forgetPassword;
@@ -90,6 +92,8 @@ export const ForgetPassword = ({
 						{formError}
 					</p>
 				) : null}
+
+				{captchaSlot}
 
 				<Button
 					className="h-12 w-full text-base font-medium"

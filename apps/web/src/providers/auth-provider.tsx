@@ -96,7 +96,13 @@ function AuthSearchParamsSync({
 	return null;
 }
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+	children,
+	nonce,
+}: {
+	children: React.ReactNode;
+	nonce?: string;
+}) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [view, setView] = useState<"signIn" | "signUp">("signIn");
 	const [redirectTo, setRedirectTo] = useState<string | undefined>(undefined);
@@ -160,6 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			{children}
 			<AuthModalProvider
 				authClient={authClient}
+				cspNonce={nonce}
 				defaultView={view}
 				googleAuthEnabled={publicWebEnv.googleAuthEnabled}
 				onOpenChange={setIsOpen}
@@ -169,6 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				redirectTo={redirectTo}
 				socialRedirectTo={socialRedirectTo}
 				toast={toast}
+				turnstileSiteKey={publicWebEnv.turnstileSiteKey || undefined}
 			/>
 		</AuthContext.Provider>
 	);

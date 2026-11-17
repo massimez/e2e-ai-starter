@@ -9,6 +9,7 @@ import { ensureDefaultOrganizationRoles } from "../../modules/roles/service";
 import { APP_CONFIG } from "../app-config";
 import { logDebug, logError, logInfo, logWarning } from "../logger";
 import { redis } from "../redis/client";
+import { createAuthCaptchaPlugin } from "./captcha";
 import { createOrganizationLifecycleHooks } from "./organization-lifecycle";
 import { ac, roles } from "./permissions";
 
@@ -16,6 +17,11 @@ const orgLifecycle = createOrganizationLifecycleHooks(undefined, {
 	onOrganizationCreated: async (organizationId) => {
 		await ensureDefaultOrganizationRoles(organizationId);
 	},
+});
+
+const captchaPlugin = createAuthCaptchaPlugin({
+	allowedHostnames: env.TURNSTILE_ALLOWED_HOSTNAMES_LIST,
+	secretKey: env.TURNSTILE_SECRET_KEY,
 });
 
 const BETTER_AUTH_PREFIX_REGEX = /^\[better-auth\]\s*/iu;
@@ -192,6 +198,7 @@ export const auth = betterAuth({
 				});
 			},
 		}),
+		...(captchaPlugin ? [captchaPlugin] : []),
 	],
 	secondaryStorage: {
 		delete: async (key) => {

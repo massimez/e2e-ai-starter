@@ -63,6 +63,12 @@
       "reset_otp_sent": "Password reset OTP sent to your email.",
       "password_reset_success": "Your password has been reset successfully!",
       "otp_resent": "OTP resent to your email."
+    },
+    "captcha": {
+      "verifying": "Completing security check...",
+      "failed": "Security verification failed. Please try again.",
+      "unavailable": "Security check could not load. Please disable any blockers for this site or retry.",
+      "retry": "Retry security check"
     }
   },
   "fr": {
@@ -129,6 +135,12 @@
       "reset_otp_sent": "OTP de réinitialisation envoyé à votre email.",
       "password_reset_success": "Votre mot de passe a été réinitialisé avec succès !",
       "otp_resent": "OTP renvoyé à votre email."
+    },
+    "captcha": {
+      "verifying": "Vérification de sécurité en cours...",
+      "failed": "La vérification de sécurité a échoué. Veuillez réessayer.",
+      "unavailable": "La vérification de sécurité n'a pas pu se charger. Veuillez désactiver les bloqueurs ou réessayer.",
+      "retry": "Réessayer la vérification"
     }
   },
   "ar": {
@@ -195,6 +207,12 @@
       "reset_otp_sent": "تم إرسال رمز إعادة تعيين كلمة المرور إلى بريدك الإلكتروني.",
       "password_reset_success": "تم إعادة تعيين كلمة المرور بنجاح!",
       "otp_resent": "تم إعادة إرسال رمز التحقق إلى بريدك الإلكتروني."
+    },
+    "captcha": {
+      "verifying": "جارٍ إكمال التحقق الأمني...",
+      "failed": "فشل التحقق الأمني. يرجى المحاولة مرة أخرى.",
+      "unavailable": "تعذر تحميل التحقق الأمني. يرجى تعطيل أدوات الحظر أو المحاولة مرة أخرى.",
+      "retry": "إعادة محاولة التحقق"
     }
   }
 }

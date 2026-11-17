@@ -11,18 +11,20 @@ import { GoogleIcon } from "@workspace/ui/components/icons/brands/google-icon";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { type FormEvent, useId, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useRef, useState } from "react";
 import type defaultTranslations from "./translations.json";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
 export const SignIn = ({
+	captchaSlot,
 	onLoginClick,
 	onSocialLoginClick,
 	onSignUpClick,
 	onForgetPasswordClick,
 	translations,
 }: {
+	captchaSlot?: ReactNode;
 	onLoginClick: (email: string, password: string) => Promise<void>;
 	onSocialLoginClick?: (name: string) => Promise<void>;
 	onSignUpClick: () => Promise<void>;
@@ -207,6 +209,8 @@ export const SignIn = ({
 						{formError}
 					</p>
 				) : null}
+
+				{captchaSlot}
 
 				<Button
 					className="h-12 w-full text-base font-medium"

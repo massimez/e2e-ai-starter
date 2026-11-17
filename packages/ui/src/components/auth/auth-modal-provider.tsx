@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeft } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { resolveSameOriginUrl } from "../../lib/utils";
 import { Dialog, DialogContent } from "../dialog";
 import { ForgetPassword } from "./forget-password";
@@ -13,6 +13,12 @@ import {
 import { SignIn } from "./sign-in";
 import { SignUp } from "./sign-up";
 import defaultTranslations from "./translations.json";
+import {
+	CaptchaUnavailableError,
+	type TurnstileHandle,
+	type TurnstileTranslations,
+	TurnstileWidget,
+} from "./turnstile-widget";
 
 type ViewType =
 	| "signIn"
@@ -20,6 +26,14 @@ type ViewType =
 	| "verificationOtp"
 	| "forgetPassword"
 	| "resetPasswordOtp";
+
+const VIEW_CAPTCHA_ACTION: Record<ViewType, string> = {
+	forgetPassword: "forget-password",
+	resetPasswordOtp: "reset-password",
+	signIn: "sign-in",
+	signUp: "sign-up",
+	verificationOtp: "otp",
+};
 
 interface AuthErrorLike {
 	code?: string;
@@ -32,6 +46,7 @@ interface AuthResponseLike {
 }
 
 interface AuthRequestOptions {
+	headers?: Record<string, string>;
 	onError?: (ctx: { error: AuthErrorLike }) => Promise<void> | void;
 	onSuccess?: () => Promise<void> | void;
 }
@@ -43,17 +58,23 @@ export interface AuthModalClient {
 			otp: string;
 			password: string;
 		}) => Promise<AuthResponseLike>;
-		sendVerificationOtp: (input: {
-			email: string;
-			type: "email-verification" | "forget-password" | "sign-in";
-		}) => Promise<AuthResponseLike>;
+		sendVerificationOtp: (
+			input: {
+				email: string;
+				type: "email-verification" | "forget-password" | "sign-in";
+			},
+			options?: AuthRequestOptions
+		) => Promise<AuthResponseLike>;
 		verifyEmail: (input: {
 			email: string;
 			otp: string;
 		}) => Promise<AuthResponseLike>;
 	};
 	forgetPassword: {
-		emailOtp: (input: { email: string }) => Promise<AuthResponseLike>;
+		emailOtp: (
+			input: { email: string },
+			options?: AuthRequestOptions
+		) => Promise<AuthResponseLike>;
 	};
 	signIn: {
 		email: (
@@ -82,6 +103,7 @@ export interface AuthModalClient {
 
 export interface AuthModalProviderProps {
 	authClient: AuthModalClient;
+	cspNonce?: string;
 	defaultView?: ViewType;
 	googleAuthEnabled?: boolean;
 	locale?: string;
@@ -98,6 +120,7 @@ export interface AuthModalProviderProps {
 		info: (message: string) => void;
 	};
 	translations?: typeof defaultTranslations.en;
+	turnstileSiteKey?: string;
 }
 
 function getLocaleTranslations(
@@ -115,8 +138,16 @@ function getLocaleTranslations(
 
 function formatAuthError(
 	error: AuthErrorLike | null | undefined,
-	fallback: string
+	fallback: string,
+	captchaTranslations?: TurnstileTranslations
 ): string {
+	if (
+		captchaTranslations &&
+		(error?.code === "VERIFICATION_FAILED" ||
+			error?.code === "MISSING_RESPONSE")
+	) {
+		return captchaTranslations.failed;
+	}
 	return error?.message || error?.statusText || fallback;
 }
 
@@ -126,6 +157,7 @@ export function AuthModalProvider({
 	defaultView = "signIn",
 	googleAuthEnabled = true,
 	authClient,
+	cspNonce,
 	locale,
 	onSignInSuccess,
 	onSignUpSuccess,
@@ -134,8 +166,11 @@ export function AuthModalProvider({
 	translations: translationsProp,
 	redirectTo,
 	socialRedirectTo,
+	turnstileSiteKey,
 }: AuthModalProviderProps) {
 	const translations = getLocaleTranslations(locale, translationsProp);
+	const captchaTranslations =
+		translations.captcha ?? defaultTranslations.en.captcha;
 
 	const [view, setView] = useState<ViewType>(defaultView);
 	const [verificationOrigin, setVerificationOrigin] = useState<
@@ -144,6 +179,9 @@ export function AuthModalProvider({
 	const [otpProps, setOtpProps] = useState<OtpVerificationProps | null>(null);
 	const [resetPasswordProps, setResetPasswordProps] =
 		useState<ResetPasswordOtpProps | null>(null);
+	const turnstileRef = useRef<TurnstileHandle>(null);
+	const isOpenRef = useRef(open);
+	isOpenRef.current = open;
 
 	// Sync internal view with defaultView when modal opens
 	useEffect(() => {
@@ -151,6 +189,38 @@ export function AuthModalProvider({
 			setView(defaultView);
 		}
 	}, [open, defaultView]);
+
+	const resetCaptcha = () => {
+		if (turnstileSiteKey && turnstileRef.current) {
+			turnstileRef.current.reset();
+		}
+	};
+
+	const acquireCaptchaHeaders = async (
+		forceRefresh = false
+	): Promise<Record<string, string> | undefined> => {
+		if (!turnstileSiteKey) {
+			return undefined;
+		}
+		const widget = turnstileRef.current;
+		if (!widget) {
+			throw new CaptchaUnavailableError(captchaTranslations.unavailable);
+		}
+		if (forceRefresh) {
+			widget.reset();
+		}
+		const token = await widget.getToken();
+		return { "x-captcha-response": token };
+	};
+
+	const showCaptchaAcquisitionError = (error: unknown) => {
+		if (!isOpenRef.current) {
+			return;
+		}
+		toast.error(
+			error instanceof Error ? error.message : captchaTranslations.unavailable
+		);
+	};
 
 	const handleOpenChange = (nextOpen: boolean) => {
 		if (!nextOpen) {
@@ -187,20 +257,38 @@ export function AuthModalProvider({
 				});
 
 				if (error) {
-					const message = formatAuthError(error, "Verification failed");
+					const message = formatAuthError(
+						error,
+						"Verification failed",
+						captchaTranslations
+					);
 					toast.error(message);
 					return { error: message };
 				}
 
 				toast.success(translations.notifications.email_verified);
-				const signInRes = await authClient.signIn.email({
-					email,
-					password,
-				});
+				let headers: Record<string, string> | undefined;
+				try {
+					headers = await acquireCaptchaHeaders();
+				} catch (captchaError) {
+					showCaptchaAcquisitionError(captchaError);
+					setView("signIn");
+					return;
+				}
+
+				const signInRes = await authClient.signIn.email(
+					{
+						email,
+						password,
+					},
+					headers ? { headers } : undefined
+				);
 				if (signInRes.error) {
+					resetCaptcha();
 					const message = formatAuthError(
 						signInRes.error,
-						"Email verified, but automatic sign-in failed. Please sign in manually."
+						"Email verified, but automatic sign-in failed. Please sign in manually.",
+						captchaTranslations
 					);
 					toast.error(message);
 					setView("signIn");
@@ -212,13 +300,28 @@ export function AuthModalProvider({
 				}
 			},
 			onResend: async () => {
-				const { error } = await authClient.emailOtp.sendVerificationOtp({
-					email,
-					type: "email-verification",
-				});
+				let headers: Record<string, string> | undefined;
+				try {
+					headers = await acquireCaptchaHeaders();
+				} catch (captchaError) {
+					showCaptchaAcquisitionError(captchaError);
+					return null;
+				}
+
+				const { error } = await authClient.emailOtp.sendVerificationOtp(
+					{
+						email,
+						type: "email-verification",
+					},
+					headers ? { headers } : undefined
+				);
+
+				resetCaptcha();
 
 				if (error) {
-					toast.error(formatAuthError(error, "Failed to resend OTP"));
+					toast.error(
+						formatAuthError(error, "Failed to resend OTP", captchaTranslations)
+					);
 					return null;
 				}
 
@@ -230,12 +333,21 @@ export function AuthModalProvider({
 	};
 
 	const handleSignIn = async (email: string, password: string) => {
+		let headers: Record<string, string> | undefined;
+		try {
+			headers = await acquireCaptchaHeaders();
+		} catch (captchaError) {
+			showCaptchaAcquisitionError(captchaError);
+			return;
+		}
+
 		await authClient.signIn.email(
 			{
 				email,
 				password,
 			},
 			{
+				...(headers ? { headers } : {}),
 				onSuccess: () => {
 					toast.success(translations.notifications.signed_in);
 					if (onSignInSuccess) {
@@ -246,14 +358,30 @@ export function AuthModalProvider({
 				},
 				onError: async (ctx) => {
 					if (ctx.error.code === "EMAIL_NOT_VERIFIED") {
+						let resendHeaders: Record<string, string> | undefined;
+						try {
+							resendHeaders = await acquireCaptchaHeaders(true);
+						} catch (captchaError) {
+							showCaptchaAcquisitionError(captchaError);
+							return;
+						}
+
 						const { error: otpError } =
-							await authClient.emailOtp.sendVerificationOtp({
-								email,
-								type: "email-verification",
-							});
+							await authClient.emailOtp.sendVerificationOtp(
+								{
+									email,
+									type: "email-verification",
+								},
+								resendHeaders ? { headers: resendHeaders } : undefined
+							);
 						if (otpError) {
+							resetCaptcha();
 							toast.error(
-								formatAuthError(otpError, "Failed to send verification code")
+								formatAuthError(
+									otpError,
+									"Failed to send verification code",
+									captchaTranslations
+								)
 							);
 							return;
 						}
@@ -264,7 +392,14 @@ export function AuthModalProvider({
 							onVerificationSuccess: onSignInSuccess,
 						});
 					} else {
-						toast.error(formatAuthError(ctx.error, "Failed to sign in"));
+						resetCaptcha();
+						toast.error(
+							formatAuthError(
+								ctx.error,
+								"Failed to sign in",
+								captchaTranslations
+							)
+						);
 					}
 				},
 			}
@@ -285,7 +420,11 @@ export function AuthModalProvider({
 			{
 				onError: (ctx) => {
 					toast.error(
-						formatAuthError(ctx.error, "Social authentication failed")
+						formatAuthError(
+							ctx.error,
+							"Social authentication failed",
+							captchaTranslations
+						)
 					);
 				},
 			}
@@ -298,6 +437,14 @@ export function AuthModalProvider({
 		firstName: string;
 		lastName: string;
 	}) => {
+		let headers: Record<string, string> | undefined;
+		try {
+			headers = await acquireCaptchaHeaders();
+		} catch (captchaError) {
+			showCaptchaAcquisitionError(captchaError);
+			return;
+		}
+
 		const trimmedFirst = data.firstName.trim();
 		const trimmedLast = data.lastName.trim();
 		await authClient.signUp.email(
@@ -310,6 +457,7 @@ export function AuthModalProvider({
 				...(locale ? { locale } : {}),
 			},
 			{
+				...(headers ? { headers } : {}),
 				onSuccess: () => {
 					handleVerification({
 						email: data.email,
@@ -319,19 +467,40 @@ export function AuthModalProvider({
 					});
 				},
 				onError: (ctx) => {
-					toast.error(formatAuthError(ctx.error, "Failed to create account"));
+					resetCaptcha();
+					toast.error(
+						formatAuthError(
+							ctx.error,
+							"Failed to create account",
+							captchaTranslations
+						)
+					);
 				},
 			}
 		);
 	};
 
 	const handleSendResetCode = async (email: string) => {
-		const { error } = await authClient.forgetPassword.emailOtp({
-			email,
-		});
+		let headers: Record<string, string> | undefined;
+		try {
+			headers = await acquireCaptchaHeaders();
+		} catch (captchaError) {
+			showCaptchaAcquisitionError(captchaError);
+			return;
+		}
+
+		const { error } = await authClient.forgetPassword.emailOtp(
+			{
+				email,
+			},
+			headers ? { headers } : undefined
+		);
 
 		if (error) {
-			toast.error(formatAuthError(error, "Failed to send reset code"));
+			resetCaptcha();
+			toast.error(
+				formatAuthError(error, "Failed to send reset code", captchaTranslations)
+			);
 			return;
 		}
 
@@ -352,7 +521,13 @@ export function AuthModalProvider({
 				});
 
 				if (resetError) {
-					toast.error(formatAuthError(resetError, "Failed to reset password"));
+					toast.error(
+						formatAuthError(
+							resetError,
+							"Failed to reset password",
+							captchaTranslations
+						)
+					);
 					return;
 				}
 
@@ -362,13 +537,29 @@ export function AuthModalProvider({
 				onPasswordResetSuccess?.();
 			},
 			onResendOtp: async () => {
+				let resendHeaders: Record<string, string> | undefined;
+				try {
+					resendHeaders = await acquireCaptchaHeaders();
+				} catch (captchaError) {
+					showCaptchaAcquisitionError(captchaError);
+					return;
+				}
+
 				const { error: resendError } = await authClient.forgetPassword.emailOtp(
 					{
 						email,
-					}
+					},
+					resendHeaders ? { headers: resendHeaders } : undefined
 				);
+				resetCaptcha();
 				if (resendError) {
-					toast.error(formatAuthError(resendError, "Failed to resend OTP"));
+					toast.error(
+						formatAuthError(
+							resendError,
+							"Failed to resend OTP",
+							captchaTranslations
+						)
+					);
 				} else {
 					toast.success(translations.notifications.otp_resent);
 				}
@@ -389,12 +580,26 @@ export function AuthModalProvider({
 		}
 	};
 
+	const captchaSlot =
+		open && turnstileSiteKey ? (
+			<TurnstileWidget
+				action={VIEW_CAPTCHA_ACTION[view]}
+				key={view}
+				language={locale}
+				nonce={cspNonce}
+				ref={turnstileRef}
+				siteKey={turnstileSiteKey}
+				translations={captchaTranslations}
+			/>
+		) : null;
+
 	const renderActiveView = () => {
 		const socialHandler = googleAuthEnabled ? handleSocialLogin : undefined;
 		switch (view) {
 			case "signUp":
 				return (
 					<SignUp
+						captchaSlot={captchaSlot}
 						onClickCreateAccount={handleSignUp}
 						onClickSignIn={() => setView("signIn")}
 						onSocialLoginClick={socialHandler}
@@ -404,6 +609,7 @@ export function AuthModalProvider({
 			case "forgetPassword":
 				return (
 					<ForgetPassword
+						captchaSlot={captchaSlot}
 						openSignIn={() => setView("signIn")}
 						sentResetCode={handleSendResetCode}
 						translations={translations.forgetPassword}
@@ -411,10 +617,16 @@ export function AuthModalProvider({
 				);
 			case "resetPasswordOtp":
 				if (resetPasswordProps) {
-					return <ResetPasswordOtp {...resetPasswordProps} />;
+					return (
+						<ResetPasswordOtp
+							{...resetPasswordProps}
+							captchaSlot={captchaSlot}
+						/>
+					);
 				}
 				return (
 					<ForgetPassword
+						captchaSlot={captchaSlot}
 						openSignIn={() => setView("signIn")}
 						sentResetCode={handleSendResetCode}
 						translations={translations.forgetPassword}
@@ -422,10 +634,11 @@ export function AuthModalProvider({
 				);
 			case "verificationOtp":
 				if (otpProps) {
-					return <OtpVerification {...otpProps} />;
+					return <OtpVerification {...otpProps} captchaSlot={captchaSlot} />;
 				}
 				return (
 					<SignIn
+						captchaSlot={captchaSlot}
 						onForgetPasswordClick={async () => setView("forgetPassword")}
 						onLoginClick={handleSignIn}
 						onSignUpClick={async () => setView("signUp")}
@@ -436,6 +649,7 @@ export function AuthModalProvider({
 			default:
 				return (
 					<SignIn
+						captchaSlot={captchaSlot}
 						onForgetPasswordClick={async () => setView("forgetPassword")}
 						onLoginClick={handleSignIn}
 						onSignUpClick={async () => setView("signUp")}

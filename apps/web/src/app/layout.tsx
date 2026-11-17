@@ -85,7 +85,7 @@ export default async function RootLayout({
 					nonce={nonce}
 				>
 					<QueryProvider>
-						<AuthProvider>
+						<AuthProvider nonce={nonce}>
 							{children}
 							<Toaster position="bottom-right" richColors />
 						</AuthProvider>

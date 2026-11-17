@@ -11,10 +11,11 @@ import { Input } from "@workspace/ui/components/input";
 import OtpInput from "@workspace/ui/components/inputs/otp";
 import { Label } from "@workspace/ui/components/label";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { type FormEvent, useId, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useRef, useState } from "react";
 import type defaultTranslations from "./translations.json";
 
 export interface ResetPasswordOtpProps {
+	captchaSlot?: ReactNode;
 	email: string;
 	handleResetPassword: (
 		email: string,
@@ -26,6 +27,7 @@ export interface ResetPasswordOtpProps {
 }
 
 export const ResetPasswordOtp = ({
+	captchaSlot,
 	email,
 	handleResetPassword,
 	onResendOtp,
@@ -162,6 +164,8 @@ export const ResetPasswordOtp = ({
 						{formError}
 					</p>
 				) : null}
+
+				{captchaSlot}
 
 				<Button
 					className="h-12 w-full text-base font-medium"
