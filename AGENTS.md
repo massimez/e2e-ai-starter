@@ -11,6 +11,8 @@ This is a Bun workspaces monorepo using Turborepo:
 - `packages/ui`: Shared React components, complete auth modal/form flows, and 11 brand icons (`src/components/icons/brands/*`, rendered in `apps/web` `SiteFooter`).
 - `.agents/skills`: Specialized agent skills for architecture, security, design, and Next.js best practices.
 - `.planning/codebase`: System architecture, conventions, and integration specs for AI context.
+- `docs/specs`: Optional short design specs (`YYYY-MM-DD-<feature>-design.md`) for major or radical changes.
+- `docs/DECISIONS.md`: Lightweight log of major architectural changes and replaced core tools (`D1`, `D2`, ...).
 
 ## Build, Test, and Development Commands
 
@@ -41,3 +43,7 @@ This is a Bun workspaces monorepo using Turborepo:
   - `apps/web` forwards browser `/api/*` requests via `next.config.ts` rewrites to `INTERNAL_API_URL || NEXT_PUBLIC_API_URL || "http://localhost:3001"` and verifies server sessions via `getServerSession()`.
   - Shared constants (RBAC role/permission matrices, storage allowlists, queue names, notification categories/channels, app branding defaults) live in concrete `apps/api` modules and are exported via pure `@workspace/api/{config,permissions,queues,storage}` subpaths.
   - `@workspace/ai-core` (`packages/ai-core`) depends only on Mastra, AI SDK, Zod, Drizzle, and `@workspace/db`—never `@workspace/api`—and persists Mastra state/vectors via `PostgresStore` + `PgVector` (`pgvector/pgvector:pg16`) inside `MASTRA_DB_SCHEMA` (`mastra`). AI env vars (`MASTRA_DEFAULT_MODEL`, provider keys `GOOGLE_GENERATIVE_AI_API_KEY`/`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`, `MASTRA_EMBEDDING_MODEL` (google/* or openai/*), `MASTRA_EMBEDDING_DIMENSIONS`, `MASTRA_DB_SCHEMA`) live at root `.env`. Add new providers in `AI_PROVIDERS` (`packages/ai-core/src/contracts.ts`) and `apps/api/src/env.ts`.
+
+## Architecture Decisions Rule (Major Changes Only)
+
+Skip `docs/DECISIONS.md` for routine features, UI edits, and normal bug fixes. Append a short `### D<n>. ...` entry to `docs/DECISIONS.md` **only** for major architectural pivots, replaced core tools/abstractions, non-obvious "do not undo" constraints, or major AI eval baselines — with **Context**, **Decision**, and **Why** citing exact file paths and symbol names.
