@@ -69,6 +69,21 @@ describe("API environment validation", () => {
 			"10.0.0.0/8",
 			"172.16.0.1",
 		]);
+		expect(parsed.TURNSTILE_SECRET_KEY).toBe("");
+		expect(parsed.TURNSTILE_ALLOWED_HOSTNAMES_LIST).toEqual([]);
+	});
+
+	test("parses Turnstile secret key and allowed hostnames list", () => {
+		const parsed = parseApiEnv({
+			NODE_ENV: "development",
+			TURNSTILE_ALLOWED_HOSTNAMES: "app.example.com, localhost",
+			TURNSTILE_SECRET_KEY: "  test-turnstile-secret  ",
+		});
+		expect(parsed.TURNSTILE_SECRET_KEY).toBe("test-turnstile-secret");
+		expect(parsed.TURNSTILE_ALLOWED_HOSTNAMES_LIST).toEqual([
+			"app.example.com",
+			"localhost",
+		]);
 	});
 });
 

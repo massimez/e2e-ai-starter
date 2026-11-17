@@ -19,10 +19,18 @@ describe("@workspace/web environment validation", () => {
 		}
 	});
 
-	test("validates optional web URLs and google auth flag", () => {
+	test("validates optional web URLs and feature flags", () => {
 		const parsed = parseServerWebEnv({});
 		expect(parsed.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED).toBe("false");
+		expect(parsed.NEXT_PUBLIC_TURNSTILE_SITE_KEY).toBe("");
 		expect(parsed.INTERNAL_API_URL).toBe("");
+
+		const withTurnstile = parseServerWebEnv({
+			NEXT_PUBLIC_TURNSTILE_SITE_KEY: "  1x00000000000000000000AA  ",
+		});
+		expect(withTurnstile.NEXT_PUBLIC_TURNSTILE_SITE_KEY).toBe(
+			"1x00000000000000000000AA"
+		);
 
 		expect(() =>
 			parseServerWebEnv({
@@ -48,6 +56,7 @@ describe("@workspace/web environment validation", () => {
 			"apiUrl",
 			"appUrl",
 			"googleAuthEnabled",
+			"turnstileSiteKey",
 			"vapidPublicKey",
 		]);
 	});
