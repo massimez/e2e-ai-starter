@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { isBlockedIpAddress } from "@workspace/shared/network";
 import { Hono } from "hono";
 import { parseApiEnv } from "../src/env";
 import {
@@ -10,7 +11,6 @@ import {
 import { incrementFallbackCounter } from "../src/lib/auth/secondary-storage";
 import type { AppEnv } from "../src/lib/create-hono-app";
 import { isPgErrorCode } from "../src/lib/errors";
-import { isBlockedIpAddress } from "../src/lib/network";
 import {
 	createAccessAuditMiddleware,
 	drainAuditLogs,
@@ -201,44 +201,21 @@ describe("audit path detection and access audit middleware", () => {
 		expect(recorded[1]?.organizationId).toBe("org_1");
 		expect(recorded[1]?.userId).toBe("user_1");
 	});
+});
 
-	test("extracts entityType and entityId from nested organization role paths", async () => {
-		const recorded: AuditLogRecord[] = [];
-		const roleId = "12345678-1234-4234-8234-123456789012";
-		const app = new Hono<AppEnv>()
-			.use("*", async (c, next) => {
-				c.set("user", { id: "user_1" } as never);
-				c.set("session", { activeOrganizationId: "org_1" } as never);
-				await next();
-			})
-			.use(
-				"*",
-				createAccessAuditMiddleware({
-					scope: "app",
-					writeAuditLog: (record) => {
-						recorded.push(record);
-						return Promise.resolve();
-					},
-				})
-			)
-			.put("/api/organizations/roles/:id", (c) => c.json({ ok: true }))
-			.post("/api/organizations/roles/:id/clone", (c) =>
-				c.json({ ok: true }, 201)
-			);
-
-		await app.request(`/api/organizations/roles/${roleId}`, { method: "PUT" });
-		await app.request(`/api/organizations/roles/${roleId}/clone`, {
-			method: "POST",
+describe("errors and fallback counter", () => {
+	test("allows production startup with QUEUE_DRIVER=inline without Redis", () => {
+		const parsed = parseApiEnv({
+			BETTER_AUTH_SECRET: "production_secret_with_at_least_32_characters_total",
+			BETTER_AUTH_URL: "https://api.example.com",
+			CORS_ORIGIN: "https://app.example.com",
+			DATABASE_URL: "postgresql://user:pass@db.internal:5432/app",
+			NODE_ENV: "production",
+			QUEUE_DRIVER: "inline",
+			S3_ACCESS_KEY_ID: "prod-access-key",
+			S3_SECRET_ACCESS_KEY: "prod-secret-key",
 		});
-		await drainAuditLogs();
-
-		expect(recorded).toHaveLength(2);
-		expect(recorded[0]?.entityType).toBe("organizations/roles");
-		expect(recorded[0]?.entityId).toBe(roleId);
-		expect(recorded[0]?.action).toBe("app.organizations/roles.update");
-		expect(recorded[1]?.entityType).toBe("organizations/roles");
-		expect(recorded[1]?.entityId).toBe(roleId);
-		expect(recorded[1]?.action).toBe("app.organizations/roles.create");
+		expect(parsed.QUEUE_DRIVER).toBe("inline");
 	});
 
 	test("isPgErrorCode matches direct and wrapped Postgres error codes", () => {

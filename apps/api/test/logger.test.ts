@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { Hono } from "hono";
-import { parseApiEnv } from "../src/env";
-import type { AppEnv } from "../src/lib/create-hono-app";
-import { AppError, AuthError } from "../src/lib/errors";
 import {
 	createLogger,
 	type LoggerSink,
 	redactRequestLog,
 	sanitizeRequestPath,
-} from "../src/lib/logger";
+} from "@workspace/shared/logger";
+import { Hono } from "hono";
+import { parseApiEnv } from "../src/env";
+import type { AppEnv } from "../src/lib/create-hono-app";
+import { AppError, AuthError } from "../src/lib/errors";
 import { httpLoggerMiddleware } from "../src/middleware/http-logger";
 import { requestIdMiddleware } from "../src/middleware/request-id";
 

@@ -38,13 +38,14 @@ describe("database connection builder and schema exports", () => {
 		expect(schema.user).toBeDefined();
 		expect(schema.session).toBeDefined();
 		expect(schema.organization).toBeDefined();
+		expect(schema.organizationRole).toBeDefined();
 		expect(schema.member).toBeDefined();
 		expect(schema.invitation).toBeDefined();
-		expect(schema.auditLog).toBeDefined();
 		expect(schema.uploads).toBeDefined();
 		expect(schema.organizationStorageLimits).toBeDefined();
 		expect(schema.notification).toBeDefined();
 		expect(schema.notificationPreference).toBeDefined();
 		expect(schema.pushSubscription).toBeDefined();
+		expect(schema.auditLog).toBeDefined();
 	});
 });

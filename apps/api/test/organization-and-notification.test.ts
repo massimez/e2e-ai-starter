@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { db } from "@workspace/db";
 import { Hono } from "hono";
+import { auth } from "../src/lib/auth";
 import type { AppEnv } from "../src/lib/create-hono-app";
+import { hasOrgPermission } from "../src/middleware/org-permission";
 import { notificationQueue } from "../src/modules/notification/queue";
 import { notificationRoutes } from "../src/modules/notification/route";
 import {
@@ -11,7 +13,6 @@ import {
 import { organizationRoutes } from "../src/modules/organization/route";
 import { updateOrganizationSchema } from "../src/modules/organization/schema";
 import { transferOwnership } from "../src/modules/organization/service";
-import { rolesService } from "../src/modules/roles/service";
 
 function createQueryChain<T>(result: T) {
 	const chain = {
@@ -364,18 +365,25 @@ describe("notification routes and fan-out controls", () => {
 	});
 
 	test("sendToOrganizationAdmins deduplicates and fans out to owners and roles with notification:manage", async () => {
-		spyOn(db, "select").mockImplementation((() =>
-			createQueryChain([
-				{ role: "owner", userId: "user_1" },
-				{ role: "admin, member", userId: "user_2" },
-				{ role: "admin", userId: "user_1" },
-				{ role: "ops-lead", userId: "user_3" },
-				{ role: "viewer", userId: "user_4" },
-			])) as never);
-		spyOn(rolesService, "getRoleSlugsWithPermission").mockResolvedValue([
-			"admin",
-			"ops-lead",
-		]);
+		let selectCall = 0;
+		spyOn(db, "select").mockImplementation((() => {
+			selectCall += 1;
+			if (selectCall === 1) {
+				return createQueryChain([
+					{ role: "owner", userId: "user_1" },
+					{ role: "admin, member", userId: "user_2" },
+					{ role: "admin", userId: "user_1" },
+					{ role: "ops-lead", userId: "user_3" },
+					{ role: "viewer", userId: "user_4" },
+				]);
+			}
+			return createQueryChain([
+				{
+					permission: JSON.stringify({ notification: ["read", "manage"] }),
+					role: "ops-lead",
+				},
+			]);
+		}) as never);
 
 		const addBulkSpy = spyOn(notificationQueue, "addBulk").mockResolvedValue(
 			[] as never
@@ -398,5 +406,32 @@ describe("notification routes and fan-out controls", () => {
 			"user_3",
 		]);
 		expect(jobs.every((j) => j.data.organizationId === "org_1")).toBe(true);
+	});
+
+	test("hasOrgPermission enforces Better Auth dynamic RBAC and caches repeated checks", async () => {
+		const permApp = new Hono<AppEnv>()
+			.use("*", async (c, next) => {
+				c.set("user", { id: "user_1" } as never);
+				c.set("session", { activeOrganizationId: "org_1" } as never);
+				await next();
+			})
+			.get(
+				"/protected",
+				hasOrgPermission("storage:read"),
+				hasOrgPermission("storage:read"),
+				(c) => c.json({ ok: true })
+			);
+
+		const permSpy = spyOn(auth.api, "hasPermission").mockResolvedValue({
+			error: null,
+			success: true,
+		});
+		const allowedRes = await permApp.request("/protected");
+		expect(allowedRes.status).toBe(200);
+		expect(permSpy).toHaveBeenCalledTimes(1);
+
+		permSpy.mockResolvedValueOnce({ error: null, success: false });
+		const deniedRes = await permApp.request("/protected");
+		expect(deniedRes.status).toBe(403);
 	});
 });

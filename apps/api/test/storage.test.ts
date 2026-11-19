@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { S3Client } from "@aws-sdk/client-s3";
 import { db } from "@workspace/db";
+import { STORAGE_CONFIG } from "@workspace/shared/storage";
 import { env } from "../src/env";
 import { generateStorageKey, sanitizeFileName } from "../src/lib/storage";
-import { STORAGE_CONFIG } from "../src/modules/storage/config";
 import {
 	commitUploadsSchema,
 	deleteUploadBodySchema,
@@ -298,8 +298,8 @@ describe("storage service controls and route guards", () => {
 
 		const originalKeyId = env.S3_ACCESS_KEY_ID;
 		const originalSecret = env.S3_SECRET_ACCESS_KEY;
-		env.S3_ACCESS_KEY_ID = undefined;
-		env.S3_SECRET_ACCESS_KEY = undefined;
+		env.S3_ACCESS_KEY_ID = "";
+		env.S3_SECRET_ACCESS_KEY = "";
 
 		try {
 			await expect(

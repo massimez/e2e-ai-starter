@@ -4,7 +4,7 @@ import {
 	PERMISSION_MATRIX,
 	roleAllows,
 	roles,
-} from "../src/lib/auth/permissions";
+} from "@workspace/shared/permissions";
 import {
 	EMAIL_QUEUE_NAME,
 	emailJobDataSchema,
@@ -12,13 +12,13 @@ import {
 	NOTIFICATION_CHANNELS,
 	NOTIFICATION_QUEUE_NAME,
 	notificationJobDataSchema,
-} from "../src/lib/queues";
+} from "@workspace/shared/queues";
 import {
 	formatBytes,
 	isAllowedContentType,
 	isValidFileSize,
 	STORAGE_CONFIG,
-} from "../src/modules/storage/config";
+} from "@workspace/shared/storage";
 
 describe("shared RBAC permissions contract", () => {
 	test("defines owner, admin, member, and viewer roles consistently", () => {
@@ -30,8 +30,8 @@ describe("shared RBAC permissions contract", () => {
 		expect(roleAllows("admin", "member", "create")).toBe(true);
 		expect(roleAllows("member", "storage", "create")).toBe(true);
 		expect(roleAllows("member", "member", "delete")).toBe(false);
-		expect(roleAllows("viewer", "project", "read")).toBe(true);
-		expect(roleAllows("viewer", "project", "create")).toBe(false);
+		expect(roleAllows("viewer", "ai", "read")).toBe(true);
+		expect(roleAllows("viewer", "ai", "execute")).toBe(false);
 	});
 
 	test("PERMISSION_MATRIX entries cover documented role capabilities", () => {

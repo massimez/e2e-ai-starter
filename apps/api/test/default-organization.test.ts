@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { ac, roles } from "@workspace/shared/permissions";
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { organization } from "better-auth/plugins";
 import { auth } from "../src/lib/auth";
 import { createOrganizationLifecycleHooks } from "../src/lib/auth/organization-lifecycle";
-import { ac, roles } from "../src/lib/auth/permissions";
 import {
 	type DefaultOrganizationStore,
 	enforceActiveOnOrganizationCreateBody,

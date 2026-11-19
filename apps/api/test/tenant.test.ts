@@ -152,22 +152,7 @@ describe("tenant boundary middleware", () => {
 		}
 	);
 
-	test.each(["POST", "PUT", "PATCH", "DELETE"])(
-		"rejects cross-tenant organizationId in %s JSON body",
-		async (method) => {
-			const mismatches: TenantMismatchSecurityEvent[] = [];
-			const res = await createTenantApp(mismatches).request("/records/1", {
-				body: JSON.stringify({ name: "hijack", organizationId: TENANT_B }),
-				headers: { "content-type": "application/json" },
-				method,
-			});
-
-			expect(res.status).toBe(403);
-			expect(mismatches[0]?.source).toBe("body");
-		}
-	);
-
-	test("keeps the request body readable for downstream validators", async () => {
+	test("does not inspect request bodies and leaves them readable downstream", async () => {
 		const app = new Hono()
 			.use("*", async (c, next) => {
 				c.set("session" as never, { activeOrganizationId: TENANT_A } as never);
