@@ -29,7 +29,7 @@ export class ApiError extends Error {
 
 function getBrowserApiBaseUrl(): string {
 	if (typeof window !== "undefined") {
-		// Next.js rewrites /api/* -> Hono backend transparently on same origin
+		// Next.js proxies /api/* -> Hono backend at runtime on same origin
 		return window.location.origin;
 	}
 	return getInternalApiUrl();
@@ -92,12 +92,33 @@ export async function fetchWithTimeout(
 
 export type TypedApiClient = ReturnType<typeof hc<AppType>>;
 
+const WORKFLOW_TIMEOUT_MS = 60_000;
+
+function resolveRequestUrl(input: RequestInfo | URL): string {
+	if (typeof input === "string") {
+		return input;
+	}
+	if (input instanceof URL) {
+		return input.href;
+	}
+	return input.url;
+}
+
 export const client: TypedApiClient = hc<AppType>(getBrowserApiBaseUrl(), {
-	fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-		fetchWithTimeout(input, {
-			credentials: "include",
-			...init,
-		}),
+	fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = resolveRequestUrl(input);
+		const timeoutMs = url.includes("/api/ai/workflows/")
+			? WORKFLOW_TIMEOUT_MS
+			: DEFAULT_TIMEOUT_MS;
+		return fetchWithTimeout(
+			input,
+			{
+				credentials: "include",
+				...init,
+			},
+			timeoutMs
+		);
+	},
 });
 
 export async function parseApiResponse<T>(response: Response): Promise<T> {
