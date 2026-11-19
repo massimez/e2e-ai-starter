@@ -37,18 +37,16 @@ for (const [network, prefix] of [
 	["198.18.0.0", 15],
 	["198.51.100.0", 24],
 	["203.0.113.0", 24],
-	["224.0.0.0", 3], // multicast (224.0.0.0/4) + reserved (240.0.0.0/4)
+	["224.0.0.0", 3],
 ] as const) {
 	BLOCKED_IPV4_LIST.addSubnet(network, prefix, "ipv4");
 }
 
 const BLOCKED_IPV6_LIST = new BlockList();
 for (const [network, prefix] of [
-	// Allow only Global Unicast (2000::/3), blocking unspecified, loopback, ULA, link-local, NAT64, etc.
 	["::", 3],
 	["4000::", 2],
 	["8000::", 1],
-	// Block Teredo (2001::/32), ORCHID (2001:10::/28), documentation (2001:db8::/32), and 6to4 (2002::/16)
 	["2001::", 32],
 	["2001:10::", 28],
 	["2001:db8::", 32],
@@ -95,8 +93,7 @@ export type PushEndpointValidationResult =
 
 /**
  * Validates that a Web Push subscription endpoint is strictly HTTPS, contains no
- * embedded credentials or non-443 ports, targets a multi-label public domain name
- * (no raw IP literals, localhost, `.local`, `.internal`, or `.arpa`), and stays within length limits.
+ * embedded credentials or non-443 ports, and targets a multi-label public domain name.
  */
 export function validatePushEndpointUrl(
 	endpoint: string

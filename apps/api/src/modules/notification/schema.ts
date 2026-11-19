@@ -1,9 +1,9 @@
-import { z } from "zod";
-import { validatePushEndpointUrl } from "../../lib/network";
+import { validatePushEndpointUrl } from "@workspace/shared/network";
 import {
 	notificationCategorySchema,
 	notificationChannelSchema,
-} from "../../lib/queues";
+} from "@workspace/shared/queues";
+import { z } from "zod";
 
 export const notificationIdParamSchema = z.object({
 	id: z.string().uuid("Invalid notification ID"),

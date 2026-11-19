@@ -5,7 +5,7 @@ import {
 	NOTIFICATION_CHANNELS,
 	type NotificationCategory,
 	type NotificationChannel,
-} from "@workspace/api/queues";
+} from "@workspace/shared/queues";
 import { Switch } from "@workspace/ui/components/switch";
 import {
 	AlertCircle,

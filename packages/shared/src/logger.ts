@@ -1,5 +1,5 @@
+import { createRequire } from "node:module";
 import pino, { type DestinationStream } from "pino";
-import { prettyFactory } from "pino-pretty";
 
 export const LOG_LEVELS = ["debug", "info", "warn", "error", "silent"] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
@@ -58,35 +58,17 @@ const BEARER_HEADER_REGEX = /\b(?<scheme>Bearer\s+)[A-Za-z0-9._~+/-]+=*/giu;
 const CAMEL_TO_SNAKE_REGEX = /(?<lower>[a-z0-9])(?<upper>[A-Z])/gu;
 const KEY_SEPARATOR_REGEX = /[_-]/gu;
 
-const SENSITIVE_QUERY_KEYS = new Set([
+const SENSITIVE_KEYS = new Set([
 	"accesstoken",
 	"apikey",
 	"auth",
-	"code",
-	"credential",
-	"idtoken",
-	"jwt",
-	"passwd",
-	"password",
-	"privatekey",
-	"refreshtoken",
-	"secret",
-	"secretkey",
-	"sessiontoken",
-	"sig",
-	"signature",
-	"state",
-	"token",
-]);
-
-const SENSITIVE_METADATA_EXACT = new Set([
-	"accesstoken",
-	"apikey",
 	"authorization",
+	"code",
 	"cookie",
 	"credential",
 	"credentials",
 	"idtoken",
+	"jwt",
 	"otp",
 	"otpcode",
 	"passwd",
@@ -94,15 +76,17 @@ const SENSITIVE_METADATA_EXACT = new Set([
 	"privatekey",
 	"refreshtoken",
 	"secret",
+	"secretkey",
 	"sessiontoken",
 	"setcookie",
 	"sig",
 	"signature",
+	"state",
 	"token",
 	"verificationcode",
 ]);
 
-const SENSITIVE_METADATA_SUFFIXES = [
+const SENSITIVE_SUFFIXES = [
 	"_password",
 	"_passwd",
 	"_secret",
@@ -124,95 +108,80 @@ const RESERVED_ROOT_KEYS = new Set([
 	"timestamp",
 ]);
 
-function normalizeKeyForMatch(key: string): string {
+function normalizeKey(key: string): string {
 	return key.toLowerCase().replace(KEY_SEPARATOR_REGEX, "");
 }
 
-function isSensitiveMetadataKey(key: string): boolean {
-	if (SENSITIVE_METADATA_EXACT.has(normalizeKeyForMatch(key))) {
+function isSensitiveKey(key: string): boolean {
+	if (SENSITIVE_KEYS.has(normalizeKey(key))) {
 		return true;
 	}
 	const snake = key
 		.replace(CAMEL_TO_SNAKE_REGEX, "$<lower>_$<upper>")
 		.toLowerCase();
-	return SENSITIVE_METADATA_SUFFIXES.some((suffix) => snake.endsWith(suffix));
+	return SENSITIVE_SUFFIXES.some((suffix) => snake.endsWith(suffix));
 }
 
-function safeDecode(value: string): string {
-	try {
-		return decodeURIComponent(value);
-	} catch {
-		return value;
-	}
-}
-
-function scrubStringSecrets(value: string): string {
+function scrubString(value: string): string {
 	return value
 		.replace(URL_USERINFO_REGEX, "$<scheme>[REDACTED]@")
 		.replace(BEARER_HEADER_REGEX, "$<scheme>[REDACTED]")
 		.replace(JWT_REGEX, "[REDACTED_JWT]");
 }
 
-function redactQueryString(rawQuery: string): string {
+function redactQuery(rawQuery: string): string {
 	if (!rawQuery) {
 		return "";
 	}
-	const redactedParts: string[] = [];
-
+	const parts: string[] = [];
 	for (const part of rawQuery.split("&")) {
 		if (!part) {
 			continue;
 		}
-		const eqIndex = part.indexOf("=");
-		if (eqIndex === -1) {
-			redactedParts.push(scrubStringSecrets(part));
+		const eq = part.indexOf("=");
+		if (eq === -1) {
+			parts.push(scrubString(part));
 			continue;
 		}
-
-		const rawKey = part.slice(0, eqIndex);
-		const normalizedKey = normalizeKeyForMatch(safeDecode(rawKey));
-		if (SENSITIVE_QUERY_KEYS.has(normalizedKey)) {
-			redactedParts.push(`${rawKey}=[REDACTED]`);
-			continue;
+		const key = part.slice(0, eq);
+		let decodedKey = key;
+		try {
+			decodedKey = decodeURIComponent(key);
+		} catch {
+			// Keep raw key
 		}
-
-		redactedParts.push(
-			`${rawKey}=${scrubStringSecrets(part.slice(eqIndex + 1))}`
+		parts.push(
+			SENSITIVE_KEYS.has(normalizeKey(decodedKey))
+				? `${key}=[REDACTED]`
+				: `${key}=${scrubString(part.slice(eq + 1))}`
 		);
 	}
-
-	return redactedParts.join("&");
+	return parts.join("&");
 }
 
-/**
- * Redacts token-bearing path segments, JWTs, URL userinfo, and secret query
- * parameters while keeping legitimate route segments and non-secret query keys intact.
- */
+/** Redacts token-bearing path segments, JWTs, URL userinfo, and secret query parameters. */
 export function sanitizeRequestPath(path: string): string {
 	const hashIndex = path.indexOf("#");
 	const withoutHash = hashIndex === -1 ? path : path.slice(0, hashIndex);
 	const queryIndex = withoutHash.indexOf("?");
 	const pathname =
 		queryIndex === -1 ? withoutHash : withoutHash.slice(0, queryIndex);
-
-	const safePathname = scrubStringSecrets(
+	const safePath = scrubString(
 		pathname.replace(SENSITIVE_PATH_TOKEN_REGEX, "$<prefix>[REDACTED]")
 	);
-
 	if (queryIndex === -1) {
-		return safePathname;
+		return safePath;
 	}
-
-	const safeQuery = redactQueryString(withoutHash.slice(queryIndex + 1));
-	return safeQuery ? `${safePathname}?${safeQuery}` : safePathname;
+	const safeQuery = redactQuery(withoutHash.slice(queryIndex + 1));
+	return safeQuery ? `${safePath}?${safeQuery}` : safePath;
 }
 
 /** Redacts sensitive path tokens, query secrets, bearer tokens, and URL credentials from raw log text. */
 export function redactRequestLog(message: string): string {
-	return scrubStringSecrets(
+	return scrubString(
 		message.replace(SENSITIVE_PATH_TOKEN_REGEX, "$<prefix>[REDACTED]")
 	).replace(QUERY_SEGMENT_REGEX, (_full, query: string) => {
-		const redacted = redactQueryString(query);
+		const redacted = redactQuery(query);
 		return redacted ? `?${redacted}` : "";
 	});
 }
@@ -226,29 +195,23 @@ interface SerializedError {
 	stack?: string;
 }
 
-function getAggregateSubErrors(error: Error): unknown[] {
-	return "errors" in error && Array.isArray(error.errors) ? error.errors : [];
-}
-
 function getErrorHeadline(error: unknown): string {
-	if (error instanceof Error) {
-		const trimmed = error.message.trim();
-		if (trimmed.length > 0) {
-			return scrubStringSecrets(trimmed);
-		}
-		const nestedMessages = Array.from(
-			new Set(
-				getAggregateSubErrors(error)
-					.map(getErrorHeadline)
-					.filter((item) => item.length > 0)
-			)
-		);
-		if (nestedMessages.length > 0) {
-			return nestedMessages.join("; ");
-		}
-		return error.name || "Error";
+	if (!(error instanceof Error)) {
+		return scrubString(String(error));
 	}
-	return scrubStringSecrets(String(error));
+	const trimmed = error.message.trim();
+	if (trimmed.length > 0) {
+		return scrubString(trimmed);
+	}
+	if ("errors" in error && Array.isArray(error.errors)) {
+		const nested = Array.from(
+			new Set(error.errors.map(getErrorHeadline).filter(Boolean))
+		);
+		if (nested.length > 0) {
+			return nested.join("; ");
+		}
+	}
+	return error.name || "Error";
 }
 
 function formatCauseChain(cause: unknown, depth = 0): string | undefined {
@@ -268,36 +231,30 @@ function serializeError(
 	includeStack: boolean
 ): SerializedError {
 	if (!(error instanceof Error)) {
-		return {
-			message: getErrorHeadline(error),
-			name: "Error",
-		};
+		return { message: getErrorHeadline(error), name: "Error" };
 	}
-
 	const rawCode = (error as { code?: unknown }).code;
 	const code =
 		typeof rawCode === "string" || typeof rawCode === "number"
 			? rawCode
 			: undefined;
-
-	const uniqueAggregate = Array.from(
-		new Set(
-			getAggregateSubErrors(error)
-				.map(getErrorHeadline)
-				.filter((item) => item.length > 0)
-				.slice(0, 5)
-		)
-	);
-
+	const aggregate =
+		"errors" in error && Array.isArray(error.errors)
+			? Array.from(
+					new Set(
+						error.errors.map(getErrorHeadline).filter(Boolean).slice(0, 5)
+					)
+				)
+			: [];
 	const cause =
 		error.cause === undefined ? undefined : formatCauseChain(error.cause);
 	const stack =
-		includeStack && error.stack ? scrubStringSecrets(error.stack) : undefined;
+		includeStack && error.stack ? scrubString(error.stack) : undefined;
 
 	return {
 		...(cause ? { cause } : {}),
 		...(code === undefined ? {} : { code }),
-		...(uniqueAggregate.length > 1 ? { errors: uniqueAggregate } : {}),
+		...(aggregate.length > 1 ? { errors: aggregate } : {}),
 		message: getErrorHeadline(error),
 		name: error.name || "Error",
 		...(stack ? { stack } : {}),
@@ -323,7 +280,7 @@ function sanitizeValue(
 		return value.toString();
 	}
 	if (typeof value === "string") {
-		return scrubStringSecrets(value);
+		return scrubString(value);
 	}
 	if (value instanceof Date) {
 		return Number.isNaN(value.getTime()) ? "Invalid Date" : value.toISOString();
@@ -355,7 +312,7 @@ function sanitizeValue(
 		if (entryValue === undefined) {
 			continue;
 		}
-		if (isSensitiveMetadataKey(key)) {
+		if (isSensitiveKey(key)) {
 			result[key] = "[REDACTED]";
 			continue;
 		}
@@ -374,12 +331,11 @@ function sanitizeMetadata(metadata?: LogMetadata): Record<string, unknown> {
 	}
 	const seen = new WeakSet<object>();
 	const clean: Record<string, unknown> = {};
-
 	for (const [key, value] of Object.entries(metadata)) {
 		if (value === undefined || RESERVED_ROOT_KEYS.has(key)) {
 			continue;
 		}
-		if (isSensitiveMetadataKey(key)) {
+		if (isSensitiveKey(key)) {
 			clean[key] = "[REDACTED]";
 			continue;
 		}
@@ -388,7 +344,6 @@ function sanitizeMetadata(metadata?: LogMetadata): Record<string, unknown> {
 			clean[key] = sanitized;
 		}
 	}
-
 	return clean;
 }
 
@@ -401,40 +356,22 @@ export function normalizeOptionalLogEnv(value: unknown): string | undefined {
 	return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function matchAllowedOption<const T extends readonly string[]>(
+function resolveOption<const T extends readonly string[]>(
 	value: unknown,
-	allowed: T
-): T[number] | undefined {
+	allowed: T,
+	fallback: T[number]
+): T[number] {
 	const normalized = normalizeOptionalLogEnv(value);
 	return normalized && allowed.includes(normalized)
 		? (normalized as T[number])
-		: undefined;
-}
-
-function resolveDefaultLevel(): LogLevel {
-	const configured = matchAllowedOption(process.env.LOG_LEVEL, LOG_LEVELS);
-	if (configured) {
-		return configured;
-	}
-	return process.env.NODE_ENV === "test" ? "silent" : "info";
-}
-
-function resolveDefaultFormat(): LogFormat {
-	const configured = matchAllowedOption(process.env.LOG_FORMAT, LOG_FORMATS);
-	if (configured) {
-		return configured;
-	}
-	return process.env.NODE_ENV === "production" ? "json" : "pretty";
+		: fallback;
 }
 
 function resolveColors(explicit?: boolean): boolean {
 	if (explicit !== undefined) {
 		return explicit;
 	}
-	if (process.env.NO_COLOR) {
-		return false;
-	}
-	if (process.env.FORCE_COLOR === "0") {
+	if (process.env.NO_COLOR || process.env.FORCE_COLOR === "0") {
 		return false;
 	}
 	if (process.env.FORCE_COLOR) {
@@ -447,10 +384,9 @@ function formatDuration(durationMs: number): string {
 	if (durationMs < 1) {
 		return `${durationMs.toFixed(1)}ms`;
 	}
-	if (durationMs < 1000) {
-		return `${Math.round(durationMs)}ms`;
-	}
-	return `${(durationMs / 1000).toFixed(2)}s`;
+	return durationMs < 1000
+		? `${Math.round(durationMs)}ms`
+		: `${(durationMs / 1000).toFixed(2)}s`;
 }
 
 function resolveHttpLevel(entry: HttpRequestLog): ActiveLogLevel {
@@ -460,10 +396,7 @@ function resolveHttpLevel(entry: HttpRequestLog): ActiveLogLevel {
 	if (entry.status >= 400) {
 		return "warn";
 	}
-	if (entry.method === "OPTIONS") {
-		return "debug";
-	}
-	return "info";
+	return entry.method === "OPTIONS" ? "debug" : "info";
 }
 
 function writeToSink(
@@ -471,23 +404,11 @@ function writeToSink(
 	level: ActiveLogLevel,
 	line: string
 ): void {
-	switch (level) {
-		case "debug":
-			(sink.debug ?? sink.info)(line);
-			break;
-		case "info":
-			sink.info(line);
-			break;
-		case "warn":
-			sink.warn(line);
-			break;
-		case "error":
-			sink.error(line);
-			break;
-		default:
-			sink.info(line);
-			break;
+	if (level === "debug") {
+		(sink.debug ?? sink.info)(line);
+		return;
 	}
+	sink[level](line);
 }
 
 const DEFAULT_SINK: LoggerSink = {
@@ -497,53 +418,77 @@ const DEFAULT_SINK: LoggerSink = {
 	warn: (line) => console.warn(line),
 };
 
-function createPinoDestination(options: {
-	colors: boolean;
-	format: LogFormat;
-	sink: LoggerSink;
-}): DestinationStream {
-	const formatPretty =
-		options.format === "pretty"
-			? prettyFactory({
-					colorize: options.colors,
-					errorLikeObjectKeys: ["error", "err"],
-					hideObject: false,
-					ignore: "service,context",
-					levelKey: "level",
-					messageFormat: (log, messageKey) => {
-						const msg = String(log[messageKey] ?? "");
-						return typeof log.context === "string"
-							? `[${log.context}] ${msg}`
-							: msg;
-					},
-					messageKey: "message",
-					singleLine: true,
-					timestampKey: "timestamp",
-					translateTime: "SYS:HH:MM:ss.l",
-				})
-			: null;
+const requireFromHere = createRequire(import.meta.url);
 
-	return {
-		write(chunk: string): void {
-			const trimmed = chunk.trimEnd();
-			const parsed = JSON.parse(trimmed) as Record<string, unknown> & {
-				level?: ActiveLogLevel;
-			};
-			const level: ActiveLogLevel = parsed.level ?? "info";
-			const output = formatPretty ? formatPretty(parsed).trimEnd() : trimmed;
-			writeToSink(options.sink, level, output);
-		},
-	};
+function loadPrettyFactory(
+	colors: boolean
+): ((input: string | Record<string, unknown>) => string) | null {
+	try {
+		const mod = requireFromHere("pino-pretty") as {
+			prettyFactory?: (
+				opts: Record<string, unknown>
+			) => (input: string | Record<string, unknown>) => string;
+		};
+		if (typeof mod.prettyFactory !== "function") {
+			return null;
+		}
+		return mod.prettyFactory({
+			colorize: colors,
+			errorLikeObjectKeys: ["error", "err"],
+			hideObject: false,
+			ignore: "service,context",
+			levelKey: "level",
+			messageFormat: (log: Record<string, unknown>, messageKey: string) => {
+				const msg = String(log[messageKey] ?? "");
+				return typeof log.context === "string"
+					? `[${log.context}] ${msg}`
+					: msg;
+			},
+			messageKey: "message",
+			singleLine: true,
+			timestampKey: "timestamp",
+			translateTime: "SYS:HH:MM:ss.l",
+		});
+	} catch {
+		return null;
+	}
 }
 
-/** Creates a structured logger powered by Pino and pino-pretty. */
+/** Creates a structured logger backed by Pino with lazy dev-only pino-pretty formatting. */
 export function createLogger(options: LoggerOptions = {}): Logger {
-	const format = options.format ?? resolveDefaultFormat();
-	const level = options.level ?? resolveDefaultLevel();
-	const colors = resolveColors(options.colors);
+	const format =
+		options.format ??
+		resolveOption(
+			process.env.LOG_FORMAT,
+			LOG_FORMATS,
+			process.env.NODE_ENV === "production" ? "json" : "pretty"
+		);
+	const level =
+		options.level ??
+		resolveOption(
+			process.env.LOG_LEVEL,
+			LOG_LEVELS,
+			process.env.NODE_ENV === "test" ? "silent" : "info"
+		);
 	const includeStack =
 		options.includeStack ??
 		(process.env.NODE_ENV !== "production" || level === "debug");
+
+	const sink = options.sink ?? DEFAULT_SINK;
+	const formatPretty =
+		format === "pretty"
+			? loadPrettyFactory(resolveColors(options.colors))
+			: null;
+
+	// Track active level synchronously across Pino's synchronous `write` call to avoid JSON.parse in JSON mode
+	let activeEmitLevel: ActiveLogLevel = "info";
+	const destination: DestinationStream = {
+		write(chunk: string): void {
+			const trimmed = chunk.trimEnd();
+			const output = formatPretty ? formatPretty(trimmed).trimEnd() : trimmed;
+			writeToSink(sink, activeEmitLevel, output);
+		},
+	};
 
 	const pinoInstance = pino(
 		{
@@ -558,61 +503,47 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 			},
 			timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
 		},
-		createPinoDestination({
-			colors,
-			format,
-			sink: options.sink ?? DEFAULT_SINK,
-		})
+		destination
 	);
 
 	function emit(
-		activeLevel: ActiveLogLevel,
+		emitLevel: ActiveLogLevel,
 		context: string,
 		message: string,
 		metadata?: LogMetadata,
 		error?: SerializedError
 	): void {
-		const payload: Record<string, unknown> = {
-			context,
-			...(error ? { error } : {}),
-			...sanitizeMetadata(metadata),
-		};
-		pinoInstance[activeLevel](payload, scrubStringSecrets(message));
+		activeEmitLevel = emitLevel;
+		pinoInstance[emitLevel](
+			{
+				context,
+				...(error ? { error } : {}),
+				...sanitizeMetadata(metadata),
+				...(error?.code === undefined ? {} : { code: error.code }),
+			},
+			scrubString(message)
+		);
 	}
 
 	return {
-		logDebug(context: string, message: string, metadata?: LogMetadata): void {
-			emit("debug", context, message, metadata);
-		},
-
-		logInfo(context: string, message: string, metadata?: LogMetadata): void {
-			emit("info", context, message, metadata);
-		},
-
-		logWarning(context: string, message: string, metadata?: LogMetadata): void {
-			emit("warn", context, message, metadata);
-		},
-
-		logError(context: string, error: unknown, metadata?: LogMetadata): void {
+		logDebug: (context, message, metadata) =>
+			emit("debug", context, message, metadata),
+		logInfo: (context, message, metadata) =>
+			emit("info", context, message, metadata),
+		logWarning: (context, message, metadata) =>
+			emit("warn", context, message, metadata),
+		logError: (context, error, metadata) => {
 			const serialized = serializeError(error, includeStack);
-			const enrichedMetadata: LogMetadata = {
-				...metadata,
-				...(serialized.code === undefined ? {} : { code: serialized.code }),
-			};
-			emit("error", context, serialized.message, enrichedMetadata, serialized);
+			emit("error", context, serialized.message, metadata, serialized);
 		},
-
-		logHttp(entry: HttpRequestLog): void {
-			const httpLevel = resolveHttpLevel(entry);
+		logHttp: (entry) => {
 			const safePath = sanitizeRequestPath(entry.path);
-			const roundedDuration = Math.round(entry.durationMs * 10) / 10;
 			const method = entry.method.toUpperCase();
 			const summary = `${method} ${safePath} ${entry.status} (${formatDuration(entry.durationMs)})`;
-
 			const metadata: LogMetadata =
 				format === "json"
 					? {
-							durationMs: roundedDuration,
+							durationMs: Math.round(entry.durationMs * 10) / 10,
 							method,
 							organizationId: entry.organizationId,
 							path: safePath,
@@ -625,12 +556,11 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 							requestId: entry.requestId,
 							userId: entry.userId,
 						};
-
-			emit(httpLevel, "HTTP", summary, metadata);
+			emit(resolveHttpLevel(entry), "HTTP", summary, metadata);
 		},
 	};
 }
 
-export const apiLogger = createLogger({ service: "api" });
-
-export const { logDebug, logError, logHttp, logInfo, logWarning } = apiLogger;
+export const defaultLogger = createLogger({ service: "api" });
+export const { logDebug, logError, logHttp, logInfo, logWarning } =
+	defaultLogger;

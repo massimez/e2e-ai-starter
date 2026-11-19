@@ -1,9 +1,9 @@
-import { APP_CONFIG } from "@workspace/api/config";
+import { APP_CONFIG } from "@workspace/shared/config";
 import {
 	LOG_FORMATS,
 	LOG_LEVELS,
 	normalizeOptionalLogEnv,
-} from "@workspace/api/logger";
+} from "@workspace/shared/logger";
 import { z } from "zod";
 
 const VAPID_SUBJECT_REGEX = /^(?:mailto:|https?:\/\/)/iu;

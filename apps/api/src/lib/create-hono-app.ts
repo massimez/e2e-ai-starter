@@ -1,3 +1,8 @@
+import {
+	logDebug,
+	logError,
+	sanitizeRequestPath,
+} from "@workspace/shared/logger";
 import { APIError } from "better-auth/api";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -12,7 +17,6 @@ import { httpLoggerMiddleware } from "../middleware/http-logger";
 import { requestIdMiddleware } from "../middleware/request-id";
 import type { Session, User } from "./auth/index";
 import { AppError, AuthError } from "./errors";
-import { logDebug, logError, sanitizeRequestPath } from "./logger";
 
 export interface AppEnv {
 	Bindings: {

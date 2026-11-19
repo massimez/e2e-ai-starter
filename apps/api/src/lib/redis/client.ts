@@ -1,6 +1,6 @@
+import { logError, logInfo } from "@workspace/shared/logger";
 import Redis from "ioredis";
 import { env } from "../../env";
-import { logError, logInfo } from "../logger";
 
 export function redactRedisUrl(rawUrl: string): string {
 	try {

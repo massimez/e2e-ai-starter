@@ -1,4 +1,4 @@
-import { APP_CONFIG } from "@workspace/api/config";
+import { APP_CONFIG } from "@workspace/shared/config";
 import { ImageResponse } from "next/og";
 
 export const alt = `${APP_CONFIG.name}: Multi-tenant AI starter for teams, storage, and background jobs`;

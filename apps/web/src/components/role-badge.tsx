@@ -1,4 +1,4 @@
-import type { OrganizationRoleName } from "@workspace/api/permissions";
+import type { OrganizationRoleName } from "@workspace/shared/permissions";
 import { Badge } from "@workspace/ui/components/badge";
 import { cn } from "@workspace/ui/lib/utils";
 import { Crown, Eye, Shield, Sparkles, User } from "lucide-react";

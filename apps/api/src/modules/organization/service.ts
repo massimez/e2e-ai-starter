@@ -1,7 +1,7 @@
 import { db } from "@workspace/db";
 import { member, organization, session } from "@workspace/db/schema";
+import { parseMemberRoles } from "@workspace/shared/permissions";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
-import { parseMemberRoles } from "../../lib/auth/permissions";
 import { invalidateUserSessionCache } from "../../lib/auth/secondary-storage";
 import {
 	ConflictError,

@@ -1,8 +1,8 @@
+import { logWarning } from "@workspace/shared/logger";
 import type { Context, MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
-import { extractClientIp } from "../lib/audit";
 import { type AppEnv, createErrorResponse } from "../lib/create-hono-app";
-import { logWarning } from "../lib/logger";
+import { extractClientIp } from "../lib/ip";
 import { checkRateLimit, type RateLimitResult } from "../lib/redis/rate-limit";
 
 interface MemoryStoreEntry {

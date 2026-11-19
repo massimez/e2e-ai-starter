@@ -1,3 +1,7 @@
+import type {
+	NotificationCategory,
+	NotificationChannel,
+} from "@workspace/shared/queues";
 import { sql } from "drizzle-orm";
 import {
 	boolean,
@@ -13,19 +17,12 @@ import {
 import { organization } from "./organization";
 import { user } from "./user";
 
-export const NOTIFICATION_CATEGORIES = [
-	"system",
-	"security",
-	"team",
-	"project",
-	"billing",
-] as const;
-
-export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
-
-export const NOTIFICATION_CHANNELS = ["in_app", "email", "push"] as const;
-
-export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+export {
+	NOTIFICATION_CATEGORIES,
+	NOTIFICATION_CHANNELS,
+	type NotificationCategory,
+	type NotificationChannel,
+} from "@workspace/shared/queues";
 
 export type NotificationMetadata = Record<string, unknown>;
 

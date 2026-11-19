@@ -1,6 +1,6 @@
 "use client";
 
-import { APP_CONFIG } from "@workspace/api/config";
+import { APP_CONFIG } from "@workspace/shared/config";
 import { Button } from "@workspace/ui/components/button";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";

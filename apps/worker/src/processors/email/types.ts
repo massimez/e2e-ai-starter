@@ -2,4 +2,4 @@ export {
 	EMAIL_QUEUE_NAME,
 	type EmailJobData,
 	emailJobDataSchema,
-} from "@workspace/api/queues";
+} from "@workspace/shared/queues";

@@ -5,33 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./config": {
-      "types": "./src/lib/app-config.ts",
-      "import": "./src/lib/app-config.ts"
-    },
     "./hc": {
       "types": "./src/lib/hc/hc.ts",
       "import": "./src/lib/hc/hc.ts"
-    },
-    "./logger": {
-      "types": "./src/lib/logger.ts",
-      "import": "./src/lib/logger.ts"
-    },
-    "./network": {
-      "types": "./src/lib/network.ts",
-      "import": "./src/lib/network.ts"
-    },
-    "./permissions": {
-      "types": "./src/lib/auth/permissions.ts",
-      "import": "./src/lib/auth/permissions.ts"
-    },
-    "./queues": {
-      "types": "./src/lib/queues.ts",
-      "import": "./src/lib/queues.ts"
-    },
-    "./storage": {
-      "types": "./src/modules/storage/config.ts",
-      "import": "./src/modules/storage/config.ts"
     }
   },
   "main": "src/index.ts",
@@ -47,14 +23,13 @@
     "@mastra/core": "catalog:",
     "@workspace/ai-core": "workspace:*",
     "@workspace/db": "workspace:*",
+    "@workspace/shared": "workspace:*",
     "ai": "catalog:",
     "better-auth": "catalog:",
     "bullmq": "catalog:",
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "ioredis": "catalog:",
-    "pino": "^10.4.0",
-    "pino-pretty": "^13.2.0",
     "zod": "catalog:"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
+import { logWarning } from "@workspace/shared/logger";
 import { env } from "../../env";
-import { logWarning } from "../logger";
 import { redis } from "../redis/client";
 
 const MAX_FALLBACK_COUNTERS = 10_000;

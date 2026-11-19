@@ -7,4 +7,4 @@ export {
 	type NotificationJobData,
 	notificationChannelSchema,
 	notificationJobDataSchema,
-} from "@workspace/api/queues";
+} from "@workspace/shared/queues";

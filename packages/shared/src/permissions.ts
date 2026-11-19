@@ -6,20 +6,14 @@ import {
 
 /**
  * Single source of truth for organization RBAC statements and roles.
- * Spreads Better Auth's built-in `defaultStatements` (`organization`, `member`,
- * `invitation`, `team`, `ac`) and extends them with application resources.
+ * Extends Better Auth's built-in `defaultStatements` with application resources.
  */
 export const statements = {
 	...defaultStatements,
 	ai: ["read", "execute", "manage"],
-	apiKey: ["create", "read", "revoke"],
 	audit: ["read", "export"],
-	billing: ["read", "manage"],
-	document: ["create", "read", "update", "delete"],
 	member: [...defaultStatements.member, "invite", "remove"],
 	notification: ["read", "manage"],
-	project: ["create", "read", "update", "delete"],
-	role: ["create", "read", "update", "delete", "assign"],
 	setting: ["read", "update"],
 	storage: ["create", "read", "update", "delete"],
 } as const;
@@ -31,32 +25,21 @@ export const roles = {
 	admin: ac.newRole({
 		...adminAc.statements,
 		ai: ["read", "execute", "manage"],
-		apiKey: ["create", "read", "revoke"],
 		audit: ["read"],
-		billing: ["read"],
-		document: ["create", "read", "update", "delete"],
 		member: [...adminAc.statements.member, "invite", "remove"],
 		notification: ["read", "manage"],
-		project: ["create", "read", "update"],
-		role: ["read"],
 		setting: ["read", "update"],
 		storage: ["create", "read", "update", "delete"],
 	}),
 	member: ac.newRole({
 		ai: ["read", "execute"],
-		document: ["create", "read", "update"],
 		notification: ["read"],
-		project: ["create", "read", "update"],
-		role: ["read"],
 		setting: ["read"],
 		storage: ["create", "read"],
 	}),
 	viewer: ac.newRole({
 		ai: ["read"],
-		document: ["read"],
 		notification: ["read"],
-		project: ["read"],
-		role: ["read"],
 		setting: ["read"],
 		storage: ["read"],
 	}),
@@ -81,8 +64,7 @@ export interface PermissionMatrixEntry {
 	category:
 		| "Workspace & Governance"
 		| "Team & Access"
-		| "Content & Storage"
-		| "Operations & Billing"
+		| "Storage"
 		| "AI & Agents";
 	description: string;
 	member: boolean;
@@ -110,8 +92,8 @@ function matrixEntry(
 }
 
 /**
- * UI permission matrix derived directly from `roles` so the Roles Settings UI
- * always stays synchronized with API enforcement.
+ * UI permission matrix derived directly from `roles` so Settings stays synchronized
+ * with Better Auth RBAC enforcement.
  */
 export const PERMISSION_MATRIX: readonly PermissionMatrixEntry[] = [
 	matrixEntry(
@@ -167,60 +149,32 @@ export const PERMISSION_MATRIX: readonly PermissionMatrixEntry[] = [
 		"update"
 	),
 	matrixEntry(
-		"Content & Storage",
-		"Manage Projects",
-		"Create and modify workspace projects",
-		"project",
+		"Team & Access",
+		"Manage Custom Roles",
+		"Create, update, and delete dynamic organization roles",
+		"ac",
 		"create"
 	),
 	matrixEntry(
-		"Content & Storage",
-		"Delete Projects",
-		"Permanently delete workspace projects",
-		"project",
-		"delete"
-	),
-	matrixEntry(
-		"Content & Storage",
+		"Storage",
 		"Upload Storage Assets",
-		"Upload files via presigned storage URLs",
+		"Upload files via presigned S3/MinIO storage endpoints",
 		"storage",
 		"create"
 	),
 	matrixEntry(
-		"Content & Storage",
+		"Storage",
 		"Read Storage Assets",
 		"Read and download private workspace files",
 		"storage",
 		"read"
 	),
 	matrixEntry(
-		"Content & Storage",
+		"Storage",
 		"Delete Storage Assets",
 		"Delete uploaded files from workspace storage",
 		"storage",
 		"delete"
-	),
-	matrixEntry(
-		"Operations & Billing",
-		"Read Audit Logs",
-		"Inspect workspace audit trails",
-		"audit",
-		"read"
-	),
-	matrixEntry(
-		"Operations & Billing",
-		"Read Billing",
-		"View workspace billing details and invoices",
-		"billing",
-		"read"
-	),
-	matrixEntry(
-		"Operations & Billing",
-		"Manage Billing",
-		"Manage billing plans and payment methods",
-		"billing",
-		"manage"
 	),
 	matrixEntry(
 		"AI & Agents",
@@ -235,6 +189,13 @@ export const PERMISSION_MATRIX: readonly PermissionMatrixEntry[] = [
 		"Chat with AI agents and invoke workspace tools",
 		"ai",
 		"execute"
+	),
+	matrixEntry(
+		"Workspace & Governance",
+		"View Audit Logs",
+		"Inspect workspace security and activity audit logs",
+		"audit",
+		"read"
 	),
 ];
 
@@ -266,22 +227,22 @@ export const SYSTEM_ROLE_META: Record<
 > = {
 	admin: {
 		description:
-			"Manages team members, invitations, projects, storage, and workspace profile.",
+			"Manages team members, invitations, storage, and workspace profile.",
 		name: "Admin",
 	},
 	member: {
 		description:
-			"Standard collaborator who can create and modify projects and upload storage assets.",
+			"Standard collaborator who can execute AI workflows and upload storage assets.",
 		name: "Member",
 	},
 	owner: {
 		description:
-			"Full administrative authority over workspace billing, ownership, roles, and deletion.",
+			"Full administrative authority over workspace ownership, roles, and deletion.",
 		name: "Owner",
 	},
 	viewer: {
 		description:
-			"Read-only access across workspace documents, projects, and notifications.",
+			"Read-only access across AI history, workspace settings, and storage.",
 		name: "Viewer",
 	},
 };
@@ -294,21 +255,6 @@ export const PERMISSION_CATALOG_ENTRIES = Object.entries(
 	actions: [...actions],
 	resource,
 }));
-
-const ALL_PERMISSION_KEYS = PERMISSION_CATALOG_ENTRIES.flatMap(
-	({ resource, actions }) => actions.map((action) => `${resource}:${action}`)
-);
-
-export const VALID_PERMISSION_KEYS = new Set(ALL_PERMISSION_KEYS);
-
-export const NON_DELEGABLE_PERMISSIONS = new Set(
-	ALL_PERMISSION_KEYS.filter(
-		(key) =>
-			key.startsWith("role:") ||
-			key.startsWith("member:") ||
-			key === "organization:delete"
-	)
-);
 
 export interface OrganizationPermissionItem {
 	action: string;
@@ -326,7 +272,6 @@ export interface OrganizationRoleSummary {
 	id: string;
 	isDefault: boolean;
 	isSystem: boolean;
-	memberCount: number;
 	name: string;
 	permissions: string[];
 	slug: string;
@@ -341,4 +286,20 @@ export interface EffectiveOrganizationPermissions {
 export function normalizeRoleSlug(role: string | null | undefined): string {
 	const parsed = parseMemberRoles(role);
 	return (parsed[0] ?? "member").trim().toLowerCase();
+}
+
+export function getStaticRolePermissions(roleName: string): string[] {
+	if (!Object.hasOwn(roles, roleName)) {
+		return [];
+	}
+	const roleDef = roles[roleName as OrganizationRoleName];
+	const result: string[] = [];
+	for (const [resource, actions] of Object.entries(
+		roleDef.statements as PermissionStatementMap
+	)) {
+		for (const action of actions) {
+			result.push(`${resource}:${action}`);
+		}
+	}
+	return result;
 }

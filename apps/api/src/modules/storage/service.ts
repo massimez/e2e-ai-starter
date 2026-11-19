@@ -5,6 +5,8 @@ import {
 	storageFolders,
 	uploads,
 } from "@workspace/db/schema";
+import { logError } from "@workspace/shared/logger";
+import { STORAGE_CONFIG } from "@workspace/shared/storage";
 import {
 	and,
 	asc,
@@ -18,7 +20,6 @@ import {
 } from "drizzle-orm";
 import { env } from "../../env";
 import { AppError, NotFoundError, ValidationError } from "../../lib/errors";
-import { logError } from "../../lib/logger";
 import {
 	formatBytes,
 	generateStorageKey,
@@ -26,7 +27,6 @@ import {
 	isValidFileSize,
 } from "../../lib/storage";
 import { withOrg } from "../../lib/tenant";
-import { STORAGE_CONFIG } from "./config";
 import {
 	deleteS3Object,
 	ensureDevBucketExists,

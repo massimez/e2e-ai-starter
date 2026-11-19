@@ -1,11 +1,11 @@
 import { db } from "@workspace/db";
+import { withTimeout } from "@workspace/shared/queues";
 import { sql } from "drizzle-orm";
 import {
 	createErrorResponse,
 	createRouter,
 	createSuccessResponse,
 } from "../../lib/create-hono-app";
-import { withTimeout } from "../../lib/queues";
 import { redis } from "../../lib/redis/client";
 
 const READINESS_CHECK_TIMEOUT_MS = 3000;

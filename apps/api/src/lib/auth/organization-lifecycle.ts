@@ -1,3 +1,4 @@
+import { logError } from "@workspace/shared/logger";
 import {
 	createAuthMiddleware,
 	getSessionFromCtx,
@@ -11,7 +12,6 @@ import {
 	resolveSessionOrganizationOnConnect,
 	syncDefaultOrganizationOnSessionActivation,
 } from "../../modules/organization/default-organization";
-import { logError } from "../logger";
 
 interface HookSession {
 	session: {

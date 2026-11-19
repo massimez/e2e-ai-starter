@@ -1,4 +1,4 @@
-import { APP_CONFIG } from "@workspace/api/config";
+import { APP_CONFIG } from "@workspace/shared/config";
 import { sendEmail } from "../../../lib/email-sender";
 import { escapeHtml, renderEmailLayout } from "../templates";
 import type { EmailJobData } from "../types";

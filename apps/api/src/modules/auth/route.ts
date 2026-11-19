@@ -1,6 +1,6 @@
-import { extractClientIp } from "../../lib/audit";
 import { auth } from "../../lib/auth/index";
 import { createRouter } from "../../lib/create-hono-app";
+import { extractClientIp } from "../../lib/ip";
 import { rateLimiter } from "../../middleware/rate-limiter";
 
 export const authRoutes = createRouter()

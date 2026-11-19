@@ -1,4 +1,4 @@
-import { formatBytes, STORAGE_CONFIG } from "@workspace/api/storage";
+import { formatBytes, STORAGE_CONFIG } from "@workspace/shared/storage";
 import { client, parseApiResponse } from "./api-client";
 
 const IMAGE_UPLOAD_TYPES = STORAGE_CONFIG.ALLOWED_CONTENT_TYPES.filter((type) =>

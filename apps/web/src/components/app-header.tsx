@@ -1,4 +1,4 @@
-import { APP_CONFIG } from "@workspace/api/config";
+import { APP_CONFIG } from "@workspace/shared/config";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { BrandMark } from "./brand-mark";

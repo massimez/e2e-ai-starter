@@ -1,5 +1,5 @@
+import { STORAGE_CONFIG } from "@workspace/shared/storage";
 import { z } from "zod";
-import { STORAGE_CONFIG } from "./config";
 
 export const presignUploadSchema = z.object({
 	contentType: z.string().trim().min(1).max(255),

@@ -1,4 +1,4 @@
-import { parseRedisConnectionOptions } from "@workspace/api/queues";
+import { parseRedisConnectionOptions } from "@workspace/shared/queues";
 import {
 	type ConnectionOptions,
 	type Processor,

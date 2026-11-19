@@ -1,7 +1,7 @@
+import { defaultLogger, type Logger } from "@workspace/shared/logger";
 import type { MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../lib/create-hono-app";
-import { apiLogger, type Logger } from "../lib/logger";
 
 export interface HttpLoggerOptions {
 	logger?: Logger;
@@ -28,7 +28,7 @@ function buildRequestTarget(path: string, rawUrl: string): string {
 export function httpLoggerMiddleware(
 	options: HttpLoggerOptions = {}
 ): MiddlewareHandler<AppEnv> {
-	const targetLogger = options.logger ?? apiLogger;
+	const targetLogger = options.logger ?? defaultLogger;
 	const skipped = options.skipPaths ? new Set(options.skipPaths) : null;
 
 	return createMiddleware<AppEnv>(async (c, next) => {

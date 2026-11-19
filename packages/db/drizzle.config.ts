@@ -1,3 +1,4 @@
+import { APP_CONFIG } from "@workspace/shared/config";
 import { defineConfig } from "drizzle-kit";
 
 function getDatabaseUrl(): string {
@@ -10,7 +11,7 @@ function getDatabaseUrl(): string {
 			"DATABASE_URL environment variable is required in production"
 		);
 	}
-	return "postgresql://postgres:postgres@localhost:5432/starter_db";
+	return `postgresql://postgres:postgres@localhost:5432/${APP_CONFIG.defaultDatabaseName}`;
 }
 
 export default defineConfig({

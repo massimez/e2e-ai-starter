@@ -1,6 +1,6 @@
 "use client";
 
-import { parseMemberRoles } from "@workspace/api/permissions";
+import { parseMemberRoles } from "@workspace/shared/permissions";
 import { Button } from "@workspace/ui/components/button";
 import { DeleteConfirmationDialog } from "@workspace/ui/components/delete-confirmation-dialog";
 import {

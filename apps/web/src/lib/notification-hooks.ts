@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
 	NotificationCategory,
 	NotificationChannel,
-} from "@workspace/api/queues";
+} from "@workspace/shared/queues";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { publicWebEnv } from "@/env";

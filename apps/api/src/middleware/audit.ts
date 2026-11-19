@@ -1,3 +1,5 @@
+import { logError, sanitizeRequestPath } from "@workspace/shared/logger";
+import { withTimeout } from "@workspace/shared/queues";
 import type { MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
 import {
@@ -5,13 +7,11 @@ import {
 	type AuditLogRecord,
 	type AuditLogWriter,
 	DEFAULT_SENSITIVE_READ_PREFIXES,
-	extractClientIp,
 	isSensitiveReadPath,
 	persistAuditLog,
 } from "../lib/audit";
 import type { AppEnv } from "../lib/create-hono-app";
-import { logError, sanitizeRequestPath } from "../lib/logger";
-import { withTimeout } from "../lib/queues";
+import { extractClientIp } from "../lib/ip";
 import type { TenantMismatchSecurityEvent } from "../lib/tenant";
 
 export interface AccessAuditMiddlewareOptions {
@@ -60,13 +60,13 @@ function extractEntityFromPath(path: string): {
 			const entityType =
 				segments.slice(0, index).join("/").slice(0, MAX_ENTITY_TYPE_LENGTH) ||
 				null;
-			return { entityType, entityId: segment };
+			return { entityId: segment, entityType };
 		}
 	}
 
 	return {
-		entityType: segments.join("/").slice(0, MAX_ENTITY_TYPE_LENGTH) || null,
 		entityId: null,
+		entityType: segments.join("/").slice(0, MAX_ENTITY_TYPE_LENGTH) || null,
 	};
 }
 
@@ -146,7 +146,7 @@ export function createAccessAuditMiddleware(
 			return;
 		}
 
-		const { entityType, entityId } = extractEntityFromPath(sanitizedPath);
+		const { entityId, entityType } = extractEntityFromPath(sanitizedPath);
 		const sensitiveRead =
 			method === "GET" && isSensitiveReadPath(sanitizedPath, sensitivePrefixes);
 

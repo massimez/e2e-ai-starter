@@ -1,7 +1,7 @@
+import { logError } from "@workspace/shared/logger";
+import { parseRedisConnectionOptions } from "@workspace/shared/queues";
 import { type ConnectionOptions, Queue, type QueueOptions } from "bullmq";
 import { env } from "../../env";
-import { logError } from "../logger";
-import { parseRedisConnectionOptions } from "../queues";
 
 export function parseBullMqConnection(redisUrl: string): ConnectionOptions {
 	return {

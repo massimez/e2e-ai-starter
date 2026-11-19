@@ -27,6 +27,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@workspace/shared": "workspace:*",
     "drizzle-orm": "catalog:",
     "postgres": "catalog:"
   },

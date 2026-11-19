@@ -1,8 +1,8 @@
 import { closeDb } from "@workspace/db";
+import { logError, logInfo, logWarning } from "@workspace/shared/logger";
+import { withTimeout } from "@workspace/shared/queues";
 import { app } from "./app";
 import { env } from "./env";
-import { logError, logInfo, logWarning } from "./lib/logger";
-import { withTimeout } from "./lib/queues";
 import { closeRedis } from "./lib/redis/client";
 import { closeQueues } from "./lib/redis/queue";
 import { drainAuditLogs } from "./middleware/audit";

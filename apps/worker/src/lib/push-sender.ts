@@ -1,7 +1,7 @@
 import type { LookupAddress } from "node:dns";
 import { lookup } from "node:dns/promises";
 import { Agent as HttpsAgent } from "node:https";
-import { resolveSafePushEndpoint } from "@workspace/api/network";
+import { resolveSafePushEndpoint } from "@workspace/shared/network";
 import { UnrecoverableError } from "bullmq";
 import { sendNotification, WebPushError } from "web-push";
 import { env } from "../env";

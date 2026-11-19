@@ -1,3 +1,4 @@
+import { APP_CONFIG } from "@workspace/shared/config";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
@@ -103,7 +104,7 @@ function getDatabaseUrl(): string {
 				"DATABASE_URL environment variable is required in production"
 			);
 		}
-		return "postgresql://postgres:postgres@localhost:5432/starter_db";
+		return `postgresql://postgres:postgres@localhost:5432/${APP_CONFIG.defaultDatabaseName}`;
 	}
 	return databaseUrl;
 }

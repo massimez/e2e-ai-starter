@@ -1,5 +1,5 @@
 import "@workspace/ui/styles/globals.css";
-import { APP_CONFIG } from "@workspace/api/config";
+import { APP_CONFIG } from "@workspace/shared/config";
 import { Toaster } from "@workspace/ui/components/sonner";
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans, JetBrains_Mono } from "next/font/google";

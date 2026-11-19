@@ -1,6 +1,6 @@
 /**
  * Canonical application branding and template defaults shared across
- * web, API, and worker workspaces without runtime dependencies.
+ * web, API, worker, and database workspaces without runtime dependencies.
  */
 export const APP_CONFIG = {
 	defaultBucketName: "starter-uploads",
@@ -8,7 +8,7 @@ export const APP_CONFIG = {
 	defaultFromEmail: "noreply@example.com",
 	defaultRedisPrefix: "starter",
 	description:
-		"Bun and Turborepo starter with Better Auth multi-tenancy, RBAC, Hono RPC, Drizzle ORM, Mastra AI agents (Gemini, OpenAI, Anthropic, OpenRouter) and pgvector, private S3/R2 storage, and BullMQ workers.",
+		"Bun and Turborepo starter with Better Auth multi-tenancy, Hono RPC, Drizzle ORM, Mastra AI agents (Gemini, OpenAI, Anthropic, OpenRouter) and pgvector, private storage, and BullMQ workers.",
 	keywords: [
 		"nextjs",
 		"nextjs-16",

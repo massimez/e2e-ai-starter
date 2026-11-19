@@ -1,4 +1,4 @@
-import { createLogger } from "@workspace/api/logger";
+import { createLogger } from "@workspace/shared/logger";
 
 export const workerLogger = createLogger({ service: "worker" });
 

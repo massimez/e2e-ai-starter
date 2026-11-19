@@ -7,7 +7,7 @@ export {
 	isValidFileSize,
 	STORAGE_CONFIG,
 	type StorageConfig,
-} from "../modules/storage/config";
+} from "@workspace/shared/storage";
 
 const NON_PATH_SEGMENT_CHARS_REGEX = /[^a-zA-Z0-9_-]/gu;
 const EDGE_UNDERSCORES_REGEX = /^_+|_+$/gu;
