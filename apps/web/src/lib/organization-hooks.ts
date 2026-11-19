@@ -73,7 +73,7 @@ export const organizationKeys = {
 
 export function orgHeadersInit(organizationId?: string) {
 	return organizationId
-		? { init: { headers: { "x-organization-id": organizationId } } }
+		? { headers: { "x-organization-id": organizationId } }
 		: undefined;
 }
 

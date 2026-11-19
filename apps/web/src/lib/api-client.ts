@@ -121,7 +121,9 @@ export const client: TypedApiClient = hc<AppType>(getBrowserApiBaseUrl(), {
 	},
 });
 
-export async function parseApiResponse<T>(response: Response): Promise<T> {
+export async function parseApiResponse<T>(
+	response: Pick<Response, "json" | "ok" | "status">
+): Promise<T> {
 	let body: unknown = null;
 	try {
 		body = await response.json();

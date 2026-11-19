@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import type { AppType } from "@workspace/api/hc";
+import { hc } from "hono/client";
 import {
 	ApiError,
 	fetchWithTimeout,
 	parseApiResponse,
 } from "../src/lib/api-client";
+import { orgHeadersInit } from "../src/lib/organization-hooks";
 
 describe("@workspace/web api client helpers", () => {
 	test("parseApiResponse unwraps success envelope data", async () => {
@@ -67,5 +70,32 @@ describe("@workspace/web api client helpers", () => {
 				signal: controller.signal,
 			})
 		).rejects.toThrow();
+	});
+
+	test("orgHeadersInit preserves Content-Type: application/json on Hono RPC JSON requests", async () => {
+		let capturedHeaders: Headers | undefined;
+		let capturedBody: BodyInit | null | undefined;
+
+		const testClient = hc<AppType>("http://localhost:3000", {
+			fetch: (_input: RequestInfo | URL, init?: RequestInit) => {
+				capturedHeaders = new Headers(init?.headers);
+				capturedBody = init?.body;
+				return Promise.resolve(
+					new Response(JSON.stringify({ data: { id: "1" }, success: true }), {
+						headers: { "content-type": "application/json" },
+						status: 201,
+					})
+				);
+			},
+		});
+
+		await testClient.api.storage.folders.$post(
+			{ json: { name: "Documents" } },
+			orgHeadersInit("org_123")
+		);
+
+		expect(capturedHeaders?.get("x-organization-id")).toBe("org_123");
+		expect(capturedHeaders?.get("content-type")).toBe("application/json");
+		expect(capturedBody).toBe(JSON.stringify({ name: "Documents" }));
 	});
 });
