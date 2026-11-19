@@ -1,15 +1,11 @@
 import { sql } from "drizzle-orm";
 import {
-	boolean,
 	index,
 	pgTable,
 	text,
 	timestamp,
 	uniqueIndex,
-	uuid,
-	varchar,
 } from "drizzle-orm/pg-core";
-import { timestamps } from "./helpers/common";
 import { organization } from "./organization-table";
 import { user } from "./user";
 
@@ -65,50 +61,30 @@ export const invitation = pgTable(
 	]
 );
 
+/**
+ * Better Auth `organization` plugin `dynamicAccessControl` table for custom org roles.
+ */
 export const organizationRole = pgTable(
 	"organization_role",
 	{
-		id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
+		id: text("id").primaryKey(),
 		organizationId: text("organization_id")
 			.notNull()
 			.references(() => organization.id, { onDelete: "cascade" }),
-		slug: varchar("slug", { length: 80 }).notNull(),
-		name: varchar("name", { length: 120 }).notNull(),
-		description: text("description"),
-		isSystem: boolean("is_system").default(false).notNull(),
-		isDefault: boolean("is_default").default(false).notNull(),
-		...timestamps,
-	},
-	(table) => [
-		uniqueIndex("organization_role_org_slug_unique").on(
-			table.organizationId,
-			table.slug
-		),
-		uniqueIndex("organization_role_org_default_unique")
-			.on(table.organizationId)
-			.where(sql`${table.isDefault} = true`),
-		index("organization_role_org_idx").on(table.organizationId),
-	]
-);
-
-export const organizationRolePermission = pgTable(
-	"organization_role_permission",
-	{
-		id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
-		roleId: uuid("role_id")
-			.notNull()
-			.references(() => organizationRole.id, { onDelete: "cascade" }),
-		resource: varchar("resource", { length: 80 }).notNull(),
-		action: varchar("action", { length: 80 }).notNull(),
+		role: text("role").notNull(),
+		permission: text("permission").notNull(),
 		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdateFn(() => new Date()),
 	},
 	(table) => [
-		uniqueIndex("organization_role_permission_unique").on(
-			table.roleId,
-			table.resource,
-			table.action
+		index("organization_role_organizationId_idx").on(table.organizationId),
+		index("organization_role_role_idx").on(table.role),
+		uniqueIndex("organization_role_org_role_unique").on(
+			table.organizationId,
+			table.role
 		),
-		index("organization_role_permission_role_idx").on(table.roleId),
 	]
 );
 
@@ -116,5 +92,3 @@ export type Organization = typeof organization.$inferSelect;
 export type Member = typeof member.$inferSelect;
 export type Invitation = typeof invitation.$inferSelect;
 export type OrganizationRole = typeof organizationRole.$inferSelect;
-export type OrganizationRolePermission =
-	typeof organizationRolePermission.$inferSelect;

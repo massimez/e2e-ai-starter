@@ -1,5 +1,13 @@
 import { db } from "@workspace/db";
 import * as schema from "@workspace/db/schema";
+import { APP_CONFIG } from "@workspace/shared/config";
+import {
+	logDebug,
+	logError,
+	logInfo,
+	logWarning,
+} from "@workspace/shared/logger";
+import { ac, roles } from "@workspace/shared/permissions";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, emailOTP, organization } from "better-auth/plugins";
@@ -8,23 +16,15 @@ import {
 	enqueueEmail,
 	enqueueWorkspaceInvitationEmail,
 } from "../../modules/email/queue";
-import { ensureDefaultOrganizationRoles } from "../../modules/roles/service";
-import { APP_CONFIG } from "../app-config";
-import { logDebug, logError, logInfo, logWarning } from "../logger";
 import { redis } from "../redis/client";
 import { createAuthCaptchaPlugin } from "./captcha";
 import { createOrganizationLifecycleHooks } from "./organization-lifecycle";
-import { ac, roles } from "./permissions";
 import {
 	authSecondaryKey,
 	incrementFallbackCounter,
 } from "./secondary-storage";
 
-const orgLifecycle = createOrganizationLifecycleHooks(undefined, {
-	onOrganizationCreated: async (organizationId) => {
-		await ensureDefaultOrganizationRoles(organizationId);
-	},
-});
+const orgLifecycle = createOrganizationLifecycleHooks();
 
 const captchaPlugin = createAuthCaptchaPlugin({
 	allowedHostnames: env.TURNSTILE_ALLOWED_HOSTNAMES_LIST,
@@ -81,15 +81,6 @@ export const auth = betterAuth({
 		},
 	},
 	baseURL: env.BETTER_AUTH_URL,
-	// Disable static-RBAC organization endpoints; dynamic RBAC is enforced on /api/organizations/*
-	disabledPaths: [
-		"/organization/update-member-role",
-		"/organization/invite-member",
-		"/organization/cancel-invitation",
-		"/organization/update",
-		"/organization/remove-member",
-		"/organization/has-permission",
-	],
 	logger: {
 		disabled:
 			env.LOG_LEVEL === "silent" || (env.NODE_ENV === "test" && !env.LOG_LEVEL),
@@ -130,6 +121,7 @@ export const auth = betterAuth({
 			invitation: schema.invitation,
 			member: schema.member,
 			organization: schema.organization,
+			organizationRole: schema.organizationRole,
 			session: schema.session,
 			user: schema.user,
 			verification: schema.verification,
@@ -182,6 +174,9 @@ export const auth = betterAuth({
 		organization({
 			ac,
 			allowUserToCreateOrganization: true,
+			dynamicAccessControl: {
+				enabled: true,
+			},
 			organizationHooks: orgLifecycle.organizationHooks,
 			organizationLimit: 5,
 			roles,

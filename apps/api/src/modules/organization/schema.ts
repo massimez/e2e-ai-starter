@@ -24,6 +24,10 @@ function isSafeOrganizationLogo(value: string): boolean {
 	}
 }
 
+export const memberIdParamSchema = z.object({
+	memberId: z.string().trim().min(1, "Member ID is required"),
+});
+
 export const transferOwnershipSchema = z.object({
 	newOwnerUserId: z.string().trim().min(1, "New owner user ID is required"),
 });

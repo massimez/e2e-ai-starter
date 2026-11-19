@@ -1,11 +1,11 @@
 import { db } from "@workspace/db";
 import { member } from "@workspace/db/schema";
+import { parseMemberRoles } from "@workspace/shared/permissions";
 import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
-import { parseMemberRoles } from "../lib/auth/permissions";
+import { auth } from "../lib/auth/index";
 import { type AppEnv, createErrorResponse } from "../lib/create-hono-app";
-import { rolesService } from "../modules/roles/service";
 
 function extractOrgActorOrErrorResponse(
 	c: Context<AppEnv>
@@ -56,7 +56,7 @@ export function hasOrgPermission(requiredPermission: string) {
 		if (!actor.ok) {
 			return actor.response;
 		}
-		const { organizationId, userId } = actor;
+		const { organizationId } = actor;
 
 		const [resource, action] = requiredPermission.split(":");
 		if (!(resource && action)) {
@@ -82,11 +82,21 @@ export function hasOrgPermission(requiredPermission: string) {
 			return;
 		}
 
-		const allowed = await rolesService.userHasOrganizationPermission({
-			organizationId,
-			permission: requiredPermission,
-			userId,
-		});
+		let allowed = false;
+		try {
+			const result = await auth.api.hasPermission({
+				body: {
+					organizationId,
+					permissions: {
+						[resource]: [action],
+					},
+				},
+				headers: c.req.raw.headers,
+			});
+			allowed = Boolean(result?.success);
+		} catch {
+			allowed = false;
+		}
 
 		if (!allowed) {
 			return c.json(

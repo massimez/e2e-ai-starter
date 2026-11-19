@@ -14,15 +14,12 @@ import {
 } from "../../middleware/org-permission";
 import { rateLimiter } from "../../middleware/rate-limiter";
 import { tenantBoundaryMiddleware } from "../../middleware/tenant-boundary";
-import { roleRoutes } from "../roles/route";
-import {
-	invitationIdParamSchema,
-	inviteOrganizationMemberSchema,
-	memberIdParamSchema,
-} from "../roles/schema";
-import { rolesService } from "../roles/service";
 import { resolveSessionOrganizationOnConnect } from "./default-organization";
-import { transferOwnershipSchema, updateOrganizationSchema } from "./schema";
+import {
+	memberIdParamSchema,
+	transferOwnershipSchema,
+	updateOrganizationSchema,
+} from "./schema";
 import {
 	getOrganizationById,
 	getUserOrganizations,
@@ -117,50 +114,4 @@ export const organizationRoutes = createRouter()
 				createSuccessResponse(result, "Member removed from organization")
 			);
 		}
-	)
-
-	// Invite member with any assignable dynamic organization role
-	.post(
-		"/invitations",
-		hasOrgPermission("member:invite"),
-		jsonValidator(inviteOrganizationMemberSchema),
-		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
-			const user = requireUser(c);
-			const input = c.req.valid("json");
-			const result = await rolesService.inviteOrganizationMember(
-				organizationId,
-				input,
-				{
-					id: user.id,
-					name: user.name,
-				}
-			);
-			return c.json(
-				createSuccessResponse(
-					result,
-					result.resent ? "Invitation resent" : "Invitation sent"
-				),
-				result.resent ? 200 : 201
-			);
-		}
-	)
-
-	// Cancel pending organization invitation
-	.delete(
-		"/invitations/:id",
-		hasOrgPermission("member:invite"),
-		paramValidator(invitationIdParamSchema),
-		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
-			const { id } = c.req.valid("param");
-			const result = await rolesService.cancelOrganizationInvitation(
-				organizationId,
-				id
-			);
-			return c.json(createSuccessResponse(result, "Invitation canceled"));
-		}
-	)
-
-	// Tenant-scoped dynamic organization roles & role assignments
-	.route("/roles", roleRoutes);
+	);

@@ -1,6 +1,6 @@
 "use client";
 
-import { ac, roles } from "@workspace/api/permissions";
+import { ac, roles } from "@workspace/shared/permissions";
 import {
 	adminClient,
 	emailOTPClient,
@@ -26,6 +26,9 @@ export const authClient = createAuthClient({
 		adminClient(),
 		organizationClient({
 			ac,
+			dynamicAccessControl: {
+				enabled: true,
+			},
 			roles,
 		}),
 		emailOTPClient(),

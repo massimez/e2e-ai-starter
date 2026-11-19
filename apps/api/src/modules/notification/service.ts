@@ -4,18 +4,23 @@ import {
 	member,
 	notification,
 	notificationPreference,
+	organizationRole,
 	pushSubscription,
 } from "@workspace/db/schema";
-import { and, count, desc, eq } from "drizzle-orm";
-import { parseMemberRoles } from "../../lib/auth/permissions";
-import { ValidationError } from "../../lib/errors";
-import { resolveSafePushEndpoint } from "../../lib/network";
+import { resolveSafePushEndpoint } from "@workspace/shared/network";
+import {
+	type OrganizationRoleName,
+	parseMemberRoles,
+	roleAllows,
+	SYSTEM_ROLE_SLUGS,
+} from "@workspace/shared/permissions";
 import {
 	NOTIFICATION_CATEGORIES,
 	NOTIFICATION_CHANNELS,
 	type NotificationJobData,
-} from "../../lib/queues";
-import { rolesService } from "../roles/service";
+} from "@workspace/shared/queues";
+import { and, count, desc, eq } from "drizzle-orm";
+import { ValidationError } from "../../lib/errors";
 import { enqueueNotificationsBulk } from "./queue";
 import type {
 	ListNotificationsQuery,
@@ -43,6 +48,22 @@ async function assertSafePushEndpoint(endpoint: string): Promise<void> {
 
 const EXPECTED_PREFERENCE_COUNT =
 	NOTIFICATION_CATEGORIES.length * NOTIFICATION_CHANNELS.length;
+
+function roleJsonAllows(
+	rawPermissionJson: string,
+	resource: string,
+	action: string
+): boolean {
+	try {
+		const parsed = JSON.parse(rawPermissionJson) as Record<
+			string,
+			readonly string[] | undefined
+		>;
+		return Boolean(parsed[resource]?.includes(action));
+	} catch {
+		return false;
+	}
+}
 
 export const notificationService = {
 	async deletePushSubscription(userId: string, endpoint: string) {
@@ -195,18 +216,30 @@ export const notificationService = {
 		organizationId: string,
 		payload: Omit<NotificationJobData, "userId">
 	) {
-		const [orgMembers, eligibleRoleSlugs] = await Promise.all([
+		const [orgMembers, customRoles] = await Promise.all([
 			db
 				.select({ role: member.role, userId: member.userId })
 				.from(member)
 				.where(eq(member.organizationId, organizationId)),
-			rolesService.getRoleSlugsWithPermission(
-				organizationId,
-				"notification:manage"
-			),
+			db
+				.select({
+					permission: organizationRole.permission,
+					role: organizationRole.role,
+				})
+				.from(organizationRole)
+				.where(eq(organizationRole.organizationId, organizationId)),
 		]);
 
-		const eligibleSet = new Set(eligibleRoleSlugs);
+		const eligibleSet = new Set<string>(
+			SYSTEM_ROLE_SLUGS.filter((slug: OrganizationRoleName) =>
+				roleAllows(slug, "notification", "manage")
+			)
+		);
+		for (const customRole of customRoles) {
+			if (roleJsonAllows(customRole.permission, "notification", "manage")) {
+				eligibleSet.add(customRole.role.trim().toLowerCase());
+			}
+		}
 		const adminUserIds = new Set<string>();
 		for (const orgMember of orgMembers) {
 			const memberRoles = parseMemberRoles(orgMember.role).map((role) =>

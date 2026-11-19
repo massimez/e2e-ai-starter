@@ -10,7 +10,6 @@ import {
 	member,
 	organization,
 	organizationRole,
-	organizationRolePermission,
 } from "./organization";
 import { account, session } from "./session";
 import { organizationStorageLimits, storageFolders, uploads } from "./storage";
@@ -90,21 +89,10 @@ export const invitationRelations = relations(invitation, ({ one }) => ({
 
 export const organizationRoleRelations = relations(
 	organizationRole,
-	({ many, one }) => ({
+	({ one }) => ({
 		organization: one(organization, {
 			fields: [organizationRole.organizationId],
 			references: [organization.id],
-		}),
-		permissions: many(organizationRolePermission),
-	})
-);
-
-export const organizationRolePermissionRelations = relations(
-	organizationRolePermission,
-	({ one }) => ({
-		role: one(organizationRole, {
-			fields: [organizationRolePermission.roleId],
-			references: [organizationRole.id],
 		}),
 	})
 );

@@ -39,6 +39,7 @@ export const aiRoutes = createRouter()
 			const input = c.req.valid("json");
 			return await aiService.createAiChatResponse({
 				abortSignal: c.req.raw.signal,
+				headers: c.req.raw.headers,
 				input,
 				organizationId,
 				requestId: c.get("requestId"),
@@ -104,6 +105,7 @@ export const aiRoutes = createRouter()
 			const { organizationId, userId } = getActiveOrgContext(c);
 			const input = c.req.valid("json");
 			const result = await aiService.runWorkspaceBrief({
+				headers: c.req.raw.headers,
 				input,
 				organizationId,
 				requestId: c.get("requestId"),

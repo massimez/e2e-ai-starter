@@ -21,13 +21,13 @@ import {
 } from "@workspace/ai-core";
 import { db } from "@workspace/db";
 import { member } from "@workspace/db/schema";
+import { logError, logWarning } from "@workspace/shared/logger";
+import { isOrgAdminRole } from "@workspace/shared/permissions";
 import { createUIMessageStreamResponse } from "ai";
 import { and, eq } from "drizzle-orm";
 import { env } from "../../env";
-import { isOrgAdminRole } from "../../lib/auth/permissions";
+import { auth } from "../../lib/auth/index";
 import { AppError, ForbiddenError, NotFoundError } from "../../lib/errors";
-import { logError, logWarning } from "../../lib/logger";
-import { rolesService } from "../roles/service";
 
 const SSE_HEARTBEAT_MS = 5000;
 
@@ -187,7 +187,30 @@ export function listAiAgents(): AiAgentsResponse {
 	};
 }
 
+async function checkAiOrgPermission(params: {
+	action: string;
+	headers: Headers;
+	organizationId: string;
+	resource: string;
+}): Promise<boolean> {
+	try {
+		const result = await auth.api.hasPermission({
+			body: {
+				organizationId: params.organizationId,
+				permissions: {
+					[params.resource]: [params.action],
+				},
+			},
+			headers: params.headers,
+		});
+		return Boolean(result?.success);
+	} catch {
+		return false;
+	}
+}
+
 async function resolveTenantAiContext(params: {
+	headers?: Headers;
 	organizationId: string;
 	requestId?: string;
 	userId: string;
@@ -196,18 +219,19 @@ async function resolveTenantAiContext(params: {
 		params.organizationId,
 		params.userId
 	);
+	const headers = params.headers ?? new Headers();
 	const [canReadStorage, canUpdateOrganization] = await Promise.all([
-		rolesService.userHasOrganizationPermission({
-			memberRole: userRole,
+		checkAiOrgPermission({
+			action: "read",
+			headers,
 			organizationId: params.organizationId,
-			permission: "storage:read",
-			userId: params.userId,
+			resource: "storage",
 		}),
-		rolesService.userHasOrganizationPermission({
-			memberRole: userRole,
+		checkAiOrgPermission({
+			action: "update",
+			headers,
 			organizationId: params.organizationId,
-			permission: "organization:update",
-			userId: params.userId,
+			resource: "organization",
 		}),
 	]);
 	const canReadMemberEmails = isOrgAdminRole(userRole) || canUpdateOrganization;
@@ -263,6 +287,7 @@ async function requireOwnedThread(
 
 export interface CreateAiChatParams {
 	abortSignal?: AbortSignal;
+	headers?: Headers;
 	input: AiChatRequest;
 	organizationId: string;
 	requestId?: string;
@@ -281,6 +306,7 @@ export async function createAiChatResponse(
 	}
 
 	const requestContext = await resolveTenantAiContext({
+		headers: params.headers,
 		organizationId: params.organizationId,
 		requestId: params.requestId,
 		userId: params.userId,
@@ -451,6 +477,7 @@ export async function deleteAiThread(
 }
 
 export interface RunWorkspaceBriefParams {
+	headers?: Headers;
 	input: WorkspaceBriefRequest;
 	organizationId: string;
 	requestId?: string;
@@ -464,6 +491,7 @@ export async function runWorkspaceBrief(
 
 	const runtime = getAiRuntime();
 	const requestContext = await resolveTenantAiContext({
+		headers: params.headers,
 		organizationId: params.organizationId,
 		requestId: params.requestId,
 		userId: params.userId,

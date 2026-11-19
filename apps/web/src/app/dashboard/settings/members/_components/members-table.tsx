@@ -1,6 +1,6 @@
 "use client";
 
-import type { OrganizationRoleSummary } from "@workspace/api/permissions";
+import type { OrganizationRoleSummary } from "@workspace/shared/permissions";
 import {
 	Avatar,
 	AvatarFallback,

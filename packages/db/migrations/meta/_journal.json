@@ -43,6 +43,13 @@
       "when": 1794952161465,
       "tag": "0005_chief_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795087273088,
+      "tag": "0006_fat_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }
