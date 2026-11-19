@@ -16,6 +16,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
+    "build": "tsc --noEmit",
     "build:mastra": "mastra build",
     "check-types": "tsc --noEmit",
     "studio": "bun --env-file=../../.env x mastra dev"

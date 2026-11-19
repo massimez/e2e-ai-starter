@@ -164,7 +164,7 @@ describe("auth Turnstile captcha protection", () => {
 			})
 		);
 		expect(signUpResponse.status).toBe(200);
-		expect(lastVerifyPayload).toEqual({
+		expect(lastVerifyPayload as SiteVerifyPayload | null).toEqual({
 			remoteip: "203.0.113.42",
 			response: "valid-token",
 			secret: "test-secret-key",

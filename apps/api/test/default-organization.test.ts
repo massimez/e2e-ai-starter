@@ -127,7 +127,9 @@ function createTestAuthInstance(options?: {
 
 	const testAuth = betterAuth({
 		baseURL: "http://localhost:3001",
-		database: memoryAdapter(memoryDb),
+		database: memoryAdapter(
+			memoryDb as unknown as Parameters<typeof memoryAdapter>[0]
+		),
 		databaseHooks: {
 			session: orgLifecycle.sessionDatabaseHooks,
 		},

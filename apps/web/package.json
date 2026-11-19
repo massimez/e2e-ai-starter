@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "build": "next build",
-    "check-types": "tsc --noEmit",
+    "check-types": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "dev": "next dev",
     "start": "next start"
   },

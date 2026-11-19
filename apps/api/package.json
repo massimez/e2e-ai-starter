@@ -12,6 +12,7 @@
   },
   "main": "src/index.ts",
   "scripts": {
+    "build": "bun build --target=bun src/index.ts --outdir dist",
     "check-types": "tsc --noEmit",
     "dev": "bun run --hot src/index.ts",
     "start": "bun run src/index.ts"

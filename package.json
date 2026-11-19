@@ -43,6 +43,7 @@
     "db:generate": "turbo -F @workspace/db db:generate",
     "db:migrate": "turbo -F @workspace/db db:migrate",
     "db:push": "turbo -F @workspace/db db:push",
+    "db:reset": "bun run db:migrate && bun run db:seed",
     "db:seed": "turbo -F @workspace/db db:seed",
     "db:studio": "turbo -F @workspace/db db:studio",
     "dev": "turbo dev",

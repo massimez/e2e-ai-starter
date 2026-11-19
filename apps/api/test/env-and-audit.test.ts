@@ -134,7 +134,7 @@ describe("proxy trust and client IP extraction", () => {
 
 	test("ignores spoofed forwarding headers when direct peer is not a trusted proxy", async () => {
 		let resolvedIp: string | null = null;
-		const app = new Hono().get("/ip", (c) => {
+		const app = new Hono<AppEnv>().get("/ip", (c) => {
 			resolvedIp = extractClientIp(c);
 			return c.text("ok");
 		});
@@ -149,7 +149,7 @@ describe("proxy trust and client IP extraction", () => {
 			{ remoteAddress: "::ffff:203.0.113.10" } as never
 		);
 
-		expect(resolvedIp).toBe("203.0.113.10");
+		expect(resolvedIp as string | null).toBe("203.0.113.10");
 	});
 });
 
