@@ -1,0 +1,4 @@
+CREATE UNIQUE INDEX "invitation_org_email_pending_unique" ON "invitation" USING btree ("organization_id","email") WHERE "invitation"."status" = 'pending';--> statement-breakpoint
+CREATE UNIQUE INDEX "organization_role_org_default_unique" ON "organization_role" USING btree ("organization_id") WHERE "organization_role"."is_default" = true;--> statement-breakpoint
+CREATE UNIQUE INDEX "storage_folders_org_root_name_unique" ON "storage_folders" USING btree ("organization_id","name") WHERE "storage_folders"."parent_id" IS NULL;--> statement-breakpoint
+CREATE INDEX "uploads_org_pending_expires_idx" ON "uploads" USING btree ("organization_id","expires_at") WHERE "uploads"."status" = 'pending';

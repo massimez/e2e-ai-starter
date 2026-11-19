@@ -1,6 +1,8 @@
+import { randomBytes, scrypt } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { closeDb, db } from "./index";
 import {
+	account,
 	member,
 	NOTIFICATION_CATEGORIES,
 	NOTIFICATION_CHANNELS,
@@ -11,6 +13,40 @@ import {
 	organizationStorageLimits,
 	user,
 } from "./schema";
+
+const BETTER_AUTH_SCRYPT_CONFIG = {
+	N: 16_384,
+	dkLen: 64,
+	p: 1,
+	r: 16,
+} as const;
+
+/** Matches Better Auth's `@better-auth/utils/password` scrypt hash format (`saltHex:keyHex`). */
+async function hashBetterAuthPassword(password: string): Promise<string> {
+	const salt = randomBytes(16).toString("hex");
+	const derivedKey = await new Promise<Buffer>((resolve, reject) => {
+		scrypt(
+			password.normalize("NFKC"),
+			salt,
+			BETTER_AUTH_SCRYPT_CONFIG.dkLen,
+			{
+				N: BETTER_AUTH_SCRYPT_CONFIG.N,
+				maxmem:
+					128 * BETTER_AUTH_SCRYPT_CONFIG.N * BETTER_AUTH_SCRYPT_CONFIG.r * 2,
+				p: BETTER_AUTH_SCRYPT_CONFIG.p,
+				r: BETTER_AUTH_SCRYPT_CONFIG.r,
+			},
+			(error, key) => {
+				if (error) {
+					reject(error);
+					return;
+				}
+				resolve(key);
+			}
+		);
+	});
+	return `${salt}:${derivedKey.toString("hex")}`;
+}
 
 interface SeedRoleDefinition {
 	description: string;
@@ -120,6 +156,14 @@ async function seed() {
 		const demoOrgId = "org_demo_acme";
 		const demoUserId = "usr_demo_admin";
 		const demoMemberId = "mem_demo_admin";
+		const demoAccountId = "acc_demo_admin";
+		const explicitDemoPassword = process.env.SEED_DEMO_PASSWORD?.trim();
+		const demoPassword =
+			explicitDemoPassword ||
+			(process.env.NODE_ENV === "production" ? undefined : "Password123!");
+		const demoPasswordHash = demoPassword
+			? await hashBetterAuthPassword(demoPassword)
+			: undefined;
 
 		await db.transaction(async (tx) => {
 			await tx
@@ -135,6 +179,19 @@ async function seed() {
 					role: "user",
 				})
 				.onConflictDoNothing();
+
+			if (demoPasswordHash) {
+				await tx
+					.insert(account)
+					.values({
+						accountId: demoUserId,
+						id: demoAccountId,
+						password: demoPasswordHash,
+						providerId: "credential",
+						userId: demoUserId,
+					})
+					.onConflictDoNothing();
+			}
 
 			await tx
 				.insert(organization)
@@ -249,7 +306,11 @@ async function seed() {
 			);
 		});
 
-		console.log("Demo user seeded: admin@acme.example (usr_demo_admin)");
+		console.log(
+			demoPassword
+				? "Demo user seeded: admin@acme.example (password configured for local sign-in)"
+				: "Demo user seeded: admin@acme.example (usr_demo_admin)"
+		);
 		console.log("Organization seeded: Acme Corporation (org_demo_acme)");
 		console.log(
 			"System roles & permissions seeded: owner, admin, member, viewer"

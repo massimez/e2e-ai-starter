@@ -59,6 +59,9 @@ export const invitation = pgTable(
 		index("invitation_email_idx").on(table.email),
 		index("invitation_inviterId_idx").on(table.inviterId),
 		index("invitation_expiresAt_idx").on(table.expiresAt),
+		uniqueIndex("invitation_org_email_pending_unique")
+			.on(table.organizationId, table.email)
+			.where(sql`${table.status} = 'pending'`),
 	]
 );
 
@@ -81,6 +84,9 @@ export const organizationRole = pgTable(
 			table.organizationId,
 			table.slug
 		),
+		uniqueIndex("organization_role_org_default_unique")
+			.on(table.organizationId)
+			.where(sql`${table.isDefault} = true`),
 		index("organization_role_org_idx").on(table.organizationId),
 	]
 );

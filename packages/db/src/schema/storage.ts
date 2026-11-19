@@ -77,6 +77,9 @@ export const storageFolders = pgTable(
 			table.parentId,
 			table.name
 		),
+		uniqueIndex("storage_folders_org_root_name_unique")
+			.on(table.organizationId, table.name)
+			.where(sql`${table.parentId} IS NULL`),
 	]
 );
 
@@ -123,6 +126,9 @@ export const uploads = pgTable(
 			table.status,
 			table.createdAt
 		),
+		index("uploads_org_pending_expires_idx")
+			.on(table.organizationId, table.expiresAt)
+			.where(sql`${table.status} = 'pending'`),
 		uniqueIndex("uploads_file_key_unique").on(table.fileKey),
 		check(
 			"uploads_size_non_negative_check",
