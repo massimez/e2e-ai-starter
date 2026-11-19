@@ -9,6 +9,7 @@ import type {
 } from "@workspace/ai-core/contracts";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import {
 	fetchInternalApiData,
 	getServerDefaultOrganizationId,
@@ -45,14 +46,16 @@ export default async function DashboardAiPage() {
 			queryClient.setQueryData(["ai", "agents", activeOrgId], agents);
 		}
 		if (threads) {
-			queryClient.setQueryData(["ai", "threads", activeOrgId], threads);
+			queryClient.setQueryData(["ai", "threads", activeOrgId, 0], threads);
 		}
 	}
 
 	return (
 		<div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
 			<HydrationBoundary state={dehydrate(queryClient)}>
-				<AiWorkspaceClient />
+				<Suspense fallback={null}>
+					<AiWorkspaceClient />
+				</Suspense>
 			</HydrationBoundary>
 		</div>
 	);

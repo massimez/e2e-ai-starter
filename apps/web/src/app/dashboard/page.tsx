@@ -3,6 +3,7 @@ import {
 	ArrowRight,
 	Bell,
 	Building2,
+	FolderOpen,
 	ShieldCheck,
 	Sparkles,
 	Users,
@@ -48,6 +49,12 @@ export default async function DashboardPage() {
 						href="/dashboard/ai"
 						icon={Sparkles}
 						title="AI Assistant"
+					/>
+					<DashboardTile
+						description="Upload private S3 files, organize folders, and index documents into pgvector for AI knowledge search."
+						href="/dashboard/files"
+						icon={FolderOpen}
+						title="Files & Knowledge RAG"
 					/>
 					<DashboardTile
 						description="Configure workspace name, workspace slug, and cloud logo branding."

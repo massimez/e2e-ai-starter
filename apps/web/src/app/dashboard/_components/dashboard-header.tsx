@@ -21,6 +21,7 @@ import { useOrganizationMutations } from "@/lib/organization-hooks";
 
 const DASHBOARD_NAV_ITEMS = [
 	{ href: "/dashboard", label: "Overview", exact: true },
+	{ href: "/dashboard/files", label: "Files & RAG", exact: false },
 	{ href: "/dashboard/ai", label: "AI Assistant", exact: false },
 	{ href: "/dashboard/settings", label: "Settings", exact: false },
 ] as const;

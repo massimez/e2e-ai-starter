@@ -15,6 +15,7 @@ import {
 	DropdownMenuTrigger,
 } from "@workspace/ui/components/dropdown-menu";
 import {
+	FolderOpen,
 	LayoutDashboard,
 	LogOut,
 	Settings,
@@ -114,6 +115,15 @@ export function UserAccountMenu({
 					>
 						<LayoutDashboard className="text-muted-foreground h-4 w-4" />
 						Dashboard
+					</Link>
+				</DropdownMenuItem>
+				<DropdownMenuItem asChild>
+					<Link
+						className="flex cursor-pointer items-center gap-2.5 rounded-lg p-2 text-sm"
+						href="/dashboard/files"
+					>
+						<FolderOpen className="text-muted-foreground h-4 w-4" />
+						Files & Knowledge
 					</Link>
 				</DropdownMenuItem>
 				<DropdownMenuItem asChild>

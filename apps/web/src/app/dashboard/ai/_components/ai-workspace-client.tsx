@@ -4,9 +4,9 @@ import { useChat } from "@ai-sdk/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
 	AiAgentsResponse,
+	AiModelOption,
 	AiThreadDetailResponse,
 	AiThreadsResponse,
-	WorkspaceBriefResponse,
 } from "@workspace/ai-core/contracts";
 import { Badge } from "@workspace/ui/components/badge";
 import { Button } from "@workspace/ui/components/button";
@@ -16,12 +16,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@workspace/ui/components/card";
-import {
-	DefaultChatTransport,
-	getToolName,
-	isToolUIPart,
-	type UIMessage,
-} from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import {
 	AlertCircle,
 	ArrowLeft,
@@ -32,10 +27,9 @@ import {
 	Send,
 	Sparkles,
 	Square,
-	Trash2,
-	Wrench,
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
 	type FormEvent,
 	type KeyboardEvent,
@@ -45,57 +39,37 @@ import {
 	useState,
 } from "react";
 import { client, parseApiResponse } from "@/lib/api-client";
-import { formatUtcDate } from "@/lib/format";
 import {
 	orgHeadersInit,
 	useCurrentOrganization,
 } from "@/lib/organization-hooks";
-import { renderSafeMarkdown } from "./markdown-renderer";
+import {
+	buildKeyedMessageParts,
+	ChatMessagePart,
+} from "./ai-chat-message-list";
+import { ThreadHistorySidebar, WorkspaceBriefCard } from "./ai-sidebar-cards";
 
 const STARTER_PROMPTS = [
 	"Summarize my active workspace, role, and storage quota usage.",
 	"List the members and roles in this workspace.",
-	"Search committed files in our workspace storage.",
+	"Search committed files and indexed knowledge in our workspace.",
 ] as const;
-
-const TOOL_LABELS: Record<string, string> = {
-	"get-workspace-context": "Workspace context",
-	"list-workspace-members": "Team members",
-	"search-workspace-files": "Workspace files",
-	workspaceContextTool: "Workspace context",
-	workspaceFilesTool: "Workspace files",
-	workspaceMembersTool: "Team members",
-};
-
-const TOOL_STATE_LABELS: Record<string, string> = {
-	"approval-requested": "Awaiting approval",
-	"approval-responded": "Approved",
-	"input-available": "Running",
-	"input-streaming": "Running",
-	"output-available": "Done",
-	"output-denied": "Declined",
-	"output-error": "Error",
-};
-
-const TOOL_SPLIT_PATTERN = /[-_]+/u;
 
 function createThreadId(): string {
 	return crypto.randomUUID();
 }
 
-function formatToolLabel(rawName: string): string {
-	return (
-		TOOL_LABELS[rawName] ??
-		rawName
-			.split(TOOL_SPLIT_PATTERN)
-			.filter(Boolean)
-			.map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-			.join(" ")
-	);
-}
-
-function formatToolState(state: string): string {
-	return TOOL_STATE_LABELS[state] ?? state;
+function syncThreadQueryParam(threadId: string | null) {
+	if (typeof window === "undefined") {
+		return;
+	}
+	const url = new URL(window.location.href);
+	if (threadId) {
+		url.searchParams.set("thread", threadId);
+	} else {
+		url.searchParams.delete("thread");
+	}
+	window.history.replaceState(null, "", `${url.pathname}${url.search}`);
 }
 
 function sanitizeLatestUserMessage(messages: UIMessage[]) {
@@ -203,6 +177,7 @@ interface AiChatSessionPaneProps {
 	isConfigured: boolean;
 	isRoleResolved: boolean;
 	isStatusPending: boolean;
+	modelId?: string;
 	onConversationFinished: () => void;
 	onThreadTitleGenerated: () => void;
 	providerLabel: string;
@@ -221,6 +196,7 @@ function AiChatSessionPane({
 	isConfigured,
 	isRoleResolved,
 	isStatusPending,
+	modelId,
 	onConversationFinished,
 	onThreadTitleGenerated,
 	providerLabel,
@@ -240,7 +216,10 @@ function AiChatSessionPane({
 		() =>
 			new DefaultChatTransport<UIMessage>({
 				api: "/api/ai/chat",
-				body: { agentId },
+				body: {
+					agentId,
+					...(modelId ? { modelId } : {}),
+				},
 				credentials: "include",
 				...(activeOrgId
 					? { headers: { "x-organization-id": activeOrgId } }
@@ -259,7 +238,7 @@ function AiChatSessionPane({
 					},
 				}),
 			}),
-		[activeOrgId, agentId]
+		[activeOrgId, agentId, modelId]
 	);
 
 	const { error, messages, sendMessage, setMessages, status, stop } =
@@ -455,7 +434,8 @@ function AiChatSessionPane({
 								</h2>
 								<p className="text-muted-foreground text-xs leading-relaxed">
 									Conversations stay scoped to your active workspace and can
-									search saved files, members, and earlier messages.
+									search saved files, RAG documents, members, and earlier
+									messages.
 								</p>
 							</div>
 							<div className="flex max-w-xl flex-wrap items-center justify-center gap-2">
@@ -544,7 +524,7 @@ function AiChatSessionPane({
 								id="ai-prompt-input"
 								onChange={(event) => setInput(event.target.value)}
 								onKeyDown={handleTextareaKeyDown}
-								placeholder="Ask about workspace quota, members, or organization setup..."
+								placeholder="Ask about workspace quota, members, or indexed files..."
 								ref={textareaRef}
 								rows={2}
 								value={input}
@@ -584,252 +564,6 @@ function AiChatSessionPane({
 	);
 }
 
-function ChatMessagePart({
-	isUser,
-	part,
-	partKey,
-}: {
-	isUser: boolean;
-	part: UIMessage["parts"][number];
-	partKey: string;
-}) {
-	if (part.type === "text") {
-		if (isUser) {
-			return <p className="wrap-break-word whitespace-pre-wrap">{part.text}</p>;
-		}
-		return <>{renderSafeMarkdown(part.text, partKey)}</>;
-	}
-	if (part.type === "reasoning") {
-		if (!part.text.trim()) {
-			return null;
-		}
-		return (
-			<details className="border-border/60 bg-background/50 my-1.5 rounded-md border px-2.5 py-1.5 text-xs">
-				<summary className="text-muted-foreground cursor-pointer font-medium select-none">
-					Reasoning
-				</summary>
-				<p className="text-muted-foreground mt-1.5 leading-relaxed whitespace-pre-wrap">
-					{part.text}
-				</p>
-			</details>
-		);
-	}
-	if (isToolUIPart(part)) {
-		const toolName = getToolName(part);
-		return (
-			<div className="bg-background/70 border-border/60 my-1.5 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]">
-				<Wrench aria-hidden="true" className="text-primary h-3 w-3 shrink-0" />
-				<span className="font-medium">{formatToolLabel(toolName)}</span>
-				<span className="text-muted-foreground">
-					{formatToolState(part.state)}
-				</span>
-			</div>
-		);
-	}
-	return null;
-}
-
-function buildKeyedMessageParts(message: UIMessage) {
-	const seenCounts = new Map<string, number>();
-	return message.parts.map((part) => {
-		const rawKey = isToolUIPart(part)
-			? `${message.id}-tool-${part.toolCallId}`
-			: `${message.id}-${part.type}`;
-		const occurrence = (seenCounts.get(rawKey) ?? 0) + 1;
-		seenCounts.set(rawKey, occurrence);
-		const key = occurrence === 1 ? rawKey : `${rawKey}-${occurrence}`;
-		return { key, part };
-	});
-}
-
-interface ThreadHistorySidebarProps {
-	activeThreadId: string | null;
-	deleteError: string | null;
-	deletingThreadId: string | null;
-	isError: boolean;
-	isPending: boolean;
-	onDeleteThread: (threadId: string) => void;
-	onSelectThread: (threadId: string) => void;
-	threads: AiThreadsResponse["threads"];
-}
-
-function ThreadHistorySidebar({
-	activeThreadId,
-	deleteError,
-	deletingThreadId,
-	isError,
-	isPending,
-	onDeleteThread,
-	onSelectThread,
-	threads,
-}: ThreadHistorySidebarProps) {
-	let body = (
-		<ul className="max-h-72 space-y-1 overflow-y-auto overscroll-contain">
-			{threads.map((thread) => {
-				const isSelected = activeThreadId === thread.id;
-				const title = thread.title?.trim() || "Untitled conversation";
-				const isDeleting = deletingThreadId === thread.id;
-				return (
-					<li className="group flex items-center gap-1" key={thread.id}>
-						<button
-							aria-current={isSelected ? "true" : undefined}
-							className={`focus-visible:ring-ring min-w-0 flex-1 rounded-lg px-3 py-2 text-left text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none ${
-								isSelected
-									? "bg-primary/10 text-primary font-medium"
-									: "text-foreground hover:bg-muted/60"
-							}`}
-							onClick={() => onSelectThread(thread.id)}
-							type="button"
-						>
-							<div className="truncate">{title}</div>
-							<div className="text-muted-foreground mt-0.5 text-[10px]">
-								{formatUtcDate(thread.updatedAt)}
-							</div>
-						</button>
-						<Button
-							aria-label={`Delete conversation: ${title}`}
-							className="text-muted-foreground hover:text-destructive size-8 shrink-0"
-							disabled={isDeleting}
-							onClick={() => onDeleteThread(thread.id)}
-							size="icon"
-							type="button"
-							variant="ghost"
-						>
-							{isDeleting ? (
-								<Loader2
-									aria-hidden="true"
-									className="h-3.5 w-3.5 animate-spin"
-								/>
-							) : (
-								<Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
-							)}
-						</Button>
-					</li>
-				);
-			})}
-		</ul>
-	);
-
-	if (isPending) {
-		body = (
-			<div className="text-muted-foreground flex items-center gap-2 px-2 py-4 text-xs">
-				<Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
-				<span>Loading threads...</span>
-			</div>
-		);
-	} else if (isError) {
-		body = (
-			<p className="text-muted-foreground px-2 py-4 text-xs">
-				Could not load thread history.
-			</p>
-		);
-	} else if (threads.length === 0) {
-		body = (
-			<p className="text-muted-foreground px-2 py-4 text-xs leading-relaxed">
-				No saved threads yet. Start a conversation to create your first thread.
-			</p>
-		);
-	}
-
-	return (
-		<aside aria-label="Conversation history">
-			<Card className="border-border/60 bg-card/70 gap-0 py-0 shadow-xs backdrop-blur-xs">
-				<CardHeader className="border-border/60 border-b px-4 py-3.5">
-					<CardTitle className="text-sm font-semibold">
-						Recent Threads
-					</CardTitle>
-				</CardHeader>
-				<CardContent className="space-y-2 p-2">
-					{deleteError ? (
-						<p className="text-destructive px-2 pt-1 text-[11px]" role="alert">
-							{deleteError}
-						</p>
-					) : null}
-					{body}
-				</CardContent>
-			</Card>
-		</aside>
-	);
-}
-
-interface WorkspaceBriefCardProps {
-	activeOrgId?: string;
-	canExecuteAi: boolean;
-	isConfigured: boolean;
-}
-
-function WorkspaceBriefCard({
-	activeOrgId,
-	canExecuteAi,
-	isConfigured,
-}: WorkspaceBriefCardProps) {
-	const briefMutation = useMutation<WorkspaceBriefResponse, Error>({
-		mutationFn: async () =>
-			parseApiResponse<WorkspaceBriefResponse>(
-				await client.api.ai.workflows["workspace-brief"].$post(
-					{ json: {} },
-					orgHeadersInit(activeOrgId)
-				)
-			),
-	});
-
-	return (
-		<Card className="border-border/60 bg-card/70 gap-0 py-0 shadow-xs backdrop-blur-xs">
-			<CardHeader className="border-border/60 flex flex-row items-center justify-between border-b px-4 py-3">
-				<CardTitle className="text-sm font-semibold">
-					Workspace Summary
-				</CardTitle>
-				<Badge appearance="light" size="sm" variant="secondary">
-					One-click report
-				</Badge>
-			</CardHeader>
-			<CardContent className="space-y-3 p-3.5 text-xs">
-				<p className="text-muted-foreground leading-relaxed">
-					Summarizes your workspace members, stored files, and activity metrics
-					into a concise report.
-				</p>
-				<Button
-					className="w-full"
-					disabled={!(isConfigured && canExecuteAi) || briefMutation.isPending}
-					onClick={() => briefMutation.mutate()}
-					size="sm"
-					type="button"
-					variant="outline"
-				>
-					{briefMutation.isPending ? (
-						<Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
-					) : (
-						<Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
-					)}
-					{briefMutation.isPending
-						? "Generating report..."
-						: "Generate Summary"}
-				</Button>
-				{briefMutation.isError ? (
-					<p className="text-destructive text-[11px] leading-relaxed">
-						{briefMutation.error.message}
-					</p>
-				) : null}
-				{briefMutation.data ? (
-					<div className="border-border/60 bg-muted/40 space-y-1.5 rounded-lg border p-2.5 text-[11px]">
-						<div className="text-foreground font-medium">
-							{briefMutation.data.metrics.organizationName} (
-							{briefMutation.data.metrics.memberCount} members,{" "}
-							{briefMutation.data.metrics.committedUploadCount} files)
-						</div>
-						<div className="text-muted-foreground space-y-1.5 text-xs leading-relaxed">
-							{renderSafeMarkdown(
-								briefMutation.data.summary,
-								"workspace-brief"
-							)}
-						</div>
-					</div>
-				) : null}
-			</CardContent>
-		</Card>
-	);
-}
-
 function resolveAgentStatus({
 	data,
 	isError,
@@ -842,6 +576,7 @@ function resolveAgentStatus({
 	if (isError) {
 		return {
 			apiKeyEnvVars: [],
+			availableModels: [] as AiModelOption[],
 			defaultAgentId: "workspace-assistant",
 			isConfigured: false,
 			modelLabel: "Status unavailable",
@@ -853,6 +588,7 @@ function resolveAgentStatus({
 	if (!data) {
 		return {
 			apiKeyEnvVars: [],
+			availableModels: [] as AiModelOption[],
 			defaultAgentId: "workspace-assistant",
 			isConfigured: false,
 			modelLabel: isPending ? "Checking model..." : "Not configured",
@@ -863,6 +599,7 @@ function resolveAgentStatus({
 
 	return {
 		apiKeyEnvVars: data.provider.apiKeyEnvVars,
+		availableModels: data.availableModels ?? [],
 		defaultAgentId: data.defaultAgentId,
 		isConfigured: data.configured,
 		modelLabel: data.model,
@@ -924,14 +661,22 @@ function ThreadLoadingCard() {
 }
 
 function AiWorkspaceBanner({
+	availableModels,
 	modelLabel,
 	onNewConversation,
+	onSelectModel,
+	selectedModelId,
 	semanticRecall,
 }: {
+	availableModels: AiModelOption[];
 	modelLabel: string;
 	onNewConversation: () => void;
+	onSelectModel: (modelId: string) => void;
+	selectedModelId: string;
 	semanticRecall: boolean;
 }) {
+	const configuredModels = availableModels.filter((m) => m.configured);
+
 	return (
 		<div className="border-border/70 bg-card/70 relative overflow-hidden rounded-2xl border p-6 shadow-xs backdrop-blur-md">
 			<div className="from-primary/10 via-primary/5 dark:from-primary/15 pointer-events-none absolute inset-0 bg-linear-to-r to-transparent" />
@@ -949,19 +694,38 @@ function AiWorkspaceBanner({
 							AI Workspace Assistant
 						</h1>
 						<Badge appearance="light" size="sm" variant="primary">
-							{modelLabel}
+							{selectedModelId || modelLabel}
 						</Badge>
 						<Badge appearance="light" size="sm" variant="secondary">
-							{semanticRecall ? "Smart Memory" : "Thread Memory"}
+							{semanticRecall ? "Smart Memory + RAG" : "Thread Memory"}
 						</Badge>
 					</div>
 					<p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-						Ask questions about your workspace, team members, and stored files.
-						Conversations stay private to your active organization.
+						Ask questions about your workspace, team members, stored files, and
+						indexed documents. Conversations stay private to your active
+						organization.
 					</p>
 				</div>
 
-				<div className="flex shrink-0 items-center gap-2">
+				<div className="flex shrink-0 flex-wrap items-center gap-2">
+					{configuredModels.length > 1 ? (
+						<label className="flex items-center gap-1.5 text-xs">
+							<span className="sr-only">Select AI model</span>
+							<select
+								aria-label="Select AI model"
+								className="border-input bg-background text-foreground focus-visible:ring-ring h-8 rounded-lg border px-2.5 text-xs outline-none focus-visible:ring-2"
+								onChange={(event) => onSelectModel(event.target.value)}
+								value={selectedModelId || modelLabel}
+							>
+								{configuredModels.map((opt) => (
+									<option key={opt.id} value={opt.id}>
+										{opt.label}
+									</option>
+								))}
+							</select>
+						</label>
+					) : null}
+
 					<Button
 						onClick={onNewConversation}
 						size="sm"
@@ -981,11 +745,13 @@ function useAiWorkspaceData({
 	activeOrgId,
 	activeThreadId,
 	onDeletedActiveThread,
+	page,
 	selectedExistingThreadId,
 }: {
 	activeOrgId: string | undefined;
 	activeThreadId: string | null;
 	onDeletedActiveThread: () => void;
+	page: number;
 	selectedExistingThreadId: string | null;
 }) {
 	const queryClient = useQueryClient();
@@ -1006,11 +772,11 @@ function useAiWorkspaceData({
 		queryFn: async () =>
 			parseApiResponse<AiThreadsResponse>(
 				await client.api.ai.threads.$get(
-					{ query: { limit: "20", page: "0" } },
+					{ query: { limit: "20", page: String(page) } },
 					orgHeadersInit(activeOrgId)
 				)
 			),
-		queryKey: ["ai", "threads", orgScope],
+		queryKey: ["ai", "threads", orgScope, page],
 	});
 
 	const threadDetailQuery = useQuery<AiThreadDetailResponse>({
@@ -1085,6 +851,9 @@ function useAiWorkspaceData({
 }
 
 export function AiWorkspaceClient() {
+	const searchParams = useSearchParams();
+	const initialUrlThread = searchParams.get("thread")?.trim() || null;
+
 	const {
 		activeOrg,
 		activeOrgId,
@@ -1094,16 +863,26 @@ export function AiWorkspaceClient() {
 		isPermissionsPending,
 	} = useCurrentOrganization();
 
-	const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+	const [activeThreadId, setActiveThreadId] = useState<string | null>(
+		initialUrlThread
+	);
 	const [selectedExistingThreadId, setSelectedExistingThreadId] = useState<
 		string | null
-	>(null);
+	>(initialUrlThread);
+	const [threadPage, setThreadPage] = useState(0);
+	const [selectedModelId, setSelectedModelId] = useState("");
 	const previousOrgIdRef = useRef<string | undefined>(activeOrgId);
 
 	useEffect(() => {
-		if (activeThreadId === null || previousOrgIdRef.current !== activeOrgId) {
+		if (previousOrgIdRef.current !== activeOrgId) {
 			previousOrgIdRef.current = activeOrgId;
+			setThreadPage(0);
 			setSelectedExistingThreadId(null);
+			setActiveThreadId(createThreadId());
+			syncThreadQueryParam(null);
+			return;
+		}
+		if (activeThreadId === null) {
 			setActiveThreadId(createThreadId());
 		}
 	}, [activeOrgId, activeThreadId]);
@@ -1111,11 +890,13 @@ export function AiWorkspaceClient() {
 	const handleNewConversation = () => {
 		setSelectedExistingThreadId(null);
 		setActiveThreadId(createThreadId());
+		syncThreadQueryParam(null);
 	};
 
 	const handleSelectThread = (threadId: string) => {
 		setSelectedExistingThreadId(threadId);
 		setActiveThreadId(threadId);
+		syncThreadQueryParam(threadId);
 	};
 
 	const {
@@ -1129,6 +910,7 @@ export function AiWorkspaceClient() {
 		activeOrgId,
 		activeThreadId,
 		onDeletedActiveThread: handleNewConversation,
+		page: threadPage,
 		selectedExistingThreadId,
 	});
 
@@ -1181,6 +963,7 @@ export function AiWorkspaceClient() {
 				isRoleResolved={isRoleResolved}
 				isStatusPending={agentsQuery.isPending}
 				key={sessionKey}
+				modelId={selectedModelId || undefined}
 				onConversationFinished={invalidateConversation}
 				onThreadTitleGenerated={invalidateThreadsList}
 				providerLabel={agentStatus.providerLabel}
@@ -1198,12 +981,14 @@ export function AiWorkspaceClient() {
 	return (
 		<div className="flex flex-col gap-6">
 			<AiWorkspaceBanner
+				availableModels={agentStatus.availableModels}
 				modelLabel={agentStatus.modelLabel}
 				onNewConversation={handleNewConversation}
+				onSelectModel={setSelectedModelId}
+				selectedModelId={selectedModelId}
 				semanticRecall={agentStatus.semanticRecall}
 			/>
 
-			{/* Main 2-column Workspace */}
 			<div className="grid grid-cols-1 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
 				<div className="order-2 flex flex-col gap-4 lg:order-1">
 					<ThreadHistorySidebar
@@ -1218,12 +1003,15 @@ export function AiWorkspaceClient() {
 								? (deleteThreadMutation.variables ?? null)
 								: null
 						}
+						hasMore={threadsQuery.data?.hasMore ?? false}
 						isError={threadsQuery.isError}
 						isPending={threadsQuery.isPending}
 						onDeleteThread={(threadIdToDelete) =>
 							deleteThreadMutation.mutate(threadIdToDelete)
 						}
+						onPageChange={setThreadPage}
 						onSelectThread={handleSelectThread}
+						page={threadPage}
 						threads={threadsQuery.data?.threads ?? []}
 					/>
 					<WorkspaceBriefCard
@@ -1231,6 +1019,7 @@ export function AiWorkspaceClient() {
 						canExecuteAi={!isRoleResolved || canExecuteAi}
 						isConfigured={agentStatus.isConfigured}
 						key={activeOrgId ?? "none"}
+						modelId={selectedModelId || undefined}
 					/>
 				</div>
 
