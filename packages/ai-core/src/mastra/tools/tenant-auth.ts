@@ -19,7 +19,8 @@ const EMAIL_READ_ADMIN_ROLES = new Set(["admin", "owner"]);
  * workspace membership in PostgreSQL before any tenant tool returns data.
  */
 export async function requireTenantMembership(
-	requestContext: RequestContext<TenantAiContext> | undefined
+	requestContext: RequestContext<TenantAiContext> | undefined,
+	options?: { requireStorageAction?: string }
 ): Promise<VerifiedTenantContext> {
 	const organizationId = requestContext?.get(AI_CONTEXT_KEYS.organizationId);
 	const userId = requestContext?.get(AI_CONTEXT_KEYS.userId);
@@ -41,6 +42,14 @@ export async function requireTenantMembership(
 		throw new Error("Active user is not a member of the requested workspace");
 	}
 
+	const canReadStorage =
+		requestContext?.get(AI_CONTEXT_KEYS.canReadStorage) === true;
+	if (options?.requireStorageAction && !canReadStorage) {
+		throw new Error(
+			`Storage read permission is required to ${options.requireStorageAction}`
+		);
+	}
+
 	const explicitEmailFlag = requestContext?.get(
 		AI_CONTEXT_KEYS.canReadMemberEmails
 	);
@@ -51,12 +60,18 @@ export async function requireTenantMembership(
 
 	return {
 		canReadMemberEmails,
-		canReadStorage:
-			requestContext?.get(AI_CONTEXT_KEYS.canReadStorage) === true,
+		canReadStorage,
 		memberRole: membershipRow.role,
 		organizationId,
 		userId,
 	};
+}
+
+/**
+ * Normalizes a Date or timestamp string to an ISO-8601 string.
+ */
+export function toIsoString(value: Date | string): string {
+	return value instanceof Date ? value.toISOString() : String(value);
 }
 
 /**

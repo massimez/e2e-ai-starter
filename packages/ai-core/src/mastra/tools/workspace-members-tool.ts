@@ -4,7 +4,7 @@ import { member, user } from "@workspace/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { tenantAiContextSchema } from "../../contracts";
-import { requireTenantMembership } from "./tenant-auth";
+import { requireTenantMembership, toIsoString } from "./tenant-auth";
 
 const workspaceMembersInputSchema = z.object({
 	limit: z.number().int().min(1).max(50).optional().default(20),
@@ -57,10 +57,7 @@ export const workspaceMembersTool = createTool({
 
 		const members = rows.map((row) => ({
 			...(canReadMemberEmails ? { email: row.email } : {}),
-			joinedAt:
-				row.createdAt instanceof Date
-					? row.createdAt.toISOString()
-					: String(row.createdAt),
+			joinedAt: toIsoString(row.createdAt),
 			name: row.name,
 			role: row.role,
 			userId: row.userId,

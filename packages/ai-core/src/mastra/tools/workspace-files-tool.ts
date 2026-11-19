@@ -4,7 +4,11 @@ import { uploads } from "@workspace/db/schema";
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { tenantAiContextSchema } from "../../contracts";
-import { escapeLikePattern, requireTenantMembership } from "./tenant-auth";
+import {
+	escapeLikePattern,
+	requireTenantMembership,
+	toIsoString,
+} from "./tenant-auth";
 
 const workspaceFilesInputSchema = z.object({
 	limit: z.number().int().min(1).max(50).optional().default(15),
@@ -54,14 +58,10 @@ export const workspaceFilesTool = createTool({
 	outputSchema: workspaceFilesOutputSchema,
 	requestContextSchema: tenantAiContextSchema,
 	execute: async (inputData, context) => {
-		const { canReadStorage, organizationId } = await requireTenantMembership(
-			context?.requestContext
+		const { organizationId } = await requireTenantMembership(
+			context?.requestContext,
+			{ requireStorageAction: "search workspace files" }
 		);
-		if (!canReadStorage) {
-			throw new Error(
-				"Storage read permission is required to search workspace files"
-			);
-		}
 
 		const searchQuery = inputData.search?.trim();
 		const escapedPattern = searchQuery
@@ -97,10 +97,7 @@ export const workspaceFilesTool = createTool({
 
 		const files = rows.map((row) => ({
 			contentType: row.contentType ?? "application/octet-stream",
-			createdAt:
-				row.createdAt instanceof Date
-					? row.createdAt.toISOString()
-					: String(row.createdAt),
+			createdAt: toIsoString(row.createdAt),
 			fileKey: row.fileKey,
 			id: row.id,
 			originalName: resolveOriginalName(row.fileKey, row.metadata),

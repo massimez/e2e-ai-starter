@@ -49,14 +49,10 @@ export function createWorkspaceKnowledgeTool(
 		outputSchema: workspaceKnowledgeOutputSchema,
 		requestContextSchema: tenantAiContextSchema,
 		execute: async (inputData, context) => {
-			const { canReadStorage, organizationId } = await requireTenantMembership(
-				context?.requestContext
+			const { organizationId } = await requireTenantMembership(
+				context?.requestContext,
+				{ requireStorageAction: "search workspace knowledge" }
 			);
-			if (!canReadStorage) {
-				throw new Error(
-					"Storage read permission is required to search workspace knowledge"
-				);
-			}
 
 			const vector = options.getVector?.();
 			if (!vector) {

@@ -47,24 +47,25 @@ export const workspaceContextTool = createTool({
 		const { canReadStorage, memberRole, organizationId } =
 			await requireTenantMembership(context?.requestContext);
 
-		const [orgRow] = await db
-			.select({
-				id: organization.id,
-				name: organization.name,
-				slug: organization.slug,
-			})
-			.from(organization)
-			.where(eq(organization.id, organizationId))
-			.limit(1);
+		const [[orgRow], [memberStats]] = await Promise.all([
+			db
+				.select({
+					id: organization.id,
+					name: organization.name,
+					slug: organization.slug,
+				})
+				.from(organization)
+				.where(eq(organization.id, organizationId))
+				.limit(1),
+			db
+				.select({ total: count() })
+				.from(member)
+				.where(eq(member.organizationId, organizationId)),
+		]);
 
 		if (!orgRow) {
 			throw new Error(`Workspace ${organizationId} was not found`);
 		}
-
-		const [memberStats] = await db
-			.select({ total: count() })
-			.from(member)
-			.where(eq(member.organizationId, organizationId));
 
 		const result: z.infer<typeof workspaceContextOutputSchema> = {
 			memberCount: memberStats?.total ?? 0,
@@ -75,24 +76,25 @@ export const workspaceContextTool = createTool({
 		};
 
 		if (inputData.includeStorageSummary && canReadStorage) {
-			const [quotaRow] = await db
-				.select({
-					currentUsage: organizationStorageLimits.currentUsage,
-					storageLimit: organizationStorageLimits.storageLimit,
-				})
-				.from(organizationStorageLimits)
-				.where(eq(organizationStorageLimits.organizationId, organizationId))
-				.limit(1);
-
-			const [uploadStats] = await db
-				.select({ total: count() })
-				.from(uploads)
-				.where(
-					and(
-						eq(uploads.organizationId, organizationId),
-						eq(uploads.status, "committed")
-					)
-				);
+			const [[quotaRow], [uploadStats]] = await Promise.all([
+				db
+					.select({
+						currentUsage: organizationStorageLimits.currentUsage,
+						storageLimit: organizationStorageLimits.storageLimit,
+					})
+					.from(organizationStorageLimits)
+					.where(eq(organizationStorageLimits.organizationId, organizationId))
+					.limit(1),
+				db
+					.select({ total: count() })
+					.from(uploads)
+					.where(
+						and(
+							eq(uploads.organizationId, organizationId),
+							eq(uploads.status, "committed")
+						)
+					),
+			]);
 
 			result.committedUploadCount = uploadStats?.total ?? 0;
 			result.storageCurrentUsageBytes = quotaRow?.currentUsage ?? 0;

@@ -23,24 +23,21 @@ const gatheredStepOutputSchema = z.object({
 
 function extractToolErrorMessage(result: unknown): string | undefined {
 	if (
-		typeof result === "object" &&
-		result !== null &&
-		"error" in result &&
-		result.error
+		!result ||
+		typeof result !== "object" ||
+		!("error" in result) ||
+		!result.error
 	) {
-		const record = result as Record<string, unknown>;
-		if (
-			typeof record.message === "string" &&
-			record.message.trim().length > 0
-		) {
-			return record.message.trim();
-		}
-		if (typeof record.error === "string" && record.error.trim().length > 0) {
-			return record.error.trim();
-		}
-		return "Workspace tool returned an error";
+		return undefined;
 	}
-	return undefined;
+	const { error, message } = result as { error: unknown; message?: unknown };
+	if (typeof message === "string" && message.trim()) {
+		return message.trim();
+	}
+	if (typeof error === "string" && error.trim()) {
+		return error.trim();
+	}
+	return "Workspace tool returned an error";
 }
 
 const gatherWorkspaceMetricsStep = createStep({

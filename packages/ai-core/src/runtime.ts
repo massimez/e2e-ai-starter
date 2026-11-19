@@ -52,30 +52,12 @@ export interface MastraRuntime {
 	vector: PgVector | undefined;
 }
 
-function resolveMastraSslConfig(
-	databaseUrl: string,
-	databaseSsl?: boolean
-): { rejectUnauthorized: boolean } | undefined {
-	if (databaseSsl || databaseUrl.includes("sslmode=require")) {
-		return { rejectUnauthorized: true };
-	}
-	return undefined;
-}
-
-function resolveMastraLogLevel(
-	level: MastraRuntimeConfig["logLevel"]
-): (typeof LogLevel)[keyof typeof LogLevel] {
-	switch (level) {
-		case "debug":
-			return LogLevel.DEBUG;
-		case "warn":
-			return LogLevel.WARN;
-		case "error":
-			return LogLevel.ERROR;
-		default:
-			return LogLevel.INFO;
-	}
-}
+const MASTRA_LOG_LEVELS = {
+	debug: LogLevel.DEBUG,
+	error: LogLevel.ERROR,
+	info: LogLevel.INFO,
+	warn: LogLevel.WARN,
+} as const;
 
 /**
  * Validates and builds a Mastra `RequestContext` populated with trusted tenant fields.
@@ -85,24 +67,13 @@ export function createTenantRequestContext(
 ): RequestContext<TenantAiContext> {
 	const parsed = tenantAiContextSchema.parse(input);
 	const requestContext = new RequestContext<TenantAiContext>();
-	requestContext.set(AI_CONTEXT_KEYS.organizationId, parsed.organizationId);
-	requestContext.set(AI_CONTEXT_KEYS.userId, parsed.userId);
-	requestContext.set(AI_CONTEXT_KEYS.userRole, parsed.userRole);
-	requestContext.set(
-		AI_CONTEXT_KEYS.canReadStorage,
-		parsed.canReadStorage ?? false
-	);
-	if (parsed.canReadMemberEmails !== undefined) {
-		requestContext.set(
-			AI_CONTEXT_KEYS.canReadMemberEmails,
-			parsed.canReadMemberEmails
-		);
+	for (const [key, value] of Object.entries(parsed)) {
+		if (value !== undefined) {
+			requestContext.set(key as keyof TenantAiContext, value);
+		}
 	}
-	if (parsed.requestId) {
-		requestContext.set(AI_CONTEXT_KEYS.requestId, parsed.requestId);
-	}
-	if (parsed.modelId) {
-		requestContext.set(AI_CONTEXT_KEYS.modelId, parsed.modelId);
+	if (parsed.canReadStorage === undefined) {
+		requestContext.set(AI_CONTEXT_KEYS.canReadStorage, false);
 	}
 	return requestContext;
 }
@@ -152,6 +123,70 @@ export async function deleteTenantMemoryData(params: {
 	return counts.reduce((sum, count) => sum + count, 0);
 }
 
+function createPgStores(
+	config: MastraRuntimeConfig,
+	embeddingModel: string,
+	embeddingDimension: number,
+	schemaName: string
+): {
+	memory: Memory | undefined;
+	storage: PostgresStoreVNext | undefined;
+	vector: PgVector | undefined;
+} {
+	if (!config.databaseUrl) {
+		return { memory: undefined, storage: undefined, vector: undefined };
+	}
+
+	const ssl =
+		config.databaseSsl || config.databaseUrl.includes("sslmode=require")
+			? { rejectUnauthorized: true }
+			: undefined;
+
+	const vector = new PgVector({
+		connectionString: config.databaseUrl,
+		disableInit: config.disableStorageInit,
+		id: "mastra-pg-vector",
+		pgPoolOptions: {
+			connectionTimeoutMillis: 10_000,
+			max: config.maxPoolConnections ?? 5,
+			...(ssl ? { ssl } : {}),
+		},
+		schemaName,
+	});
+
+	const storage = new PostgresStoreVNext({
+		disableInit: config.disableStorageInit,
+		id: "mastra-pg-store",
+		observability: {
+			pool: vector.pool,
+			schemaName,
+		},
+		pool: vector.pool,
+		schemaName,
+	});
+
+	const enableSemanticRecall = config.enableSemanticRecall ?? true;
+	const memory = new Memory({
+		...(enableSemanticRecall
+			? {
+					embedder: embeddingModel,
+					embedderOptions: {
+						providerOptions: buildEmbeddingProviderOptions(
+							embeddingModel,
+							embeddingDimension
+						),
+					},
+					embeddingDimension,
+					vector,
+				}
+			: {}),
+		options: createWorkspaceMemoryOptions({ enableSemanticRecall }),
+		storage,
+	});
+
+	return { memory, storage, vector };
+}
+
 /**
  * Instantiates Mastra with PostgreSQL vNext storage/observability & pgvector persistence
  * (isolated schema), provider-agnostic agent defaults, semantic recall memory, and trace context.
@@ -165,53 +200,12 @@ export function createMastraRuntime(
 		config.embeddingDimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
 	const schemaName = config.schemaName ?? DEFAULT_MASTRA_DB_SCHEMA;
 
-	let storage: PostgresStoreVNext | undefined;
-	let vector: PgVector | undefined;
-	let memory: Memory | undefined;
-
-	if (config.databaseUrl) {
-		const maxPoolConnections = config.maxPoolConnections ?? 5;
-		const ssl = resolveMastraSslConfig(config.databaseUrl, config.databaseSsl);
-		vector = new PgVector({
-			connectionString: config.databaseUrl,
-			disableInit: config.disableStorageInit,
-			id: "mastra-pg-vector",
-			pgPoolOptions: {
-				connectionTimeoutMillis: 10_000,
-				max: maxPoolConnections,
-				...(ssl ? { ssl } : {}),
-			},
-			schemaName,
-		});
-		storage = new PostgresStoreVNext({
-			disableInit: config.disableStorageInit,
-			id: "mastra-pg-store",
-			observability: {
-				pool: vector.pool,
-				schemaName,
-			},
-			pool: vector.pool,
-			schemaName,
-		});
-		const enableSemanticRecall = config.enableSemanticRecall ?? true;
-		memory = new Memory({
-			...(enableSemanticRecall
-				? {
-						embedder: embeddingModel,
-						embedderOptions: {
-							providerOptions: buildEmbeddingProviderOptions(
-								embeddingModel,
-								embeddingDimension
-							),
-						},
-						embeddingDimension,
-						vector,
-					}
-				: {}),
-			options: createWorkspaceMemoryOptions({ enableSemanticRecall }),
-			storage,
-		});
-	}
+	const { memory, storage, vector } = createPgStores(
+		config,
+		embeddingModel,
+		embeddingDimension,
+		schemaName
+	);
 
 	const knowledgeTool = createWorkspaceKnowledgeTool({
 		embeddingDimension,
@@ -249,7 +243,7 @@ export function createMastraRuntime(
 	const logger = config.disableStorageInit
 		? noopLogger
 		: new ConsoleLogger({
-				level: resolveMastraLogLevel(config.logLevel),
+				level: MASTRA_LOG_LEVELS[config.logLevel ?? "info"],
 				name: "mastra",
 			});
 
@@ -271,15 +265,11 @@ export function createMastraRuntime(
 	});
 
 	const close = async (): Promise<void> => {
-		if (memory) {
-			await memory.settled();
-		}
-		if (observability) {
-			await Promise.allSettled([observability.shutdown()]);
-		}
+		await memory?.settled();
 		await Promise.allSettled([
-			storage ? storage.close() : Promise.resolve(),
-			vector ? vector.disconnect() : Promise.resolve(),
+			observability?.shutdown(),
+			storage?.close(),
+			vector?.disconnect(),
 		]);
 	};
 
