@@ -1,13 +1,17 @@
 import {
+	type AiModelOption,
 	createMastraRuntime,
 	deleteTenantMemoryData,
+	deleteWorkspaceKnowledgeForUpload,
 	getAiProviderInfo,
 	hasAiProviderApiKey,
+	indexWorkspaceUploadKnowledge,
 	isSupportedEmbeddingModel,
+	listAvailableAiModels,
 	type MastraRuntime,
 } from "@workspace/ai-core";
 import { env } from "../../env";
-import { AppError } from "../../lib/errors";
+import { AppError, ValidationError } from "../../lib/errors";
 
 interface GlobalAiRuntimeCache {
 	_aiRuntime?: MastraRuntime | null;
@@ -54,14 +58,35 @@ export function isAiProviderConfigured(): boolean {
 }
 
 export function assertAiProviderConfigured(): void {
-	if (isAiProviderConfigured()) {
-		return;
+	assertModelProviderConfigured(env.MASTRA_DEFAULT_MODEL);
+}
+
+export function assertModelProviderConfigured(requestedModel?: string): string {
+	const targetModel = requestedModel?.trim() || env.MASTRA_DEFAULT_MODEL;
+	const allowedModel = getAvailableAiModels().find(
+		(option) => option.id === targetModel
+	);
+	if (!allowedModel) {
+		throw new ValidationError(
+			`Unsupported AI model "${targetModel}"`,
+			"modelId"
+		);
 	}
-	const provider = getAiProviderInfo(env.MASTRA_DEFAULT_MODEL);
+	if (allowedModel.configured) {
+		return allowedModel.id;
+	}
+	const provider = getAiProviderInfo(allowedModel.id);
 	throw new AppError(
-		`${provider.label} API key is not configured for ${env.MASTRA_DEFAULT_MODEL}. Set ${provider.apiKeyEnvVars.join(" or ")} to enable workspace AI.`,
+		`${provider.label} API key is not configured for ${allowedModel.id}. Set ${provider.apiKeyEnvVars.join(" or ")} to enable workspace AI.`,
 		503,
 		"AI_NOT_CONFIGURED"
+	);
+}
+
+export function getAvailableAiModels(): AiModelOption[] {
+	return listAvailableAiModels(
+		env.MASTRA_DEFAULT_MODEL,
+		getProviderKeyValues()
 	);
 }
 
@@ -117,13 +142,17 @@ export async function closeAiRuntime(): Promise<void> {
 
 export async function cleanupTenantAiMemory(
 	organizationId: string,
-	userIds: readonly string[]
+	userIds: readonly string[],
+	options?: { deleteOrganizationKnowledge?: boolean }
 ): Promise<number> {
-	if (userIds.length === 0) {
-		return 0;
-	}
 	const runtime = getAiRuntime();
-	if (!runtime.memory) {
+	if (options?.deleteOrganizationKnowledge && runtime.vector) {
+		await deleteWorkspaceKnowledgeForUpload({
+			organizationId,
+			vector: runtime.vector,
+		});
+	}
+	if (userIds.length === 0 || !runtime.memory) {
 		return 0;
 	}
 	await ensureStorageInitialized(runtime);
@@ -131,5 +160,43 @@ export async function cleanupTenantAiMemory(
 		organizationId,
 		runtime,
 		userIds,
+	});
+}
+
+export async function indexUploadKnowledgeInMastra(params: {
+	content: string;
+	fileName: string;
+	organizationId: string;
+	uploadId: string;
+}): Promise<{ chunkCount: number; indexed: boolean }> {
+	if (!isSemanticRecallEnabled()) {
+		return { chunkCount: 0, indexed: false };
+	}
+	const runtime = getAiRuntime();
+	if (!runtime.vector) {
+		return { chunkCount: 0, indexed: false };
+	}
+	await ensureStorageInitialized(runtime);
+	const { chunkCount } = await indexWorkspaceUploadKnowledge({
+		content: params.content,
+		embeddingDimension: runtime.embeddingDimension,
+		embeddingModel: runtime.embeddingModel,
+		fileName: params.fileName,
+		organizationId: params.organizationId,
+		uploadId: params.uploadId,
+		vector: runtime.vector,
+	});
+	return { chunkCount, indexed: chunkCount > 0 };
+}
+
+export async function deleteUploadKnowledgeFromMastra(params: {
+	organizationId: string;
+	uploadId: string;
+}): Promise<void> {
+	const runtime = getAiRuntime();
+	await deleteWorkspaceKnowledgeForUpload({
+		organizationId: params.organizationId,
+		uploadId: params.uploadId,
+		vector: runtime.vector,
 	});
 }

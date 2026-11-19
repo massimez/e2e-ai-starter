@@ -33,10 +33,9 @@ const orgLifecycle = createOrganizationLifecycleHooks(undefined, {
 			.from(schema.member)
 			.where(eq(schema.member.organizationId, organizationId));
 		const userIds = members.map((row) => row.userId);
-		if (userIds.length === 0) {
-			return;
-		}
-		await cleanupTenantAiMemory(organizationId, userIds);
+		await cleanupTenantAiMemory(organizationId, userIds, {
+			deleteOrganizationKnowledge: true,
+		});
 	},
 	onMembershipLost: async ({ organizationId, userId }) => {
 		await cleanupTenantAiMemory(organizationId, [userId]);

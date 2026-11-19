@@ -12,17 +12,23 @@ import { rateLimiter } from "../../middleware/rate-limiter";
 import { tenantBoundaryMiddleware } from "../../middleware/tenant-boundary";
 import {
 	commitUploadsSchema,
+	createStorageFolderSchema,
 	deleteUploadBodySchema,
+	folderIdParamSchema,
 	listUploadsQuerySchema,
 	presignUploadSchema,
 	uploadIdParamSchema,
 } from "./schema";
 import {
 	commitUploads,
+	createStorageFolder,
+	deleteStorageFolder,
 	deleteUpload,
 	getStorageUsage,
 	getUploadFileStream,
 	getUploadSignedDownloadUrl,
+	indexUploadKnowledge,
+	listStorageFolders,
 	listUploads,
 	presignUpload,
 } from "./service";
@@ -91,6 +97,52 @@ export const storageRoutes = createRouter()
 		const usage = await getStorageUsage(organizationId);
 		return c.json(createSuccessResponse(usage));
 	})
+
+	// 4b. List, create, and delete workspace storage folders
+	.get("/folders", hasOrgPermission("storage:read"), async (c) => {
+		const { organizationId } = getActiveOrgContext(c);
+		const folders = await listStorageFolders(organizationId);
+		return c.json(createSuccessResponse(folders));
+	})
+	.post(
+		"/folders",
+		hasOrgPermission("storage:create"),
+		jsonValidator(createStorageFolderSchema),
+		async (c) => {
+			const { organizationId } = getActiveOrgContext(c);
+			const input = c.req.valid("json");
+			const folder = await createStorageFolder({ input, organizationId });
+			return c.json(createSuccessResponse(folder), 201);
+		}
+	)
+	.delete(
+		"/folders/:id",
+		hasOrgPermission("storage:delete"),
+		paramValidator(folderIdParamSchema),
+		async (c) => {
+			const { organizationId } = getActiveOrgContext(c);
+			const { id } = c.req.valid("param");
+			const result = await deleteStorageFolder({ id, organizationId });
+			return c.json(createSuccessResponse(result));
+		}
+	)
+
+	// 4c. Index a committed PDF/Markdown/text/CSV/JSON upload into pgvector RAG knowledge
+	.post(
+		"/files/:id/index",
+		hasOrgPermission("storage:create"),
+		rateLimiter(60_000, 15, {
+			identity: "actor",
+			operation: "storage:index",
+		}),
+		paramValidator(uploadIdParamSchema),
+		async (c) => {
+			const { organizationId } = getActiveOrgContext(c);
+			const { id } = c.req.valid("param");
+			const result = await indexUploadKnowledge({ id, organizationId });
+			return c.json(createSuccessResponse(result));
+		}
+	)
 
 	// 5. Generate short-lived presigned download URL for a private file
 	.get(

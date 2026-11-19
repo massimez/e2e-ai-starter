@@ -30,6 +30,7 @@
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "ioredis": "catalog:",
+    "unpdf": "^2.2.1",
     "zod": "catalog:"
   },
   "devDependencies": {

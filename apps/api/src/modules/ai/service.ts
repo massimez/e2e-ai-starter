@@ -25,11 +25,12 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "../../lib/auth/index";
 import { AppError, ForbiddenError, NotFoundError } from "../../lib/errors";
 import {
-	assertAiProviderConfigured,
+	assertModelProviderConfigured,
 	cleanupTenantAiMemory,
 	closeAiRuntime,
 	ensureStorageInitialized,
 	getAiRuntime,
+	getAvailableAiModels,
 	isAiProviderConfigured,
 	isSemanticRecallEnabled,
 } from "./runtime";
@@ -111,6 +112,7 @@ export function listAiAgents(): AiAgentsResponse {
 
 	return {
 		agents,
+		availableModels: getAvailableAiModels(),
 		configured: isAiProviderConfigured(),
 		defaultAgentId: DEFAULT_AI_AGENT_ID,
 		model: runtime.model,
@@ -143,6 +145,7 @@ async function checkAiOrgPermission(params: {
 
 async function resolveTenantAiContext(params: {
 	headers?: Headers;
+	modelId?: string;
 	organizationId: string;
 	requestId?: string;
 	userId: string;
@@ -171,6 +174,7 @@ async function resolveTenantAiContext(params: {
 	return createTenantRequestContext({
 		canReadMemberEmails,
 		canReadStorage,
+		...(params.modelId ? { modelId: params.modelId } : {}),
 		organizationId: params.organizationId,
 		requestId: params.requestId,
 		userId: params.userId,
@@ -229,7 +233,7 @@ export interface CreateAiChatParams {
 export async function createAiChatResponse(
 	params: CreateAiChatParams
 ): Promise<Response> {
-	assertAiProviderConfigured();
+	const selectedModel = assertModelProviderConfigured(params.input.modelId);
 
 	const runtime = getAiRuntime();
 	const agentId = params.input.agentId ?? DEFAULT_AI_AGENT_ID;
@@ -239,6 +243,7 @@ export async function createAiChatResponse(
 
 	const requestContext = await resolveTenantAiContext({
 		headers: params.headers,
+		modelId: selectedModel,
 		organizationId: params.organizationId,
 		requestId: params.requestId,
 		userId: params.userId,
@@ -420,11 +425,12 @@ export interface RunWorkspaceBriefParams {
 export async function runWorkspaceBrief(
 	params: RunWorkspaceBriefParams
 ): Promise<WorkspaceBriefResponse> {
-	assertAiProviderConfigured();
+	const selectedModel = assertModelProviderConfigured(params.input.modelId);
 
 	const runtime = getAiRuntime();
 	const requestContext = await resolveTenantAiContext({
 		headers: params.headers,
+		modelId: selectedModel,
 		organizationId: params.organizationId,
 		requestId: params.requestId,
 		userId: params.userId,

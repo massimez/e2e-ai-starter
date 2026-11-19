@@ -6,7 +6,10 @@ import {
 	uploads,
 } from "@workspace/db/schema";
 import { logError } from "@workspace/shared/logger";
-import { STORAGE_CONFIG } from "@workspace/shared/storage";
+import {
+	isRagIndexableContentType,
+	STORAGE_CONFIG,
+} from "@workspace/shared/storage";
 import {
 	and,
 	asc,
@@ -20,8 +23,15 @@ import {
 	type SQL,
 	sql,
 } from "drizzle-orm";
+import { extractText } from "unpdf";
 import { env } from "../../env";
-import { AppError, NotFoundError, ValidationError } from "../../lib/errors";
+import {
+	AppError,
+	ConflictError,
+	isPgErrorCode,
+	NotFoundError,
+	ValidationError,
+} from "../../lib/errors";
 import {
 	formatBytes,
 	generateStorageKey,
@@ -29,6 +39,11 @@ import {
 	isValidFileSize,
 } from "../../lib/storage";
 import { withOrg } from "../../lib/tenant";
+import {
+	deleteUploadKnowledgeFromMastra,
+	indexUploadKnowledgeInMastra,
+	isSemanticRecallEnabled,
+} from "../ai/runtime";
 import {
 	deleteS3Object,
 	ensureDevBucketExists,
@@ -41,9 +56,12 @@ import {
 } from "./s3";
 import type {
 	CommitUploadsInput,
+	CreateStorageFolderInput,
 	ListUploadsQuery,
 	PresignUploadInput,
 } from "./schema";
+
+const MAX_RAG_INDEX_BYTES = 256 * 1024;
 
 const SAFE_INLINE_IMAGE_TYPES = new Set([
 	"image/jpeg",
@@ -222,7 +240,10 @@ export async function presignUpload(params: {
 				expiresAt,
 				fileKey,
 				folderId: input.folderId ?? null,
-				metadata: input.metadata ?? {},
+				metadata: {
+					...(input.metadata ?? {}),
+					originalName: input.fileName,
+				},
 				organizationId,
 				size: input.size,
 				status: "pending",
@@ -462,8 +483,9 @@ export async function listUploads(params: {
 	}
 	if (query.search) {
 		const escaped = escapeIlikePattern(query.search);
+		const pattern = `%${escaped}%`;
 		extraConditions.push(
-			sql`${uploads.fileKey} ILIKE ${`%${escaped}%`} ESCAPE '\\'`
+			sql`(${uploads.fileKey} ILIKE ${pattern} ESCAPE '\\' OR COALESCE(${uploads.metadata}->>'originalName', '') ILIKE ${pattern} ESCAPE '\\')`
 		);
 	}
 
@@ -696,11 +718,212 @@ export async function deleteUpload(params: {
 	);
 
 	await deleteS3ObjectWithRetry(deletedBucket, deletedFileKey, deletedId);
+	await deleteUploadKnowledgeFromMastra({
+		organizationId,
+		uploadId: deletedId,
+	}).catch((error) => {
+		logError("deleteUpload:KnowledgeCleanup", error, {
+			organizationId,
+			uploadId: deletedId,
+		});
+	});
 
 	return {
 		fileKey: deletedFileKey,
 		id: deletedId,
 		success: true,
+	};
+}
+
+export async function listStorageFolders(organizationId: string) {
+	return await db
+		.select()
+		.from(storageFolders)
+		.where(eq(storageFolders.organizationId, organizationId))
+		.orderBy(asc(storageFolders.name));
+}
+
+export async function createStorageFolder(params: {
+	input: CreateStorageFolderInput;
+	organizationId: string;
+}) {
+	const { input, organizationId } = params;
+	if (input.parentId) {
+		const [parent] = await db
+			.select({ id: storageFolders.id })
+			.from(storageFolders)
+			.where(
+				withOrg(
+					storageFolders,
+					organizationId,
+					eq(storageFolders.id, input.parentId)
+				)
+			)
+			.limit(1);
+		if (!parent) {
+			throw new NotFoundError("Parent folder", "parentId");
+		}
+	}
+
+	try {
+		const [created] = await db
+			.insert(storageFolders)
+			.values({
+				name: input.name,
+				organizationId,
+				parentId: input.parentId ?? null,
+			})
+			.returning();
+		if (!created) {
+			throw new AppError("Failed to create folder", 500);
+		}
+		return created;
+	} catch (error) {
+		if (isPgErrorCode(error, "23505")) {
+			throw new ConflictError("A folder with this name already exists", {
+				cause: error,
+				field: "name",
+			});
+		}
+		throw error;
+	}
+}
+
+export async function deleteStorageFolder(params: {
+	id: string;
+	organizationId: string;
+}) {
+	const [deleted] = await db
+		.delete(storageFolders)
+		.where(
+			withOrg(
+				storageFolders,
+				params.organizationId,
+				eq(storageFolders.id, params.id)
+			)
+		)
+		.returning();
+
+	if (!deleted) {
+		throw new NotFoundError("Folder");
+	}
+	return { id: deleted.id, success: true };
+}
+
+async function readBoundedStreamText(
+	stream: ReadableStream<Uint8Array>,
+	maxBytes: number
+): Promise<string> {
+	const reader = stream.getReader();
+	const chunks: Uint8Array[] = [];
+	let totalBytes = 0;
+
+	try {
+		while (totalBytes < maxBytes) {
+			// biome-ignore lint/performance/noAwaitInLoops: sequential stream reader loop
+			const { done, value } = await reader.read();
+			if (done || !value) {
+				break;
+			}
+			const remaining = maxBytes - totalBytes;
+			const slice =
+				value.byteLength > remaining ? value.subarray(0, remaining) : value;
+			chunks.push(slice);
+			totalBytes += slice.byteLength;
+			if (totalBytes >= maxBytes) {
+				await reader.cancel();
+				break;
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
+
+	const combined = new Uint8Array(totalBytes);
+	let offset = 0;
+	for (const chunk of chunks) {
+		combined.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return new TextDecoder().decode(combined);
+}
+
+async function extractUploadKnowledgeText(
+	stream: ReadableStream<Uint8Array>,
+	normalizedType: string
+): Promise<string> {
+	if (normalizedType === "application/pdf") {
+		try {
+			const buffer = await new Response(stream).arrayBuffer();
+			const { text } = await extractText(new Uint8Array(buffer), {
+				mergePages: true,
+			});
+			return text.slice(0, MAX_RAG_INDEX_BYTES);
+		} catch (error) {
+			throw new ValidationError(
+				"Could not extract text from PDF (file may be encrypted or corrupted)",
+				{ cause: error, field: "contentType" }
+			);
+		}
+	}
+	return await readBoundedStreamText(stream, MAX_RAG_INDEX_BYTES);
+}
+
+export async function indexUploadKnowledge(params: {
+	id: string;
+	organizationId: string;
+}) {
+	const record = await requireCommittedUpload(params.organizationId, params.id);
+	const normalizedType =
+		record.contentType?.split(";")[0]?.trim().toLowerCase() ?? "";
+	if (!isRagIndexableContentType(normalizedType)) {
+		throw new ValidationError(
+			"Only PDF, Markdown, plain text, CSV, and JSON files can be indexed for AI knowledge search",
+			"contentType"
+		);
+	}
+
+	if (!isSemanticRecallEnabled()) {
+		return {
+			chunkCount: 0,
+			id: record.id,
+			indexed: false,
+		};
+	}
+
+	const { stream } = await getUploadFileStream(params);
+	const rawText = await extractUploadKnowledgeText(stream, normalizedType);
+	const fileName =
+		typeof record.metadata?.originalName === "string" &&
+		record.metadata.originalName.trim().length > 0
+			? record.metadata.originalName.trim()
+			: path.posix.basename(record.fileKey) || record.id;
+
+	const { chunkCount, indexed } = await indexUploadKnowledgeInMastra({
+		content: rawText,
+		fileName,
+		organizationId: params.organizationId,
+		uploadId: record.id,
+	});
+
+	const nextMetadata = {
+		...(record.metadata ?? {}),
+		ragChunkCount: chunkCount,
+		ragIndexedAt: indexed ? new Date().toISOString() : null,
+	};
+
+	await db
+		.update(uploads)
+		.set({
+			metadata: nextMetadata,
+			updatedAt: new Date(),
+		})
+		.where(withOrg(uploads, params.organizationId, eq(uploads.id, record.id)));
+
+	return {
+		chunkCount,
+		id: record.id,
+		indexed,
 	};
 }
 
