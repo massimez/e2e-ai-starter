@@ -174,16 +174,12 @@ export function createMastraRuntime(
 		if (memory) {
 			await memory.settled();
 		}
+		if (observability) {
+			await Promise.allSettled([observability.shutdown()]);
+		}
 		await Promise.allSettled([
-			observability ? observability.shutdown() : Promise.resolve(),
-			(async () => {
-				if (storage) {
-					await storage.close();
-				}
-				if (vector) {
-					await vector.disconnect();
-				}
-			})(),
+			storage ? storage.close() : Promise.resolve(),
+			vector ? vector.disconnect() : Promise.resolve(),
 		]);
 	};
 

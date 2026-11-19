@@ -29,7 +29,7 @@ import { AppError, ForbiddenError, NotFoundError } from "../../lib/errors";
 import { logError, logWarning } from "../../lib/logger";
 import { rolesService } from "../roles/service";
 
-const SSE_HEARTBEAT_MS = 15_000;
+const SSE_HEARTBEAT_MS = 5000;
 
 let cachedRuntime: MastraRuntime | null = null;
 let storageInitPromise: Promise<void> | null = null;
@@ -68,7 +68,7 @@ function getAiRuntime(): MastraRuntime {
 }
 
 async function ensureStorageInitialized(runtime: MastraRuntime): Promise<void> {
-	if (!runtime.storage) {
+	if (!runtime.storage || env.NODE_ENV === "test") {
 		return;
 	}
 	if (!storageInitPromise) {
@@ -83,6 +83,42 @@ async function ensureStorageInitialized(runtime: MastraRuntime): Promise<void> {
 /** Whether an API key is set for the provider behind `MASTRA_DEFAULT_MODEL`. */
 export function isAiProviderConfigured(): boolean {
 	return hasAiProviderApiKey(env.MASTRA_DEFAULT_MODEL, getProviderKeyValues());
+}
+
+function assertAiProviderConfigured(): void {
+	if (isAiProviderConfigured()) {
+		return;
+	}
+	const provider = getAiProviderInfo(env.MASTRA_DEFAULT_MODEL);
+	throw new AppError(
+		`${provider.label} API key is not configured for ${env.MASTRA_DEFAULT_MODEL}. Set ${provider.apiKeyEnvVars.join(" or ")} to enable workspace AI.`,
+		503,
+		"AI_NOT_CONFIGURED"
+	);
+}
+
+function assertOwnedThreadResource(params: {
+	actionDescription: string;
+	organizationId: string;
+	resourceId: string;
+	thread: StorageThreadType;
+	userId: string;
+}): void {
+	if (params.thread.resourceId === params.resourceId) {
+		return;
+	}
+	logWarning(
+		"AIService",
+		`Rejected cross-tenant AI thread ${params.actionDescription}`,
+		{
+			organizationId: params.organizationId,
+			threadId: params.thread.id,
+			userId: params.userId,
+		}
+	);
+	throw new ForbiddenError(
+		"Conversation thread does not belong to active tenant"
+	);
 }
 
 async function resolveMemberRole(
@@ -123,8 +159,12 @@ export async function closeAiRuntime(): Promise<void> {
 		return;
 	}
 	const runtimeToClose = cachedRuntime;
+	const pendingInit = storageInitPromise;
 	cachedRuntime = null;
 	storageInitPromise = null;
+	if (pendingInit) {
+		await Promise.allSettled([pendingInit]);
+	}
 	await runtimeToClose.close();
 }
 
@@ -211,20 +251,13 @@ async function requireOwnedThread(
 	if (!thread) {
 		throw new NotFoundError("Conversation thread not found");
 	}
-	if (thread.resourceId !== resourceId) {
-		logWarning(
-			"AIService",
-			`Rejected cross-tenant AI thread ${actionDescription}`,
-			{
-				organizationId,
-				threadId,
-				userId,
-			}
-		);
-		throw new ForbiddenError(
-			"Conversation thread does not belong to active tenant"
-		);
-	}
+	assertOwnedThreadResource({
+		actionDescription,
+		organizationId,
+		resourceId,
+		thread,
+		userId,
+	});
 	return { memory: runtime.memory, resourceId, thread };
 }
 
@@ -239,14 +272,7 @@ export interface CreateAiChatParams {
 export async function createAiChatResponse(
 	params: CreateAiChatParams
 ): Promise<Response> {
-	if (!isAiProviderConfigured()) {
-		const provider = getAiProviderInfo(env.MASTRA_DEFAULT_MODEL);
-		throw new AppError(
-			`${provider.label} API key is not configured for ${env.MASTRA_DEFAULT_MODEL}. Set ${provider.apiKeyEnvVars.join(" or ")} to enable workspace AI.`,
-			503,
-			"AI_NOT_CONFIGURED"
-		);
-	}
+	assertAiProviderConfigured();
 
 	const runtime = getAiRuntime();
 	const agentId = params.input.agentId ?? DEFAULT_AI_AGENT_ID;
@@ -271,15 +297,14 @@ export async function createAiChatResponse(
 		const existingThread = await runtime.memory.getThreadById({
 			threadId: params.input.id,
 		});
-		if (existingThread && existingThread.resourceId !== resourceId) {
-			logWarning("AIService", "Rejected cross-tenant AI thread access", {
+		if (existingThread) {
+			assertOwnedThreadResource({
+				actionDescription: "access",
 				organizationId: params.organizationId,
-				threadId: params.input.id,
+				resourceId,
+				thread: existingThread,
 				userId: params.userId,
 			});
-			throw new ForbiddenError(
-				"Conversation thread does not belong to active tenant"
-			);
 		}
 	}
 
@@ -435,14 +460,7 @@ export interface RunWorkspaceBriefParams {
 export async function runWorkspaceBrief(
 	params: RunWorkspaceBriefParams
 ): Promise<WorkspaceBriefResponse> {
-	if (!isAiProviderConfigured()) {
-		const provider = getAiProviderInfo(env.MASTRA_DEFAULT_MODEL);
-		throw new AppError(
-			`${provider.label} API key is not configured for ${env.MASTRA_DEFAULT_MODEL}. Set ${provider.apiKeyEnvVars.join(" or ")} to enable workspace AI.`,
-			503,
-			"AI_NOT_CONFIGURED"
-		);
-	}
+	assertAiProviderConfigured();
 
 	const runtime = getAiRuntime();
 	const requestContext = await resolveTenantAiContext({

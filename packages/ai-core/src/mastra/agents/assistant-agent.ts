@@ -45,8 +45,8 @@ export function createWorkspaceAssistantAgent(
 			const canReadStorage =
 				requestContext.get(AI_CONTEXT_KEYS.canReadStorage) === true;
 			const allowedTools = canReadStorage
-				? "get-workspace-context, list-workspace-members, or search-workspace-files"
-				: "get-workspace-context or list-workspace-members";
+				? "workspaceContextTool, workspaceMembersTool, or workspaceFilesTool"
+				: "workspaceContextTool or workspaceMembersTool";
 			const groundingLine = `Always ground answers about the user's current workspace, membership role, team roster, or committed files by calling ${allowedTools} instead of guessing.`;
 
 			if (organizationId && userRole) {
