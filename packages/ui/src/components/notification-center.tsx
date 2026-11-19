@@ -62,6 +62,7 @@ export function NotificationCenter({
 	const [isOpen, setIsOpen] = useState<boolean>(false);
 	const abortControllerRef = useRef<AbortController | null>(null);
 	const isAuthBlockedRef = useRef<boolean>(false);
+	const markingReadIdsRef = useRef<Set<string>>(new Set());
 
 	const navigateTo = useCallback(
 		(path: string) => {
@@ -147,7 +148,10 @@ export function NotificationCenter({
 			}
 			setErrorMessage("Unable to load notifications.");
 		} finally {
-			setIsLoading(false);
+			if (abortControllerRef.current === controller) {
+				abortControllerRef.current = null;
+				setIsLoading(false);
+			}
 		}
 	}, [apiUrl, enabled]);
 
@@ -188,21 +192,37 @@ export function NotificationCenter({
 	};
 
 	const handleMarkAsRead = async (id: string) => {
+		if (markingReadIdsRef.current.has(id)) {
+			return;
+		}
+		markingReadIdsRef.current.add(id);
 		try {
 			const res = await fetch(`${apiUrl}/api/notifications/${id}/read`, {
 				credentials: "include",
+				keepalive: true,
 				method: "PATCH",
 			});
 			if (!res.ok) {
 				setErrorMessage("Failed to mark notification as read.");
 				return;
 			}
+			let decremented = false;
 			setNotifications((prev) =>
-				prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+				prev.map((n) => {
+					if (n.id === id && !n.isRead) {
+						decremented = true;
+						return { ...n, isRead: true };
+					}
+					return n;
+				})
 			);
-			setUnreadCount((c) => Math.max(0, c - 1));
+			if (decremented) {
+				setUnreadCount((c) => Math.max(0, c - 1));
+			}
 		} catch {
 			setErrorMessage("Failed to mark notification as read.");
+		} finally {
+			markingReadIdsRef.current.delete(id);
 		}
 	};
 

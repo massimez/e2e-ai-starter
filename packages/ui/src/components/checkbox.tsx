@@ -8,10 +8,7 @@ import { useEffect, useRef } from "react";
 export type CheckedState = boolean | "indeterminate";
 
 export interface CheckboxProps
-	extends Omit<
-		React.InputHTMLAttributes<HTMLInputElement>,
-		"checked" | "onChange" | "type"
-	> {
+	extends Omit<React.ComponentProps<"input">, "checked" | "onChange" | "type"> {
 	checked?: CheckedState;
 	onCheckedChange?: (checked: boolean) => void;
 }
@@ -50,12 +47,23 @@ function Checkbox({
 	className,
 	disabled,
 	onCheckedChange,
+	ref,
 	...props
 }: CheckboxProps) {
 	const inputRef = useRef<HTMLInputElement>(null);
 	const isChecked = checked === true;
 	const isIndeterminate = checked === "indeterminate";
 	const dataState = getCheckboxDataState(isIndeterminate, isChecked);
+
+	const setRefs = (node: HTMLInputElement | null) => {
+		inputRef.current = node;
+		if (typeof ref === "function") {
+			return ref(node);
+		}
+		if (ref) {
+			ref.current = node;
+		}
+	};
 
 	useEffect(() => {
 		if (inputRef.current) {
@@ -76,7 +84,7 @@ function Checkbox({
 				data-state={dataState}
 				disabled={disabled}
 				onChange={(event) => onCheckedChange?.(event.target.checked)}
-				ref={inputRef}
+				ref={setRefs}
 				type="checkbox"
 				{...props}
 			/>

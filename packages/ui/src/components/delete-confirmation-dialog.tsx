@@ -78,6 +78,8 @@ export function DeleteConfirmationDialog({
 				setTypedKeyword("");
 				setIsOpen(false);
 			}
+		} catch {
+			// Keep dialog open so the caller's error feedback remains visible
 		} finally {
 			setIsConfirming(false);
 		}

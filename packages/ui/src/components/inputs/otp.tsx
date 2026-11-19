@@ -95,12 +95,20 @@ const OTPInput = ({
 	const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
 	const digitsRef = useRef<string[]>(digits);
 	const lastEmittedValueRef = useRef(value);
+	const previousValuePropRef = useRef(value);
 	const lastCompletedRef = useRef("");
 
 	digitsRef.current = digits;
 
-	// Sync internal slot array only when external `value` changes out-of-band
+	// Sync internal slot array only when external `value` prop actually changes
 	useEffect(() => {
+		if (value === previousValuePropRef.current) {
+			if (digitsRef.current.length !== numInputs) {
+				setDigits(buildDigits(digitsRef.current.join(""), numInputs));
+			}
+			return;
+		}
+		previousValuePropRef.current = value;
 		if (
 			value === lastEmittedValueRef.current &&
 			digitsRef.current.length === numInputs
@@ -282,9 +290,8 @@ const OTPInput = ({
 
 			const { value: valueCur } = event.currentTarget;
 
+			// Let React's onChange handle multi-character SMS autofill and fast mobile typing cleanly
 			if (valueCur.length > 1) {
-				applyCharactersAt(index, valueCur);
-				event.currentTarget.value = digitsRef.current[index] ?? "";
 				return;
 			}
 
@@ -313,7 +320,7 @@ const OTPInput = ({
 				event.currentTarget.value = digitsRef.current[index] ?? "";
 			}
 		},
-		[applyCharactersAt, commitDigits, disabled, focusInput, isInputValueValid]
+		[commitDigits, disabled, focusInput, isInputValueValid]
 	);
 
 	const handleFocus = useCallback(

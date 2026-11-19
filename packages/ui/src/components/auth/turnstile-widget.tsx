@@ -53,7 +53,6 @@ export interface TurnstileTranslations {
 	failed: string;
 	retry: string;
 	unavailable: string;
-	verifying: string;
 }
 
 export interface TurnstileWidgetProps {
@@ -180,9 +179,14 @@ export function TurnstileWidget({
 	);
 	const pendingResolversRef = useRef<PendingResolver[]>([]);
 	const mountGenerationRef = useRef(0);
+	const [hasMounted, setHasMounted] = useState(false);
 	const [status, setStatus] = useState<
 		"loading" | "ready" | "interactive" | "error"
 	>("loading");
+
+	useEffect(() => {
+		setHasMounted(true);
+	}, []);
 
 	const updateStatus = useCallback(
 		(next: "loading" | "ready" | "interactive" | "error") => {
@@ -231,6 +235,17 @@ export function TurnstileWidget({
 					widgetIdRef.current = null;
 				}
 
+				const handleTokenReset = () => {
+					if (mountGenerationRef.current !== generation) {
+						return;
+					}
+					tokenRef.current = null;
+					updateStatus("loading");
+					if (widgetIdRef.current) {
+						turnstile.reset(widgetIdRef.current);
+					}
+				};
+
 				widgetIdRef.current = turnstile.render(containerRef.current, {
 					action,
 					appearance: "interaction-only",
@@ -268,26 +283,8 @@ export function TurnstileWidget({
 						}
 						updateStatus(tokenRef.current ? "ready" : "loading");
 					},
-					"expired-callback": () => {
-						if (mountGenerationRef.current !== generation) {
-							return;
-						}
-						tokenRef.current = null;
-						updateStatus("loading");
-						if (widgetIdRef.current) {
-							turnstile.reset(widgetIdRef.current);
-						}
-					},
-					"timeout-callback": () => {
-						if (mountGenerationRef.current !== generation) {
-							return;
-						}
-						tokenRef.current = null;
-						updateStatus("loading");
-						if (widgetIdRef.current) {
-							turnstile.reset(widgetIdRef.current);
-						}
-					},
+					"expired-callback": handleTokenReset,
+					"timeout-callback": handleTokenReset,
 					"error-callback": () => {
 						if (mountGenerationRef.current !== generation) {
 							return;
@@ -326,13 +323,16 @@ export function TurnstileWidget({
 
 	const resetWidget = useCallback(() => {
 		tokenRef.current = null;
+		rejectPending(
+			new CaptchaUnavailableError("Security check was reset before completion")
+		);
 		if (window.turnstile && widgetIdRef.current) {
 			updateStatus("loading");
 			window.turnstile.reset(widgetIdRef.current);
 			return;
 		}
 		mountWidget();
-	}, [mountWidget, updateStatus]);
+	}, [mountWidget, rejectPending, updateStatus]);
 
 	useImperativeHandle(
 		ref,
@@ -371,6 +371,9 @@ export function TurnstileWidget({
 	);
 
 	useEffect(() => {
+		if (!hasMounted) {
+			return;
+		}
 		mountWidget();
 
 		return () => {
@@ -386,7 +389,7 @@ export function TurnstileWidget({
 				widgetIdRef.current = null;
 			}
 		};
-	}, [mountWidget, rejectPending]);
+	}, [hasMounted, mountWidget, rejectPending]);
 
 	return (
 		<div className="space-y-2">

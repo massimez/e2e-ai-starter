@@ -14,7 +14,6 @@ import { SignIn } from "./sign-in";
 import { SignUp } from "./sign-up";
 import defaultTranslations from "./translations.json";
 import {
-	CaptchaUnavailableError,
 	type TurnstileHandle,
 	type TurnstileTranslations,
 	TurnstileWidget,
@@ -196,30 +195,35 @@ export function AuthModalProvider({
 		}
 	};
 
-	const acquireCaptchaHeaders = async (
+	const tryAcquireCaptchaOptions = async (
 		forceRefresh = false
-	): Promise<Record<string, string> | undefined> => {
+	): Promise<{ headers?: Record<string, string> } | null> => {
 		if (!turnstileSiteKey) {
-			return undefined;
+			return {};
 		}
 		const widget = turnstileRef.current;
 		if (!widget) {
-			throw new CaptchaUnavailableError(captchaTranslations.unavailable);
+			if (isOpenRef.current) {
+				toast.error(captchaTranslations.unavailable);
+			}
+			return null;
 		}
-		if (forceRefresh) {
-			widget.reset();
+		try {
+			if (forceRefresh) {
+				widget.reset();
+			}
+			const token = await widget.getToken();
+			return { headers: { "x-captcha-response": token } };
+		} catch (error) {
+			if (isOpenRef.current) {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: captchaTranslations.unavailable
+				);
+			}
+			return null;
 		}
-		const token = await widget.getToken();
-		return { "x-captcha-response": token };
-	};
-
-	const showCaptchaAcquisitionError = (error: unknown) => {
-		if (!isOpenRef.current) {
-			return;
-		}
-		toast.error(
-			error instanceof Error ? error.message : captchaTranslations.unavailable
-		);
 	};
 
 	const handleOpenChange = (nextOpen: boolean) => {
@@ -267,11 +271,8 @@ export function AuthModalProvider({
 				}
 
 				toast.success(translations.notifications.email_verified);
-				let headers: Record<string, string> | undefined;
-				try {
-					headers = await acquireCaptchaHeaders();
-				} catch (captchaError) {
-					showCaptchaAcquisitionError(captchaError);
+				const captchaOptions = await tryAcquireCaptchaOptions();
+				if (!captchaOptions) {
 					setView("signIn");
 					return;
 				}
@@ -281,7 +282,7 @@ export function AuthModalProvider({
 						email,
 						password,
 					},
-					headers ? { headers } : undefined
+					captchaOptions.headers ? captchaOptions : undefined
 				);
 				if (signInRes.error) {
 					resetCaptcha();
@@ -300,11 +301,8 @@ export function AuthModalProvider({
 				}
 			},
 			onResend: async () => {
-				let headers: Record<string, string> | undefined;
-				try {
-					headers = await acquireCaptchaHeaders();
-				} catch (captchaError) {
-					showCaptchaAcquisitionError(captchaError);
+				const captchaOptions = await tryAcquireCaptchaOptions();
+				if (!captchaOptions) {
 					return null;
 				}
 
@@ -313,7 +311,7 @@ export function AuthModalProvider({
 						email,
 						type: "email-verification",
 					},
-					headers ? { headers } : undefined
+					captchaOptions.headers ? captchaOptions : undefined
 				);
 
 				resetCaptcha();
@@ -333,11 +331,8 @@ export function AuthModalProvider({
 	};
 
 	const handleSignIn = async (email: string, password: string) => {
-		let headers: Record<string, string> | undefined;
-		try {
-			headers = await acquireCaptchaHeaders();
-		} catch (captchaError) {
-			showCaptchaAcquisitionError(captchaError);
+		const captchaOptions = await tryAcquireCaptchaOptions();
+		if (!captchaOptions) {
 			return;
 		}
 
@@ -347,7 +342,7 @@ export function AuthModalProvider({
 				password,
 			},
 			{
-				...(headers ? { headers } : {}),
+				...captchaOptions,
 				onSuccess: () => {
 					toast.success(translations.notifications.signed_in);
 					if (onSignInSuccess) {
@@ -358,11 +353,8 @@ export function AuthModalProvider({
 				},
 				onError: async (ctx) => {
 					if (ctx.error.code === "EMAIL_NOT_VERIFIED") {
-						let resendHeaders: Record<string, string> | undefined;
-						try {
-							resendHeaders = await acquireCaptchaHeaders(true);
-						} catch (captchaError) {
-							showCaptchaAcquisitionError(captchaError);
+						const resendOptions = await tryAcquireCaptchaOptions(true);
+						if (!resendOptions) {
 							return;
 						}
 
@@ -372,7 +364,7 @@ export function AuthModalProvider({
 									email,
 									type: "email-verification",
 								},
-								resendHeaders ? { headers: resendHeaders } : undefined
+								resendOptions.headers ? resendOptions : undefined
 							);
 						if (otpError) {
 							resetCaptcha();
@@ -437,11 +429,8 @@ export function AuthModalProvider({
 		firstName: string;
 		lastName: string;
 	}) => {
-		let headers: Record<string, string> | undefined;
-		try {
-			headers = await acquireCaptchaHeaders();
-		} catch (captchaError) {
-			showCaptchaAcquisitionError(captchaError);
+		const captchaOptions = await tryAcquireCaptchaOptions();
+		if (!captchaOptions) {
 			return;
 		}
 
@@ -457,7 +446,7 @@ export function AuthModalProvider({
 				...(locale ? { locale } : {}),
 			},
 			{
-				...(headers ? { headers } : {}),
+				...captchaOptions,
 				onSuccess: () => {
 					handleVerification({
 						email: data.email,
@@ -481,11 +470,8 @@ export function AuthModalProvider({
 	};
 
 	const handleSendResetCode = async (email: string) => {
-		let headers: Record<string, string> | undefined;
-		try {
-			headers = await acquireCaptchaHeaders();
-		} catch (captchaError) {
-			showCaptchaAcquisitionError(captchaError);
+		const captchaOptions = await tryAcquireCaptchaOptions();
+		if (!captchaOptions) {
 			return;
 		}
 
@@ -493,7 +479,7 @@ export function AuthModalProvider({
 			{
 				email,
 			},
-			headers ? { headers } : undefined
+			captchaOptions.headers ? captchaOptions : undefined
 		);
 
 		if (error) {
@@ -537,11 +523,8 @@ export function AuthModalProvider({
 				onPasswordResetSuccess?.();
 			},
 			onResendOtp: async () => {
-				let resendHeaders: Record<string, string> | undefined;
-				try {
-					resendHeaders = await acquireCaptchaHeaders();
-				} catch (captchaError) {
-					showCaptchaAcquisitionError(captchaError);
+				const resendOptions = await tryAcquireCaptchaOptions();
+				if (!resendOptions) {
 					return;
 				}
 
@@ -549,7 +532,7 @@ export function AuthModalProvider({
 					{
 						email,
 					},
-					resendHeaders ? { headers: resendHeaders } : undefined
+					resendOptions.headers ? resendOptions : undefined
 				);
 				resetCaptcha();
 				if (resendError) {
