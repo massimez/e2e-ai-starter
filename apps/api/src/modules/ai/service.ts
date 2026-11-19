@@ -7,13 +7,10 @@ import {
 	type AiThreadDetailResponse,
 	type AiThreadSummary,
 	type AiThreadsResponse,
-	createMastraRuntime,
 	createTenantRequestContext,
 	DEFAULT_AI_AGENT_ID,
 	formatTenantMemoryResourceId,
 	getAiProviderInfo,
-	hasAiProviderApiKey,
-	isSupportedEmbeddingModel,
 	type MastraRuntime,
 	type WorkspaceBriefRequest,
 	type WorkspaceBriefResponse,
@@ -25,77 +22,26 @@ import { logError, logWarning } from "@workspace/shared/logger";
 import { isOrgAdminRole } from "@workspace/shared/permissions";
 import { createUIMessageStreamResponse } from "ai";
 import { and, eq } from "drizzle-orm";
-import { env } from "../../env";
 import { auth } from "../../lib/auth/index";
 import { AppError, ForbiddenError, NotFoundError } from "../../lib/errors";
+import {
+	assertAiProviderConfigured,
+	cleanupTenantAiMemory,
+	closeAiRuntime,
+	ensureStorageInitialized,
+	getAiRuntime,
+	isAiProviderConfigured,
+	isSemanticRecallEnabled,
+} from "./runtime";
+
+export {
+	cleanupTenantAiMemory,
+	closeAiRuntime,
+	isAiProviderConfigured,
+	isSemanticRecallEnabled,
+} from "./runtime";
 
 const SSE_HEARTBEAT_MS = 5000;
-
-let cachedRuntime: MastraRuntime | null = null;
-let storageInitPromise: Promise<void> | null = null;
-
-function getProviderKeyValues(): Record<string, string | undefined> {
-	return {
-		ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
-		GOOGLE_API_KEY: env.GOOGLE_API_KEY,
-		GOOGLE_GENERATIVE_AI_API_KEY: env.GOOGLE_GENERATIVE_AI_API_KEY,
-		OPENAI_API_KEY: env.OPENAI_API_KEY,
-		OPENROUTER_API_KEY: env.OPENROUTER_API_KEY,
-	};
-}
-
-/** Semantic recall needs a supported embedding model plus its provider key. */
-export function isSemanticRecallEnabled(): boolean {
-	return (
-		isSupportedEmbeddingModel(env.MASTRA_EMBEDDING_MODEL) &&
-		hasAiProviderApiKey(env.MASTRA_EMBEDDING_MODEL, getProviderKeyValues())
-	);
-}
-
-function getAiRuntime(): MastraRuntime {
-	if (!cachedRuntime) {
-		cachedRuntime = createMastraRuntime({
-			databaseUrl: env.DATABASE_URL,
-			defaultModel: env.MASTRA_DEFAULT_MODEL,
-			disableStorageInit: env.NODE_ENV === "test",
-			embeddingDimensions: env.MASTRA_EMBEDDING_DIMENSIONS,
-			embeddingModel: env.MASTRA_EMBEDDING_MODEL,
-			enableSemanticRecall: isSemanticRecallEnabled(),
-			schemaName: env.MASTRA_DB_SCHEMA,
-		});
-	}
-	return cachedRuntime;
-}
-
-async function ensureStorageInitialized(runtime: MastraRuntime): Promise<void> {
-	if (!runtime.storage || env.NODE_ENV === "test") {
-		return;
-	}
-	if (!storageInitPromise) {
-		storageInitPromise = runtime.storage.init().catch((error: unknown) => {
-			storageInitPromise = null;
-			throw error;
-		});
-	}
-	await storageInitPromise;
-}
-
-/** Whether an API key is set for the provider behind `MASTRA_DEFAULT_MODEL`. */
-export function isAiProviderConfigured(): boolean {
-	return hasAiProviderApiKey(env.MASTRA_DEFAULT_MODEL, getProviderKeyValues());
-}
-
-function assertAiProviderConfigured(): void {
-	if (isAiProviderConfigured()) {
-		return;
-	}
-	const provider = getAiProviderInfo(env.MASTRA_DEFAULT_MODEL);
-	throw new AppError(
-		`${provider.label} API key is not configured for ${env.MASTRA_DEFAULT_MODEL}. Set ${provider.apiKeyEnvVars.join(" or ")} to enable workspace AI.`,
-		503,
-		"AI_NOT_CONFIGURED"
-	);
-}
 
 function assertOwnedThreadResource(params: {
 	actionDescription: string;
@@ -152,20 +98,6 @@ function serializeThread(thread: StorageThreadType): AiThreadSummary {
 				? thread.updatedAt.toISOString()
 				: String(thread.updatedAt),
 	};
-}
-
-export async function closeAiRuntime(): Promise<void> {
-	if (!cachedRuntime) {
-		return;
-	}
-	const runtimeToClose = cachedRuntime;
-	const pendingInit = storageInitPromise;
-	cachedRuntime = null;
-	storageInitPromise = null;
-	if (pendingInit) {
-		await Promise.allSettled([pendingInit]);
-	}
-	await runtimeToClose.close();
 }
 
 export function listAiAgents(): AiAgentsResponse {
@@ -442,7 +374,8 @@ export async function getAiThread(
 	);
 
 	const recalled = await memory.recall({
-		perPage: false,
+		page: 0,
+		perPage: 100,
 		resourceId,
 		threadId: params.threadId,
 	});
@@ -506,6 +439,20 @@ export async function runWorkspaceBrief(
 	});
 
 	if (result.status !== "success") {
+		logError(
+			"AIService:WorkspaceBrief",
+			"error" in result
+				? result.error
+				: new Error(
+						`Workspace brief workflow ended with status ${result.status}`
+					),
+			{
+				organizationId: params.organizationId,
+				requestId: params.requestId,
+				status: result.status,
+				userId: params.userId,
+			}
+		);
 		throw new AppError(
 			"Workspace brief workflow failed to complete",
 			502,
@@ -517,6 +464,7 @@ export async function runWorkspaceBrief(
 }
 
 export const aiService = {
+	cleanupTenantAiMemory,
 	closeAiRuntime,
 	createAiChatResponse,
 	deleteAiThread,

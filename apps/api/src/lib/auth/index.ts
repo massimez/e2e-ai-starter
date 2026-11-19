@@ -11,7 +11,9 @@ import { ac, roles } from "@workspace/shared/permissions";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, emailOTP, organization } from "better-auth/plugins";
+import { eq } from "drizzle-orm";
 import { env } from "../../env";
+import { cleanupTenantAiMemory } from "../../modules/ai/runtime";
 import {
 	enqueueEmail,
 	enqueueWorkspaceInvitationEmail,
@@ -24,7 +26,22 @@ import {
 	incrementFallbackCounter,
 } from "./secondary-storage";
 
-const orgLifecycle = createOrganizationLifecycleHooks();
+const orgLifecycle = createOrganizationLifecycleHooks(undefined, {
+	onBeforeOrganizationDelete: async (organizationId) => {
+		const members = await db
+			.select({ userId: schema.member.userId })
+			.from(schema.member)
+			.where(eq(schema.member.organizationId, organizationId));
+		const userIds = members.map((row) => row.userId);
+		if (userIds.length === 0) {
+			return;
+		}
+		await cleanupTenantAiMemory(organizationId, userIds);
+	},
+	onMembershipLost: async ({ organizationId, userId }) => {
+		await cleanupTenantAiMemory(organizationId, [userId]);
+	},
+});
 
 const captchaPlugin = createAuthCaptchaPlugin({
 	allowedHostnames: env.TURNSTILE_ALLOWED_HOSTNAMES_LIST,
@@ -169,6 +186,20 @@ export const auth = betterAuth({
 			});
 		},
 	},
+	emailVerification: {
+		afterEmailVerification: async (verifiedUser) => {
+			try {
+				await enqueueEmail({
+					payload: { name: verifiedUser.name },
+					subject: `Welcome to ${APP_CONFIG.name}!`,
+					template: "welcome",
+					to: verifiedUser.email,
+				});
+			} catch (error) {
+				logError("Auth:WelcomeEmail", error, { userId: verifiedUser.id });
+			}
+		},
+	},
 	plugins: [
 		admin(),
 		organization({
@@ -236,8 +267,10 @@ export const auth = betterAuth({
 			),
 		set: (key, value, ttl) =>
 			runSecondaryStorageOp("set", key, undefined, async (scopedKey) => {
-				if (ttl) {
-					await redis.set(scopedKey, value, "EX", ttl);
+				const ttlSeconds =
+					typeof ttl === "number" && Number.isFinite(ttl) ? Math.floor(ttl) : 0;
+				if (ttlSeconds > 0) {
+					await redis.set(scopedKey, value, "EX", ttlSeconds);
 				} else {
 					await redis.set(scopedKey, value);
 				}

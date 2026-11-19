@@ -96,6 +96,11 @@ const ORG_ACTIVATION_PATHS = new Set([
 ]);
 
 export interface OrganizationLifecycleOptions {
+	onBeforeOrganizationDelete?: (organizationId: string) => Promise<void>;
+	onMembershipLost?: (params: {
+		organizationId: string;
+		userId: string;
+	}) => Promise<void>;
 	onOrganizationCreated?: (organizationId: string) => Promise<void>;
 }
 
@@ -128,6 +133,43 @@ export function createOrganizationLifecycleHooks(
 		}
 	});
 
+	async function applyMembershipLossEffects(params: {
+		actingSession: HookSession;
+		internalAdapter?: {
+			updateSession: (
+				sessionToken: string,
+				data: Record<string, unknown>
+			) => Promise<unknown>;
+		};
+		lostOrganizationId: string;
+		path: string;
+	}) {
+		const { actingSession, internalAdapter, lostOrganizationId, path } = params;
+		const fallbackOrganizationId =
+			await healDefaultOrganizationAfterMembershipLoss(
+				{
+					lostOrganizationId,
+					userId: actingSession.user.id,
+				},
+				store
+			);
+
+		await reactivateFallbackOnActingSession({
+			activeOrganizationId: actingSession.session.activeOrganizationId,
+			fallbackOrganizationId,
+			internalAdapter,
+			lostOrganizationId,
+			sessionToken: actingSession.session.token,
+		});
+
+		if (path === "/organization/leave" && options?.onMembershipLost) {
+			await options.onMembershipLost({
+				organizationId: lostOrganizationId,
+				userId: actingSession.user.id,
+			});
+		}
+	}
+
 	const after = createAuthMiddleware(async (ctx) => {
 		if (!MEMBERSHIP_LOSS_PATHS.has(ctx.path)) {
 			return;
@@ -156,30 +198,20 @@ export function createOrganizationLifecycleHooks(
 			return;
 		}
 
-		try {
-			if (ctx.path === "/organization/remove-member") {
-				const removedUserId = (returned as RemovedMemberPayload | undefined)
-					?.member?.userId;
-				if (!removedUserId || removedUserId !== actingSession.user.id) {
-					return;
-				}
+		if (ctx.path === "/organization/remove-member") {
+			const removedUserId = (returned as RemovedMemberPayload | undefined)
+				?.member?.userId;
+			if (!removedUserId || removedUserId !== actingSession.user.id) {
+				return;
 			}
+		}
 
-			const fallbackOrganizationId =
-				await healDefaultOrganizationAfterMembershipLoss(
-					{
-						lostOrganizationId,
-						userId: actingSession.user.id,
-					},
-					store
-				);
-
-			await reactivateFallbackOnActingSession({
-				activeOrganizationId: actingSession.session.activeOrganizationId,
-				fallbackOrganizationId,
+		try {
+			await applyMembershipLossEffects({
+				actingSession,
 				internalAdapter: ctx.context.internalAdapter,
 				lostOrganizationId,
-				sessionToken: actingSession.session.token,
+				path: ctx.path,
 			});
 		} catch (error) {
 			logError("AuthOrganizationLifecycle:afterHook", error, {
@@ -304,6 +336,39 @@ export function createOrganizationLifecycleHooks(
 				logError("AuthOrganizationLifecycle:afterRemoveMember", error, {
 					organizationId: organization.id,
 					userId: user.id,
+				});
+			}
+			if (options?.onMembershipLost) {
+				try {
+					await options.onMembershipLost({
+						organizationId: organization.id,
+						userId: user.id,
+					});
+				} catch (error) {
+					logError(
+						"AuthOrganizationLifecycle:removeMemberMemoryCleanup",
+						error,
+						{
+							organizationId: organization.id,
+							userId: user.id,
+						}
+					);
+				}
+			}
+		},
+		beforeDeleteOrganization: async ({
+			organization,
+		}: {
+			organization: { id: string };
+		}) => {
+			if (!options?.onBeforeOrganizationDelete) {
+				return;
+			}
+			try {
+				await options.onBeforeOrganizationDelete(organization.id);
+			} catch (error) {
+				logError("AuthOrganizationLifecycle:beforeDeleteOrganization", error, {
+					organizationId: organization.id,
 				});
 			}
 		},

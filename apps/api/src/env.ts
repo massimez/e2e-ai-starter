@@ -71,6 +71,10 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 				.default(
 					`postgresql://postgres:postgres@localhost:5432/${APP_CONFIG.defaultDatabaseName}`
 				),
+			DATABASE_SSL: z
+				.string()
+				.optional()
+				.transform((value) => value?.trim().toLowerCase() === "true"),
 			BETTER_AUTH_SECRET: z
 				.string()
 				.min(32, "BETTER_AUTH_SECRET must be at least 32 characters")
@@ -106,6 +110,10 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 			S3_ACCESS_KEY_ID: z.string().default(""),
 			S3_SECRET_ACCESS_KEY: z.string().default(""),
 			S3_PUBLIC_URL: optionalUrlSchema,
+			S3_USE_IAM_ROLE: z
+				.string()
+				.optional()
+				.transform((value) => value?.trim().toLowerCase() === "true"),
 			QUEUE_DRIVER: z.enum(["redis", "inline"]).default("redis"),
 			REDIS_URL: z
 				.string()
@@ -148,7 +156,7 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 				Boolean(data.GOOGLE_CLIENT_SECRET.trim())
 			) {
 				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
+					code: "custom",
 					message:
 						"GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must both be set when configuring Google OAuth.",
 					path: ["GOOGLE_CLIENT_ID"],
@@ -161,7 +169,7 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 
 			if (data.BETTER_AUTH_SECRET === DEFAULT_DEV_SECRET) {
 				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
+					code: "custom",
 					message:
 						"BETTER_AUTH_SECRET must not use the default fallback secret in production.",
 					path: ["BETTER_AUTH_SECRET"],
@@ -172,9 +180,11 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 				"DATABASE_URL",
 				"BETTER_AUTH_URL",
 				"CORS_ORIGIN",
-				"S3_ACCESS_KEY_ID",
-				"S3_SECRET_ACCESS_KEY",
 			];
+
+			if (!data.S3_USE_IAM_ROLE) {
+				requiredInProd.push("S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY");
+			}
 
 			if (data.QUEUE_DRIVER === "redis") {
 				requiredInProd.push("REDIS_URL");
@@ -183,7 +193,7 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 			for (const key of requiredInProd) {
 				if (!rawInput[key]?.trim()) {
 					ctx.addIssue({
-						code: z.ZodIssueCode.custom,
+						code: "custom",
 						message: `${key} must be explicitly configured in production.`,
 						path: [key],
 					});
@@ -200,7 +210,7 @@ export function parseApiEnv(
 	if (!parsed.success) {
 		console.error(
 			"Invalid API environment variables:\n",
-			JSON.stringify(parsed.error.format(), null, 2)
+			JSON.stringify(z.treeifyError(parsed.error), null, 2)
 		);
 		throw new Error("Invalid API environment variables");
 	}

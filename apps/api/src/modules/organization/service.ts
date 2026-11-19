@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
 import { member, organization, session } from "@workspace/db/schema";
+import { logError } from "@workspace/shared/logger";
 import { parseMemberRoles } from "@workspace/shared/permissions";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { invalidateUserSessionCache } from "../../lib/auth/secondary-storage";
@@ -10,6 +11,7 @@ import {
 	ValidationError,
 } from "../../lib/errors";
 import { scopedWhere } from "../../lib/tenant";
+import { cleanupTenantAiMemory } from "../ai/service";
 import {
 	createDrizzleDefaultOrganizationStore,
 	healDefaultOrganizationAfterMembershipLoss,
@@ -274,6 +276,15 @@ export async function removeOrganizationMember(params: {
 	});
 
 	await invalidateUserSessionCache(targetMember.userId, sessionTokens);
+
+	try {
+		await cleanupTenantAiMemory(organizationId, [targetMember.userId]);
+	} catch (error) {
+		logError("OrganizationService:removeMemberAiCleanup", error, {
+			organizationId,
+			userId: targetMember.userId,
+		});
+	}
 
 	return {
 		member: targetMember,
