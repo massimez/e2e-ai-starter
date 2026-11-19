@@ -1,3 +1,8 @@
+pre-commit:
+  commands:
+    biome:
+      run: bun run check
+
 commit-msg:
   commands:
     commitlint:

@@ -1,11 +1,17 @@
 .git
 .github
+.agents
+.claude
+.planning
+docs
 **/node_modules
 **/.next
 **/.turbo
 dist
 out
 coverage
+playwright-report
+test-results
 .env
 .env.*
 **/.env*

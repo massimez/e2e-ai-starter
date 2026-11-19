@@ -1,5 +1,5 @@
 # Multi-stage Bun Dockerfile for Hono API
-FROM oven/bun:1.4-alpine AS base
+FROM oven/bun:1.4.4-alpine AS base
 WORKDIR /app
 
 FROM base AS pruner
