@@ -24,7 +24,10 @@ export interface ServerOrganization {
 	slug: string;
 }
 
-async function fetchInternalAuthJson<T>(path: string): Promise<T | null> {
+async function fetchInternalAuthJson<T>(
+	path: string,
+	organizationId?: string
+): Promise<T | null> {
 	const headerList = await headers();
 	const cookieHeader = headerList.get("cookie") ?? "";
 	if (!cookieHeader) {
@@ -36,6 +39,7 @@ async function fetchInternalAuthJson<T>(path: string): Promise<T | null> {
 			cache: "no-store",
 			headers: {
 				cookie: cookieHeader,
+				...(organizationId ? { "x-organization-id": organizationId } : {}),
 			},
 			signal: AbortSignal.timeout(5000),
 		});
@@ -48,6 +52,17 @@ async function fetchInternalAuthJson<T>(path: string): Promise<T | null> {
 	} catch {
 		return null;
 	}
+}
+
+export async function fetchInternalApiData<T>(
+	path: string,
+	organizationId?: string
+): Promise<T | null> {
+	const payload = await fetchInternalAuthJson<{ data?: T; success?: boolean }>(
+		path,
+		organizationId
+	);
+	return payload?.success && payload.data !== undefined ? payload.data : null;
 }
 
 /**

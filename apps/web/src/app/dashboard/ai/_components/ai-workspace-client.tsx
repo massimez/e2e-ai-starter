@@ -38,7 +38,6 @@ import {
 import Link from "next/link";
 import {
 	type FormEvent,
-	Fragment,
 	type KeyboardEvent,
 	useEffect,
 	useMemo,
@@ -47,7 +46,10 @@ import {
 } from "react";
 import { client, parseApiResponse } from "@/lib/api-client";
 import { formatUtcDate } from "@/lib/format";
-import { useCurrentOrganization } from "@/lib/organization-hooks";
+import {
+	orgHeadersInit,
+	useCurrentOrganization,
+} from "@/lib/organization-hooks";
 import { renderSafeMarkdown } from "./markdown-renderer";
 
 const STARTER_PROMPTS = [
@@ -192,6 +194,7 @@ function AssistantConfigNotice({
 }
 
 interface AiChatSessionPaneProps {
+	activeOrgId?: string;
 	activeOrgName: string | null;
 	agentId: string;
 	apiKeyEnvVars: string[];
@@ -201,12 +204,15 @@ interface AiChatSessionPaneProps {
 	isRoleResolved: boolean;
 	isStatusPending: boolean;
 	onConversationFinished: () => void;
+	onThreadTitleGenerated: () => void;
 	providerLabel: string;
 	statusError: string | null;
+	threadDetailUpdatedAt: number;
 	threadId: string | null;
 }
 
 function AiChatSessionPane({
+	activeOrgId,
 	activeOrgName,
 	agentId,
 	apiKeyEnvVars,
@@ -216,13 +222,17 @@ function AiChatSessionPane({
 	isRoleResolved,
 	isStatusPending,
 	onConversationFinished,
+	onThreadTitleGenerated,
 	providerLabel,
 	statusError,
+	threadDetailUpdatedAt,
 	threadId,
 }: AiChatSessionPaneProps) {
 	const [input, setInput] = useState("");
 	const [liveAnnouncement, setLiveAnnouncement] = useState("");
-	const pendingPromptRef = useRef<string | null>(null);
+	const isNearBottomRef = useRef<boolean>(true);
+	const lastSyncedAtRef = useRef(0);
+	const messagesScrollRef = useRef<HTMLDivElement | null>(null);
 	const scrollBottomRef = useRef<HTMLDivElement | null>(null);
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -232,54 +242,49 @@ function AiChatSessionPane({
 				api: "/api/ai/chat",
 				body: { agentId },
 				credentials: "include",
+				...(activeOrgId
+					? { headers: { "x-organization-id": activeOrgId } }
+					: {}),
 				prepareSendMessagesRequest: ({
 					body,
 					id,
-					messageId,
 					messages: outgoingMessages,
 					trigger,
 				}) => ({
 					body: {
 						...(body ?? {}),
 						id,
-						messageId,
 						messages: sanitizeLatestUserMessage(outgoingMessages),
-						trigger,
+						...(trigger === "submit-message" ? { trigger } : {}),
 					},
 				}),
 			}),
-		[agentId]
+		[activeOrgId, agentId]
 	);
 
-	const { error, messages, sendMessage, status, stop } = useChat<UIMessage>({
-		id: threadId ?? "pending",
-		messages: initialMessages,
-		onError: (err) => {
-			pendingPromptRef.current = null;
-			setLiveAnnouncement(`Assistant request failed: ${err.message}`);
-		},
-		onFinish: ({ isAbort, isError }) => {
-			const submittedPrompt = pendingPromptRef.current;
-			pendingPromptRef.current = null;
-			if (isAbort) {
-				setLiveAnnouncement("Assistant response stopped.");
+	const { error, messages, sendMessage, setMessages, status, stop } =
+		useChat<UIMessage>({
+			id: threadId ?? "pending",
+			messages: initialMessages,
+			onData: (dataPart) => {
+				if (dataPart.type === "data-thread-title") {
+					onThreadTitleGenerated();
+				}
+			},
+			onError: (err) => {
+				setLiveAnnouncement(`Assistant request failed: ${err.message}`);
+			},
+			onFinish: ({ isAbort }) => {
+				if (isAbort) {
+					setLiveAnnouncement("Assistant response stopped.");
+					onConversationFinished();
+					return;
+				}
+				setLiveAnnouncement("Assistant response complete.");
 				onConversationFinished();
-				return;
-			}
-			if (isError) {
-				onConversationFinished();
-				return;
-			}
-			if (submittedPrompt !== null) {
-				setInput((current) =>
-					current.trim() === submittedPrompt ? "" : current
-				);
-			}
-			setLiveAnnouncement("Assistant response complete.");
-			onConversationFinished();
-		},
-		transport,
-	});
+			},
+			transport,
+		});
 
 	const isStreaming = status === "submitted" || status === "streaming";
 	const isInputDisabled =
@@ -288,7 +293,22 @@ function AiChatSessionPane({
 		!(isInputDisabled || isStreaming) && input.trim().length > 0;
 
 	useEffect(() => {
+		if (
+			isStreaming ||
+			threadDetailUpdatedAt <= 0 ||
+			threadDetailUpdatedAt === lastSyncedAtRef.current
+		) {
+			return;
+		}
+		lastSyncedAtRef.current = threadDetailUpdatedAt;
+		setMessages(initialMessages);
+	}, [initialMessages, isStreaming, setMessages, threadDetailUpdatedAt]);
+
+	useEffect(() => {
 		if (messages.length === 0 && !isStreaming) {
+			return;
+		}
+		if (!isNearBottomRef.current) {
 			return;
 		}
 		const target = scrollBottomRef.current;
@@ -299,22 +319,33 @@ function AiChatSessionPane({
 			typeof window !== "undefined" &&
 			window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 		target.scrollIntoView({
-			behavior: prefersReduced ? "auto" : "smooth",
+			behavior: isStreaming || prefersReduced ? "auto" : "smooth",
 			block: "end",
 		});
-	}, [messages.length, isStreaming]);
+	}, [isStreaming, messages]);
+
+	const handleMessagesScroll = () => {
+		const container = messagesScrollRef.current;
+		if (!container) {
+			return;
+		}
+		const distanceToBottom =
+			container.scrollHeight - container.scrollTop - container.clientHeight;
+		isNearBottomRef.current = distanceToBottom < 80;
+	};
 
 	const handleSubmitPrompt = async () => {
 		const trimmed = input.trim();
 		if (!(trimmed && threadId) || isStreaming) {
 			return;
 		}
-		pendingPromptRef.current = trimmed;
+		isNearBottomRef.current = true;
+		setInput("");
 		setLiveAnnouncement("Assistant responding.");
 		try {
 			await sendMessage({ text: trimmed });
 		} catch {
-			pendingPromptRef.current = null;
+			setInput((current) => (current ? current : trimmed));
 		}
 	};
 
@@ -408,7 +439,11 @@ function AiChatSessionPane({
 					</div>
 				) : null}
 
-				<div className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-5">
+				<div
+					className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-5"
+					onScroll={handleMessagesScroll}
+					ref={messagesScrollRef}
+				>
 					{messages.length === 0 ? (
 						<div className="flex h-full min-h-64 flex-col items-center justify-center gap-5 py-6 text-center">
 							<div className="bg-primary/10 text-primary flex h-12 w-12 items-center justify-center rounded-2xl">
@@ -462,50 +497,32 @@ function AiChatSessionPane({
 													: "border-border/70 bg-muted/40 text-foreground border"
 											}`}
 										>
-											{buildKeyedMessageParts(message).map(({ key, part }) => {
-												if (part.type === "text") {
-													if (isUser) {
-														return (
-															<p
-																className="wrap-break-word whitespace-pre-wrap"
-																key={key}
-															>
-																{part.text}
-															</p>
-														);
-													}
-													return (
-														<Fragment key={key}>
-															{renderSafeMarkdown(part.text, key)}
-														</Fragment>
-													);
-												}
-												if (isToolUIPart(part)) {
-													const toolName = getToolName(part);
-													return (
-														<div
-															className="bg-background/70 border-border/60 my-1.5 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]"
-															key={key}
-														>
-															<Wrench
-																aria-hidden="true"
-																className="text-primary h-3 w-3 shrink-0"
-															/>
-															<span className="font-medium">
-																{formatToolLabel(toolName)}
-															</span>
-															<span className="text-muted-foreground">
-																{formatToolState(part.state)}
-															</span>
-														</div>
-													);
-												}
-												return null;
-											})}
+											{buildKeyedMessageParts(message).map(({ key, part }) => (
+												<ChatMessagePart
+													isUser={isUser}
+													key={key}
+													part={part}
+													partKey={key}
+												/>
+											))}
 										</div>
 									</li>
 								);
 							})}
+							{status === "submitted" ? (
+								<li className="flex flex-col items-start gap-1.5">
+									<span className="text-muted-foreground px-1 text-[11px] font-medium">
+										Workspace Assistant
+									</span>
+									<div className="border-border/70 bg-muted/40 text-muted-foreground inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm">
+										<Loader2
+											aria-hidden="true"
+											className="text-primary h-3.5 w-3.5 animate-spin"
+										/>
+										<span>Thinking...</span>
+									</div>
+								</li>
+							) : null}
 						</ul>
 					)}
 					<div ref={scrollBottomRef} />
@@ -565,6 +582,51 @@ function AiChatSessionPane({
 			</CardContent>
 		</Card>
 	);
+}
+
+function ChatMessagePart({
+	isUser,
+	part,
+	partKey,
+}: {
+	isUser: boolean;
+	part: UIMessage["parts"][number];
+	partKey: string;
+}) {
+	if (part.type === "text") {
+		if (isUser) {
+			return <p className="wrap-break-word whitespace-pre-wrap">{part.text}</p>;
+		}
+		return <>{renderSafeMarkdown(part.text, partKey)}</>;
+	}
+	if (part.type === "reasoning") {
+		if (!part.text.trim()) {
+			return null;
+		}
+		return (
+			<details className="border-border/60 bg-background/50 my-1.5 rounded-md border px-2.5 py-1.5 text-xs">
+				<summary className="text-muted-foreground cursor-pointer font-medium select-none">
+					Reasoning
+				</summary>
+				<p className="text-muted-foreground mt-1.5 leading-relaxed whitespace-pre-wrap">
+					{part.text}
+				</p>
+			</details>
+		);
+	}
+	if (isToolUIPart(part)) {
+		const toolName = getToolName(part);
+		return (
+			<div className="bg-background/70 border-border/60 my-1.5 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]">
+				<Wrench aria-hidden="true" className="text-primary h-3 w-3 shrink-0" />
+				<span className="font-medium">{formatToolLabel(toolName)}</span>
+				<span className="text-muted-foreground">
+					{formatToolState(part.state)}
+				</span>
+			</div>
+		);
+	}
+	return null;
 }
 
 function buildKeyedMessageParts(message: UIMessage) {
@@ -691,20 +753,23 @@ function ThreadHistorySidebar({
 }
 
 interface WorkspaceBriefCardProps {
+	activeOrgId?: string;
 	canExecuteAi: boolean;
 	isConfigured: boolean;
 }
 
 function WorkspaceBriefCard({
+	activeOrgId,
 	canExecuteAi,
 	isConfigured,
 }: WorkspaceBriefCardProps) {
 	const briefMutation = useMutation<WorkspaceBriefResponse, Error>({
 		mutationFn: async () =>
 			parseApiResponse<WorkspaceBriefResponse>(
-				await client.api.ai.workflows["workspace-brief"].$post({
-					json: {},
-				})
+				await client.api.ai.workflows["workspace-brief"].$post(
+					{ json: {} },
+					orgHeadersInit(activeOrgId)
+				)
 			),
 	});
 
@@ -752,9 +817,12 @@ function WorkspaceBriefCard({
 							{briefMutation.data.metrics.memberCount} members,{" "}
 							{briefMutation.data.metrics.committedUploadCount} files)
 						</div>
-						<p className="text-muted-foreground leading-relaxed whitespace-pre-wrap">
-							{briefMutation.data.summary}
-						</p>
+						<div className="text-muted-foreground space-y-1.5 text-xs leading-relaxed">
+							{renderSafeMarkdown(
+								briefMutation.data.summary,
+								"workspace-brief"
+							)}
+						</div>
 					</div>
 				) : null}
 			</CardContent>
@@ -926,7 +994,9 @@ function useAiWorkspaceData({
 	const agentsQuery = useQuery<AiAgentsResponse>({
 		enabled: Boolean(activeOrgId),
 		queryFn: async () =>
-			parseApiResponse<AiAgentsResponse>(await client.api.ai.agents.$get()),
+			parseApiResponse<AiAgentsResponse>(
+				await client.api.ai.agents.$get(undefined, orgHeadersInit(activeOrgId))
+			),
 		queryKey: ["ai", "agents", orgScope],
 		staleTime: 60_000,
 	});
@@ -935,9 +1005,10 @@ function useAiWorkspaceData({
 		enabled: Boolean(activeOrgId),
 		queryFn: async () =>
 			parseApiResponse<AiThreadsResponse>(
-				await client.api.ai.threads.$get({
-					query: { limit: "20", page: "0" },
-				})
+				await client.api.ai.threads.$get(
+					{ query: { limit: "20", page: "0" } },
+					orgHeadersInit(activeOrgId)
+				)
 			),
 		queryKey: ["ai", "threads", orgScope],
 	});
@@ -949,9 +1020,10 @@ function useAiWorkspaceData({
 				throw new Error("No thread selected");
 			}
 			return parseApiResponse<AiThreadDetailResponse>(
-				await client.api.ai.threads[":id"].$get({
-					param: { id: selectedExistingThreadId },
-				})
+				await client.api.ai.threads[":id"].$get(
+					{ param: { id: selectedExistingThreadId } },
+					orgHeadersInit(activeOrgId)
+				)
 			);
 		},
 		queryKey: ["ai", "thread", orgScope, selectedExistingThreadId ?? "none"],
@@ -963,9 +1035,10 @@ function useAiWorkspaceData({
 		string
 	>({
 		mutationFn: async (threadIdToDelete) => {
-			const response = await client.api.ai.threads[":id"].$delete({
-				param: { id: threadIdToDelete },
-			});
+			const response = await client.api.ai.threads[":id"].$delete(
+				{ param: { id: threadIdToDelete } },
+				orgHeadersInit(activeOrgId)
+			);
 			return parseApiResponse<{ deleted: boolean; id: string }>(response);
 		},
 		onSuccess: (_data, deletedId) => {
@@ -995,10 +1068,17 @@ function useAiWorkspaceData({
 		}
 	};
 
+	const invalidateThreadsList = () => {
+		void queryClient.invalidateQueries({
+			queryKey: ["ai", "threads", orgScope],
+		});
+	};
+
 	return {
 		agentsQuery,
 		deleteThreadMutation,
 		invalidateConversation,
+		invalidateThreadsList,
 		threadDetailQuery,
 		threadsQuery,
 	};
@@ -1042,6 +1122,7 @@ export function AiWorkspaceClient() {
 		agentsQuery,
 		deleteThreadMutation,
 		invalidateConversation,
+		invalidateThreadsList,
 		threadDetailQuery,
 		threadsQuery,
 	} = useAiWorkspaceData({
@@ -1064,11 +1145,12 @@ export function AiWorkspaceClient() {
 			? (threadDetailQuery.data.messages as unknown as UIMessage[])
 			: [];
 
-	const sessionKey = `${activeOrgId ?? "none"}:${activeThreadId ?? "initializing"}:${
-		selectedExistingThreadId && threadDetailQuery.data ? "loaded" : "fresh"
-	}`;
+	const sessionKey = `${activeOrgId ?? "none"}:${activeThreadId ?? "initializing"}`;
 
 	const renderMainChatPane = () => {
+		if (!activeThreadId) {
+			return <ThreadLoadingCard />;
+		}
 		if (selectedExistingThreadId && threadDetailQuery.isPending) {
 			return <ThreadLoadingCard />;
 		}
@@ -1089,6 +1171,7 @@ export function AiWorkspaceClient() {
 		}
 		return (
 			<AiChatSessionPane
+				activeOrgId={activeOrgId}
 				activeOrgName={activeOrg?.name ?? null}
 				agentId={agentStatus.defaultAgentId}
 				apiKeyEnvVars={agentStatus.apiKeyEnvVars}
@@ -1099,8 +1182,14 @@ export function AiWorkspaceClient() {
 				isStatusPending={agentsQuery.isPending}
 				key={sessionKey}
 				onConversationFinished={invalidateConversation}
+				onThreadTitleGenerated={invalidateThreadsList}
 				providerLabel={agentStatus.providerLabel}
 				statusError={agentsQuery.isError ? agentsQuery.error.message : null}
+				threadDetailUpdatedAt={
+					selectedExistingThreadId && threadDetailQuery.data
+						? threadDetailQuery.dataUpdatedAt
+						: 0
+				}
 				threadId={activeThreadId}
 			/>
 		);
@@ -1138,8 +1227,10 @@ export function AiWorkspaceClient() {
 						threads={threadsQuery.data?.threads ?? []}
 					/>
 					<WorkspaceBriefCard
+						activeOrgId={activeOrgId}
 						canExecuteAi={!isRoleResolved || canExecuteAi}
 						isConfigured={agentStatus.isConfigured}
+						key={activeOrgId ?? "none"}
 					/>
 				</div>
 

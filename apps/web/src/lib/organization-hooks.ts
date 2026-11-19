@@ -71,7 +71,7 @@ export const organizationKeys = {
 		[...organizationKeys.all, "roles", organizationId] as const,
 };
 
-function orgHeadersInit(organizationId?: string) {
+export function orgHeadersInit(organizationId?: string) {
 	return organizationId
 		? { init: { headers: { "x-organization-id": organizationId } } }
 		: undefined;

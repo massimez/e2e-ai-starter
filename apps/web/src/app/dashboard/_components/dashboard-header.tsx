@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { NotificationCenter } from "@workspace/ui/components/notification-center";
 import {
 	type OrganizationItem,
@@ -14,11 +15,9 @@ import {
 	type AccountMenuUser,
 	UserAccountMenu,
 } from "@/components/user-account-menu";
+import { authClient } from "@/lib/auth-client";
 import type { ServerOrganization } from "@/lib/auth-server";
-import {
-	useCurrentOrganization,
-	useOrganizationMutations,
-} from "@/lib/organization-hooks";
+import { useOrganizationMutations } from "@/lib/organization-hooks";
 
 const DASHBOARD_NAV_ITEMS = [
 	{ href: "/dashboard", label: "Overview", exact: true },
@@ -39,23 +38,37 @@ export function DashboardHeader({
 }: DashboardHeaderProps) {
 	const router = useRouter();
 	const pathname = usePathname();
-	const {
-		activeOrgId,
-		currentUserRole,
-		isListPending,
-		organizations,
-		session,
-	} = useCurrentOrganization();
+	const session = authClient.useSession();
+	const activeOrg = authClient.useActiveOrganization();
+	const listOrgs = authClient.useListOrganizations();
 	const { createOrganization, setActiveOrganization } =
 		useOrganizationMutations({
 			showToasts: false,
 		});
 
-	const resolvedUser = session?.user ?? initialUser;
-	const resolvedOrganizations = isListPending
+	const resolvedUser = session.data?.user ?? initialUser;
+	const resolvedOrganizations = listOrgs.isPending
 		? initialOrganizations
-		: organizations;
-	const resolvedActiveOrgId = activeOrgId ?? initialActiveOrgId;
+		: (listOrgs.data ?? []);
+	const resolvedActiveOrgId = activeOrg.data?.id ?? initialActiveOrgId;
+
+	const activeRoleQuery = useQuery<string | null>({
+		enabled: Boolean(resolvedActiveOrgId && resolvedUser),
+		queryFn: async () => {
+			const res = await authClient.organization.getActiveMemberRole();
+			if (res.error) {
+				return null;
+			}
+			return (res.data as { role?: string } | null)?.role ?? null;
+		},
+		queryKey: [
+			"organizations",
+			"active-member-role",
+			resolvedActiveOrgId ?? "none",
+		],
+		staleTime: 30_000,
+	});
+	const currentUserRole = activeRoleQuery.data ?? null;
 
 	const orgItems: OrganizationItem[] = resolvedOrganizations.map((org) => ({
 		id: org.id,
