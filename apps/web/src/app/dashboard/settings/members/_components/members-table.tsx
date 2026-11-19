@@ -25,6 +25,7 @@ import {
 } from "@workspace/ui/components/table";
 import { LogOut, Trash2, Users } from "lucide-react";
 import { RoleBadge } from "@/components/role-badge";
+import { formatUtcDate } from "@/lib/format";
 import type { OrganizationMember } from "@/lib/organization-hooks";
 
 interface MembersTableProps {
@@ -221,10 +222,7 @@ export function MembersTable({
 										/>
 									</TableCell>
 									<TableCell className="text-muted-foreground hidden font-mono text-xs md:table-cell">
-										{new Intl.DateTimeFormat("en-US", {
-											dateStyle: "medium",
-											timeZone: "UTC",
-										}).format(new Date(member.createdAt))}
+										{formatUtcDate(member.createdAt)}
 									</TableCell>
 									<TableCell className="text-right">
 										<MemberActionsCell

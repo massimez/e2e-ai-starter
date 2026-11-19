@@ -24,7 +24,6 @@ interface AuthOpenOptions {
 }
 
 interface AuthContextType {
-	closeAuthModal: () => void;
 	openSignIn: (options?: AuthOpenOptions | string) => void;
 	openSignUp: (options?: AuthOpenOptions | string) => void;
 }
@@ -132,10 +131,6 @@ export function AuthProvider({
 		setIsOpen(true);
 	}, []);
 
-	const closeAuthModal = useCallback(() => {
-		setIsOpen(false);
-	}, []);
-
 	const handleSuccess = useCallback(async () => {
 		setIsOpen(false);
 		if (successHandler) {
@@ -151,11 +146,10 @@ export function AuthProvider({
 
 	const value = useMemo(
 		() => ({
-			closeAuthModal,
 			openSignIn,
 			openSignUp,
 		}),
-		[closeAuthModal, openSignIn, openSignUp]
+		[openSignIn, openSignUp]
 	);
 
 	return (

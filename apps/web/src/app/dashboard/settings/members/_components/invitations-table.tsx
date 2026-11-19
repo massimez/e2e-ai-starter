@@ -12,6 +12,7 @@ import {
 } from "@workspace/ui/components/table";
 import { Clock, Mail } from "lucide-react";
 import { RoleBadge } from "@/components/role-badge";
+import { formatUtcDate } from "@/lib/format";
 import type { OrganizationInvitation } from "@/lib/organization-hooks";
 
 interface InvitationsTableProps {
@@ -74,10 +75,7 @@ export function InvitationsTable({
 									</Badge>
 								</TableCell>
 								<TableCell className="text-muted-foreground hidden font-mono text-xs md:table-cell">
-									{new Intl.DateTimeFormat("en-US", {
-										dateStyle: "medium",
-										timeZone: "UTC",
-									}).format(new Date(invite.expiresAt))}
+									{formatUtcDate(invite.expiresAt)}
 								</TableCell>
 								<TableCell className="text-right">
 									{canManageMembers ? (

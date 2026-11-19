@@ -4,7 +4,7 @@ import { APP_CONFIG } from "@workspace/api/config";
 import { Button } from "@workspace/ui/components/button";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import { sanitizeSlug } from "@workspace/ui/components/organization-switcher";
+import { sanitizeSlug } from "@workspace/ui/lib/utils";
 import { AlertCircle, Building2, Loader2, LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useId, useState } from "react";

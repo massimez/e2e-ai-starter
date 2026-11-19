@@ -50,7 +50,6 @@ export const organizationKeys = {
 	all: ["organizations"] as const,
 	detail: (organizationId: string) =>
 		[...organizationKeys.all, "detail", organizationId] as const,
-	list: () => [...organizationKeys.all, "list"] as const,
 	myPermissions: (organizationId: string) =>
 		[...organizationKeys.all, "roles", organizationId, "me"] as const,
 	permissionCatalog: (organizationId: string) =>
@@ -228,50 +227,69 @@ export async function syncOrganizationClientState(
 	}
 }
 
+function unwrapAuthResult<T>(
+	res: { data?: T; error?: { message?: string } | null },
+	fallback: string
+): T {
+	if (res.error) {
+		throw new Error(res.error.message || fallback);
+	}
+	return res.data as T;
+}
+
+function useOrgMutation<TData, TVariables>(params: {
+	errorFallback: string;
+	mutationFn: (variables: TVariables) => Promise<TData>;
+	onAfterSuccess?: (data: TData, variables: TVariables) => void;
+	resolveOrgId: (data: TData, variables: TVariables) => string | undefined;
+	showToasts: boolean;
+	successMessage?: (data: TData, variables: TVariables) => string;
+}) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: params.mutationFn,
+		onError: (error) => {
+			if (params.showToasts) {
+				toast.error(
+					error instanceof Error ? error.message : params.errorFallback
+				);
+			}
+		},
+		onSuccess: async (data, variables) => {
+			await syncOrganizationClientState(
+				queryClient,
+				params.resolveOrgId(data, variables)
+			);
+			if (params.showToasts && params.successMessage) {
+				toast.success(params.successMessage(data, variables));
+			}
+			params.onAfterSuccess?.(data, variables);
+		},
+	});
+}
+
 export function useOrganizationMutations(
 	options: OrganizationMutationsOptions = {}
 ) {
-	const queryClient = useQueryClient();
 	const showToasts = options.showToasts ?? true;
 
-	const invalidateAll = async (organizationId?: string) => {
-		await syncOrganizationClientState(queryClient, organizationId);
-	};
-
-	const notifySuccess = (message: string) => {
-		if (showToasts) {
-			toast.success(message);
-		}
-	};
-
-	const notifyError = (error: unknown, fallback: string) => {
-		if (showToasts) {
-			toast.error(error instanceof Error ? error.message : fallback);
-		}
-	};
-
-	const createOrgMutation = useMutation({
+	const createOrgMutation = useOrgMutation({
+		errorFallback: "Failed to create organization",
 		mutationFn: async ({ name, slug }: { name: string; slug: string }) => {
 			const res = await authClient.organization.create({
 				keepCurrentActiveOrganization: false,
 				name,
 				slug,
 			});
-			if (res.error) {
-				throw new Error(res.error.message || "Failed to create organization");
-			}
-			return res.data;
+			return unwrapAuthResult(res, "Failed to create organization");
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to create organization");
-		},
-		onSuccess: async (data) => {
-			await invalidateAll(data?.id);
-			notifySuccess("Organization created successfully");
-		},
+		resolveOrgId: (data) => data?.id,
+		showToasts,
+		successMessage: () => "Organization created successfully",
 	});
 
-	const setActiveOrgMutation = useMutation({
+	const setActiveOrgMutation = useOrgMutation({
+		errorFallback: "Failed to switch organization",
 		mutationFn: async ({
 			organizationId,
 		}: {
@@ -280,20 +298,14 @@ export function useOrganizationMutations(
 			const res = await authClient.organization.setActive({
 				organizationId,
 			});
-			if (res.error) {
-				throw new Error(res.error.message || "Failed to switch organization");
-			}
-			return res.data;
+			return unwrapAuthResult(res, "Failed to switch organization");
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to switch organization");
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidateAll(variables.organizationId ?? undefined);
-		},
+		resolveOrgId: (_data, variables) => variables.organizationId ?? undefined,
+		showToasts,
 	});
 
-	const updateOrgMutation = useMutation({
+	const updateOrgMutation = useOrgMutation({
+		errorFallback: "Failed to update organization",
 		mutationFn: async ({
 			logo,
 			metadata,
@@ -339,16 +351,13 @@ export function useOrganizationMutations(
 				slug: string | null;
 			}>(response);
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to update organization");
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidateAll(variables.organizationId);
-			notifySuccess("Organization updated successfully");
-		},
+		resolveOrgId: (_data, variables) => variables.organizationId,
+		showToasts,
+		successMessage: () => "Organization updated successfully",
 	});
 
-	const inviteMemberMutation = useMutation({
+	const inviteMemberMutation = useOrgMutation({
+		errorFallback: "Failed to invite member",
 		mutationFn: async ({
 			email,
 			organizationId,
@@ -368,20 +377,16 @@ export function useOrganizationMutations(
 				OrganizationInvitation & { resent: boolean }
 			>(response);
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to invite member");
-		},
-		onSuccess: async (data, variables) => {
-			await invalidateAll(variables.organizationId);
-			notifySuccess(
-				data.resent
-					? `Invitation resent to ${variables.email}`
-					: `Invitation sent to ${variables.email}`
-			);
-		},
+		resolveOrgId: (_data, variables) => variables.organizationId,
+		showToasts,
+		successMessage: (data, variables) =>
+			data.resent
+				? `Invitation resent to ${variables.email}`
+				: `Invitation sent to ${variables.email}`,
 	});
 
-	const cancelInvitationMutation = useMutation({
+	const cancelInvitationMutation = useOrgMutation({
+		errorFallback: "Failed to cancel invitation",
 		mutationFn: async ({
 			invitationId,
 			organizationId,
@@ -397,16 +402,13 @@ export function useOrganizationMutations(
 			);
 			return await parseApiResponse<{ deletedId: string }>(response);
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to cancel invitation");
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidateAll(variables.organizationId);
-			notifySuccess("Invitation canceled");
-		},
+		resolveOrgId: (_data, variables) => variables.organizationId,
+		showToasts,
+		successMessage: () => "Invitation canceled",
 	});
 
-	const updateMemberRoleMutation = useMutation({
+	const updateMemberRoleMutation = useOrgMutation({
+		errorFallback: "Failed to update member role",
 		mutationFn: async ({
 			memberId,
 			organizationId,
@@ -424,16 +426,13 @@ export function useOrganizationMutations(
 			);
 			return await parseApiResponse<OrganizationMember>(response);
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to update member role");
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidateAll(variables.organizationId);
-			notifySuccess("Member role updated");
-		},
+		resolveOrgId: (_data, variables) => variables.organizationId,
+		showToasts,
+		successMessage: () => "Member role updated",
 	});
 
-	const removeMemberMutation = useMutation({
+	const removeMemberMutation = useOrgMutation({
+		errorFallback: "Failed to remove member",
 		mutationFn: async ({
 			memberId,
 			organizationId,
@@ -453,16 +452,13 @@ export function useOrganizationMutations(
 				};
 			}>(response);
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to remove member");
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidateAll(variables.organizationId);
-			notifySuccess("Member removed from organization");
-		},
+		resolveOrgId: (_data, variables) => variables.organizationId,
+		showToasts,
+		successMessage: () => "Member removed from organization",
 	});
 
-	const transferOwnershipMutation = useMutation({
+	const transferOwnershipMutation = useOrgMutation({
+		errorFallback: "Failed to transfer ownership",
 		mutationFn: async ({
 			newOwnerUserId,
 			organizationId,
@@ -472,63 +468,48 @@ export function useOrganizationMutations(
 		}) => {
 			const response = await client.api.organizations[
 				"transfer-ownership"
-			].$post(
-				{ json: { newOwnerUserId } },
-				{ init: { headers: { "x-organization-id": organizationId } } }
-			);
+			].$post({ json: { newOwnerUserId } }, orgHeadersInit(organizationId));
 			return await parseApiResponse<{
 				newOwnerUserId: string;
 				organizationId: string;
 				previousOwnerUserId: string;
 			}>(response);
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to transfer ownership");
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidateAll(variables.organizationId);
-			notifySuccess("Organization ownership transferred");
-		},
+		resolveOrgId: (_data, variables) => variables.organizationId,
+		showToasts,
+		successMessage: () => "Organization ownership transferred",
 	});
 
-	const leaveOrganizationMutation = useMutation({
+	const leaveOrganizationMutation = useOrgMutation({
+		errorFallback: "Failed to leave organization",
 		mutationFn: async ({ organizationId }: { organizationId: string }) => {
 			const res = await authClient.organization.leave({
 				organizationId,
 			});
-			if (res.error) {
-				throw new Error(res.error.message || "Failed to leave organization");
-			}
-			return res.data;
+			return unwrapAuthResult(res, "Failed to leave organization");
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to leave organization");
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidateAll(variables.organizationId);
-			notifySuccess("You have left the organization");
+		onAfterSuccess: () => {
 			options.onSuccessNavigate?.("/dashboard");
 		},
+		resolveOrgId: (_data, variables) => variables.organizationId,
+		showToasts,
+		successMessage: () => "You have left the organization",
 	});
 
-	const deleteOrganizationMutation = useMutation({
+	const deleteOrganizationMutation = useOrgMutation({
+		errorFallback: "Failed to delete organization",
 		mutationFn: async ({ organizationId }: { organizationId: string }) => {
 			const res = await authClient.organization.delete({
 				organizationId,
 			});
-			if (res.error) {
-				throw new Error(res.error.message || "Failed to delete organization");
-			}
-			return res.data;
+			return unwrapAuthResult(res, "Failed to delete organization");
 		},
-		onError: (error) => {
-			notifyError(error, "Failed to delete organization");
-		},
-		onSuccess: async (_data, variables) => {
-			await invalidateAll(variables.organizationId);
-			notifySuccess("Organization permanently deleted");
+		onAfterSuccess: () => {
 			options.onSuccessNavigate?.("/dashboard");
 		},
+		resolveOrgId: (_data, variables) => variables.organizationId,
+		showToasts,
+		successMessage: () => "Organization permanently deleted",
 	});
 
 	const isSubmitting =

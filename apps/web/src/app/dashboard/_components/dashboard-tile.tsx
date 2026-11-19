@@ -1,26 +1,22 @@
 import { cn } from "@workspace/ui/lib/utils";
 import { ArrowRight, type LucideIcon } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
 
-export interface DashboardTileProps {
+interface DashboardTileProps {
 	badge?: string;
 	className?: string;
 	description: string;
 	href?: string;
 	icon: LucideIcon;
 	title: string;
-	trailing?: ReactNode;
 }
 
 function TileTrailing({
 	badge,
-	trailing,
 	hasHref,
 }: {
 	badge?: string;
 	hasHref: boolean;
-	trailing?: ReactNode;
 }) {
 	if (badge) {
 		return (
@@ -28,10 +24,6 @@ function TileTrailing({
 				{badge}
 			</span>
 		);
-	}
-
-	if (trailing) {
-		return <>{trailing}</>;
 	}
 
 	if (hasHref) {
@@ -51,7 +43,6 @@ export function DashboardTile({
 	icon: Icon,
 	href,
 	badge,
-	trailing,
 	className,
 }: DashboardTileProps) {
 	const content = (
@@ -71,11 +62,7 @@ export function DashboardTile({
 						<Icon className="h-5 w-5" />
 					</div>
 
-					<TileTrailing
-						badge={badge}
-						hasHref={Boolean(href)}
-						trailing={trailing}
-					/>
+					<TileTrailing badge={badge} hasHref={Boolean(href)} />
 				</div>
 
 				<div className="space-y-1">
