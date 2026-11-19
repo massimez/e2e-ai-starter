@@ -18,7 +18,7 @@ export interface TenantMismatchSecurityEvent {
 	activeOrganizationId: string;
 	attemptedOrganizationId: string;
 	reason: "CROSS_TENANT_MISMATCH";
-	source: "body" | "header" | "param" | "query";
+	source: "header" | "param" | "query";
 }
 
 interface SessionLike {
