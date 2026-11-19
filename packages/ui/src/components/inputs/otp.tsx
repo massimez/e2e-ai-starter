@@ -11,9 +11,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 type AllowedInputTypes = "password" | "text" | "number" | "tel";
 
-const NUMERIC_REGEX = /^\d$/u;
-const ALPHA_REGEX = /^[a-zA-Z]$/u;
-const ALPHANUMERIC_REGEX = /^[a-zA-Z0-9]$/u;
+const CHAR_PATTERNS = {
+	alpha: /^[a-zA-Z]$/u,
+	alphanumeric: /^[a-zA-Z0-9]$/u,
+	numeric: /^\d$/u,
+} as const;
 
 type InputProps = Required<
 	Pick<
@@ -66,8 +68,85 @@ interface OTPInputProps {
 	value?: string;
 }
 
-function buildDigits(value: string, numInputs: number): string[] {
-	return Array.from({ length: numInputs }, (_, index) => value[index] ?? "");
+const NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
+
+function resolveNavTarget(
+	key: string,
+	index: number,
+	numInputs: number
+): number {
+	switch (key) {
+		case "ArrowLeft":
+			return index - 1;
+		case "ArrowRight":
+			return index + 1;
+		case "Home":
+			return 0;
+		default:
+			return numInputs - 1;
+	}
+}
+
+type OtpKeyPlan =
+	| { focusIndex: number; nextDigits?: string[]; type: "update" }
+	| { type: "noop" };
+
+function computeOtpKeyPlan(params: {
+	digits: string[];
+	index: number;
+	isCharValid: (char: string) => boolean;
+	key: string;
+	numInputs: number;
+}): OtpKeyPlan {
+	const { digits, index, isCharValid, key, numInputs } = params;
+	if (NAV_KEYS.has(key)) {
+		return {
+			focusIndex: resolveNavTarget(key, index, numInputs),
+			type: "update",
+		};
+	}
+
+	if (key === "Backspace" || key === "Delete") {
+		const nextDigits = [...digits];
+		if (nextDigits[index]) {
+			nextDigits[index] = "";
+			return { focusIndex: index, nextDigits, type: "update" };
+		}
+		if (key === "Backspace" && index > 0) {
+			nextDigits[index - 1] = "";
+			return { focusIndex: index - 1, nextDigits, type: "update" };
+		}
+		return { type: "noop" };
+	}
+
+	if (isCharValid(key)) {
+		const nextDigits = [...digits];
+		nextDigits[index] = key;
+		return {
+			focusIndex: index < numInputs - 1 ? index + 1 : index,
+			nextDigits,
+			type: "update",
+		};
+	}
+
+	return { type: "noop" };
+}
+
+function resolveSeparator(
+	index: number,
+	numInputs: number,
+	renderMiddleSeparator: boolean,
+	renderSeparator: OTPInputProps["renderSeparator"]
+): React.ReactNode {
+	if (index >= numInputs - 1) {
+		return null;
+	}
+	if (renderMiddleSeparator && index === Math.floor(numInputs / 2) - 1) {
+		return <FakeDash />;
+	}
+	return typeof renderSeparator === "function"
+		? renderSeparator(index)
+		: renderSeparator;
 }
 
 const OTPInput = ({
@@ -89,155 +168,83 @@ const OTPInput = ({
 	renderMiddleSeparator = false,
 }: OTPInputProps) => {
 	const [activeInput, setActiveInput] = useState(0);
-	const [digits, setDigits] = useState<string[]>(() =>
-		buildDigits(value, numInputs)
-	);
 	const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
-	const digitsRef = useRef<string[]>(digits);
-	const lastEmittedValueRef = useRef(value);
-	const previousValuePropRef = useRef(value);
-	const lastCompletedRef = useRef("");
-
-	digitsRef.current = digits;
-
-	// Sync internal slot array only when external `value` prop actually changes
-	useEffect(() => {
-		if (value === previousValuePropRef.current) {
-			if (digitsRef.current.length !== numInputs) {
-				setDigits(buildDigits(digitsRef.current.join(""), numInputs));
-			}
-			return;
-		}
-		previousValuePropRef.current = value;
-		if (
-			value === lastEmittedValueRef.current &&
-			digitsRef.current.length === numInputs
-		) {
-			return;
-		}
-		lastEmittedValueRef.current = value;
-		if (value.length < numInputs) {
-			lastCompletedRef.current = "";
-		}
-		setDigits(buildDigits(value, numInputs));
-	}, [value, numInputs]);
+	const digits = Array.from({ length: numInputs }, (_, i) => value[i] ?? "");
 
 	useEffect(() => {
 		inputRefs.current = inputRefs.current.slice(0, numInputs);
 	}, [numInputs]);
 
 	useEffect(() => {
-		if (shouldAutoFocus && !disabled) {
-			const timer = setTimeout(() => {
-				inputRefs.current[0]?.focus();
-			}, 0);
-			return () => clearTimeout(timer);
-		}
-	}, [shouldAutoFocus, disabled]);
-
-	// Fire onComplete once per newly completed OTP code without re-triggering on unrelated rerenders
-	useEffect(() => {
-		const isComplete =
-			digits.length === numInputs &&
-			digits.every((digit) => digit.length === 1);
-		if (!isComplete) {
-			lastCompletedRef.current = "";
+		if (!shouldAutoFocus || disabled) {
 			return;
 		}
+		const timer = setTimeout(() => {
+			inputRefs.current[0]?.focus();
+		}, 0);
+		return () => clearTimeout(timer);
+	}, [shouldAutoFocus, disabled]);
 
-		const joined = digits.join("");
-		if (onComplete && lastCompletedRef.current !== joined) {
-			lastCompletedRef.current = joined;
-			onComplete(joined);
-		}
-	}, [digits, numInputs, onComplete]);
-
-	const getPlaceholderValue = useCallback(() => {
-		if (typeof placeholder === "string" && placeholder.length === numInputs) {
-			return placeholder;
-		}
-		if (placeholder && placeholder.length !== numInputs) {
-			console.warn(
-				"Length of the placeholder should be equal to the number of inputs."
-			);
-		}
-	}, [placeholder, numInputs]);
-
-	const isInputValueValid = useCallback(
-		(valueCurr: string) => {
-			if (valueCurr.trim().length !== 1) {
-				return false;
-			}
-
-			switch (allowedCharacterSet) {
-				case "numeric":
-					return (
-						!Number.isNaN(Number(valueCurr)) && NUMERIC_REGEX.test(valueCurr)
-					);
-				case "alpha":
-					return ALPHA_REGEX.test(valueCurr);
-				case "alphanumeric":
-					return ALPHANUMERIC_REGEX.test(valueCurr);
-				default:
-					return false;
-			}
-		},
+	const isCharValid = useCallback(
+		(char: string) =>
+			char.length === 1 && CHAR_PATTERNS[allowedCharacterSet].test(char),
 		[allowedCharacterSet]
 	);
 
-	const focusInput = useCallback(
+	const focusSlot = useCallback(
 		(index: number) => {
-			const targetIndex = Math.max(Math.min(numInputs - 1, index), 0);
-
-			if (inputRefs.current[targetIndex] && !disabled) {
-				requestAnimationFrame(() => {
-					inputRefs.current[targetIndex]?.focus();
-					inputRefs.current[targetIndex]?.select();
-					setActiveInput(targetIndex);
-				});
+			if (disabled) {
+				return;
 			}
+			const clamped = Math.max(0, Math.min(numInputs - 1, index));
+			requestAnimationFrame(() => {
+				const el = inputRefs.current[clamped];
+				if (el) {
+					el.focus();
+					el.select();
+					setActiveInput(clamped);
+				}
+			});
 		},
-		[numInputs, disabled]
+		[disabled, numInputs]
 	);
 
 	const commitDigits = useCallback(
 		(nextDigits: string[]) => {
 			const normalized = nextDigits.slice(0, numInputs);
 			const joined = normalized.join("");
-			digitsRef.current = normalized;
-			lastEmittedValueRef.current = joined;
-			setDigits(normalized);
 			onChange(joined);
+			if (
+				onComplete &&
+				normalized.length === numInputs &&
+				normalized.every((d) => d.length === 1)
+			) {
+				onComplete(joined);
+			}
 		},
-		[numInputs, onChange]
+		[numInputs, onChange, onComplete]
 	);
 
 	const applyCharactersAt = useCallback(
 		(startIndex: number, rawText: string) => {
-			const validChars = rawText
+			const chars = rawText
 				.replace(/\s/gu, "")
 				.split("")
-				.filter((char) => isInputValueValid(char))
+				.filter(isCharValid)
 				.slice(0, numInputs - startIndex);
 
-			if (validChars.length === 0) {
-				return false;
+			if (chars.length === 0) {
+				return;
 			}
 
-			const nextDigits = [...digitsRef.current];
-			for (let offset = 0; offset < validChars.length; offset += 1) {
-				const char = validChars[offset];
-				const position = startIndex + offset;
-				if (char !== undefined && position < numInputs) {
-					nextDigits[position] = char;
-				}
+			const nextDigits = [...digits];
+			for (const [offset, char] of chars.entries()) {
+				nextDigits[startIndex + offset] = char;
 			}
-
 			commitDigits(nextDigits);
-			focusInput(Math.min(startIndex + validChars.length, numInputs - 1));
-			return true;
+			focusSlot(Math.min(startIndex + chars.length, numInputs - 1));
 		},
-		[commitDigits, focusInput, isInputValueValid, numInputs]
+		[commitDigits, digits, focusSlot, isCharValid, numInputs]
 	);
 
 	const handleChange = useCallback(
@@ -245,82 +252,52 @@ const OTPInput = ({
 			if (disabled) {
 				return;
 			}
-
-			const { value: inputValue } = event.target;
-			if (!inputValue) {
-				if (digitsRef.current[index]) {
-					const nextDigits = [...digitsRef.current];
+			const incoming = event.target.value;
+			if (!incoming) {
+				if (digits[index]) {
+					const nextDigits = [...digits];
 					nextDigits[index] = "";
 					commitDigits(nextDigits);
 				}
 				return;
 			}
 
-			// Handle SMS autofill or multi-character input pasted into a single box
-			if (inputValue.length > 1) {
-				applyCharactersAt(index, inputValue);
+			if (incoming.length > 1) {
+				applyCharactersAt(index, incoming);
 				return;
 			}
 
-			if (isInputValueValid(inputValue)) {
-				const nextDigits = [...digitsRef.current];
-				nextDigits[index] = inputValue;
+			if (isCharValid(incoming)) {
+				const nextDigits = [...digits];
+				nextDigits[index] = incoming;
 				commitDigits(nextDigits);
-
 				if (index < numInputs - 1) {
-					focusInput(index + 1);
+					focusSlot(index + 1);
 				}
 			}
 		},
 		[
 			applyCharactersAt,
 			commitDigits,
+			digits,
 			disabled,
-			focusInput,
-			isInputValueValid,
+			focusSlot,
+			isCharValid,
 			numInputs,
 		]
 	);
 
-	const handleInputChange = useCallback(
+	const handleInput = useCallback(
 		(event: React.SyntheticEvent<HTMLInputElement>, index: number) => {
 			if (disabled) {
 				return;
 			}
-
-			const { value: valueCur } = event.currentTarget;
-
-			// Let React's onChange handle multi-character SMS autofill and fast mobile typing cleanly
-			if (valueCur.length > 1) {
-				return;
-			}
-
-			const nativeEvent = event.nativeEvent as InputEvent;
-			if (
-				nativeEvent.inputType === "deleteContentBackward" ||
-				nativeEvent.inputType === "deleteContentForward"
-			) {
-				event.preventDefault();
-				const nextDigits = [...digitsRef.current];
-				if (nextDigits[index]) {
-					nextDigits[index] = "";
-					commitDigits(nextDigits);
-				} else if (
-					index > 0 &&
-					nativeEvent.inputType === "deleteContentBackward"
-				) {
-					nextDigits[index - 1] = "";
-					commitDigits(nextDigits);
-					focusInput(index - 1);
-				}
-				return;
-			}
-
-			if (valueCur && !isInputValueValid(valueCur)) {
-				event.currentTarget.value = digitsRef.current[index] ?? "";
+			const currentValue = event.currentTarget.value;
+			if (currentValue.length === 1 && !isCharValid(currentValue)) {
+				event.currentTarget.value = digits[index] ?? "";
 			}
 		},
-		[commitDigits, disabled, focusInput, isInputValueValid]
+		[digits, disabled, isCharValid]
 	);
 
 	const handleFocus = useCallback(
@@ -328,7 +305,6 @@ const OTPInput = ({
 			if (disabled) {
 				return;
 			}
-
 			setActiveInput(index);
 			event.target.select();
 		},
@@ -344,57 +320,25 @@ const OTPInput = ({
 			if (disabled) {
 				return;
 			}
-
-			const { key } = event;
-			const nextDigits = [...digitsRef.current];
-
-			switch (key) {
-				case "Backspace":
-				case "Delete":
-					event.preventDefault();
-					if (nextDigits[index]) {
-						nextDigits[index] = "";
-						commitDigits(nextDigits);
-					} else if (index > 0 && key === "Backspace") {
-						nextDigits[index - 1] = "";
-						commitDigits(nextDigits);
-						focusInput(index - 1);
-					}
-					break;
-
-				case "ArrowLeft":
-					event.preventDefault();
-					focusInput(index - 1);
-					break;
-
-				case "ArrowRight":
-					event.preventDefault();
-					focusInput(index + 1);
-					break;
-
-				case "Home":
-					event.preventDefault();
-					focusInput(0);
-					break;
-
-				case "End":
-					event.preventDefault();
-					focusInput(numInputs - 1);
-					break;
-
-				default:
-					if (key.length === 1 && isInputValueValid(key)) {
-						event.preventDefault();
-						nextDigits[index] = key;
-						commitDigits(nextDigits);
-						if (index < numInputs - 1) {
-							focusInput(index + 1);
-						}
-					}
-					break;
+			const plan = computeOtpKeyPlan({
+				digits,
+				index,
+				isCharValid,
+				key: event.key,
+				numInputs,
+			});
+			if (plan.type === "noop") {
+				return;
+			}
+			event.preventDefault();
+			if (plan.nextDigits) {
+				commitDigits(plan.nextDigits);
+			}
+			if (plan.focusIndex !== index || !plan.nextDigits) {
+				focusSlot(plan.focusIndex);
 			}
 		},
-		[commitDigits, disabled, focusInput, isInputValueValid, numInputs]
+		[commitDigits, digits, disabled, focusSlot, isCharValid, numInputs]
 	);
 
 	const handlePaste = useCallback(
@@ -402,19 +346,21 @@ const OTPInput = ({
 			if (disabled) {
 				return;
 			}
-
 			event.preventDefault();
+			const pasted = event.clipboardData.getData("text/plain");
 			const startAt =
-				event.clipboardData.getData("text/plain").replace(/\s/gu, "").length >=
-				numInputs
-					? 0
-					: index;
-			applyCharactersAt(startAt, event.clipboardData.getData("text/plain"));
+				pasted.replace(/\s/gu, "").length >= numInputs ? 0 : index;
+			applyCharactersAt(startAt, pasted);
 		},
 		[applyCharactersAt, disabled, numInputs]
 	);
 
-	const resolvedPlaceholder = getPlaceholderValue();
+	const validPlaceholder =
+		typeof placeholder === "string" && placeholder.length === numInputs
+			? placeholder
+			: undefined;
+
+	const slots = Array.from({ length: numInputs }, (_, index) => index);
 
 	return (
 		<fieldset
@@ -428,18 +374,23 @@ const OTPInput = ({
 			onPaste={onPaste}
 			style={{ ...(typeof containerStyle === "object" && containerStyle) }}
 		>
-			{Array.from({ length: numInputs }, (_, index) => index).map((index) => {
+			{slots.map((index) => {
 				const digit = digits[index] ?? "";
+				const inputMode =
+					allowedCharacterSet === "numeric" ||
+					inputType === "number" ||
+					inputType === "tel"
+						? "numeric"
+						: "text";
+
 				return (
 					<React.Fragment key={index}>
 						{renderInput(
 							{
 								value: isSecure && digit ? "•" : digit,
-								placeholder: resolvedPlaceholder?.[index] ?? undefined,
+								placeholder: validPlaceholder?.[index] ?? undefined,
 								ref: (element) => {
-									if (element !== null) {
-										inputRefs.current[index] = element;
-									}
+									inputRefs.current[index] = element;
 								},
 								onChange: (event) => handleChange(event, index),
 								onFocus: (event) => handleFocus(event, index),
@@ -457,31 +408,18 @@ const OTPInput = ({
 									disabled && "cursor-not-allowed"
 								),
 								type: inputType,
-								inputMode:
-									allowedCharacterSet === "numeric" ||
-									inputType === "number" ||
-									inputType === "tel"
-										? "numeric"
-										: "text",
-								onInput: (event) => handleInputChange(event, index),
+								inputMode,
+								onInput: (event) => handleInput(event, index),
 								disabled,
 							},
 							index
 						)}
-						{(() => {
-							if (index >= numInputs - 1) {
-								return null;
-							}
-							if (
-								renderMiddleSeparator &&
-								index === Math.floor(numInputs / 2) - 1
-							) {
-								return <FakeDash />;
-							}
-							return typeof renderSeparator === "function"
-								? renderSeparator(index)
-								: renderSeparator;
-						})()}
+						{resolveSeparator(
+							index,
+							numInputs,
+							renderMiddleSeparator,
+							renderSeparator
+						)}
 					</React.Fragment>
 				);
 			})}
