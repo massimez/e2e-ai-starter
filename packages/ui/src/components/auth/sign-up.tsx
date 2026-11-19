@@ -1,20 +1,22 @@
 "use client";
 
-import { Button } from "@workspace/ui/components/button";
 import {
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
 } from "@workspace/ui/components/dialog";
-import { GoogleIcon } from "@workspace/ui/components/icons/brands/google-icon";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useRef, useState } from "react";
+import {
+	AuthFormError,
+	AuthSubmitButton,
+	EMAIL_PATTERN,
+	PasswordField,
+	SocialAuthDivider,
+} from "./auth-form-primitives";
 import type defaultTranslations from "./translations.json";
-
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
 export const SignUp = ({
 	captchaSlot,
@@ -50,11 +52,17 @@ export const SignUp = ({
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [loading, setLoading] = useState(false);
-	const [showPassword, setShowPassword] = useState(false);
 	const [formError, setFormError] = useState<string | null>(null);
 	const [errorField, setErrorField] = useState<
 		"firstName" | "lastName" | "email" | "password" | null
 	>(null);
+
+	const clearError = () => {
+		if (formError) {
+			setFormError(null);
+			setErrorField(null);
+		}
+	};
 
 	const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
@@ -127,35 +135,12 @@ export const SignUp = ({
 				</DialogDescription>
 			</DialogHeader>
 
-			{onSocialLoginClick ? (
-				<>
-					{/* OAuth Providers */}
-					<div className="flex gap-3">
-						<Button
-							className="h-12 flex-1 gap-2"
-							disabled={loading}
-							onClick={() => handleSocial("google")}
-							type="button"
-							variant="outline"
-						>
-							<GoogleIcon />
-							{translations.google_continue}
-						</Button>
-					</div>
-
-					{/* Divider */}
-					<div className="relative">
-						<div className="absolute inset-0 flex items-center">
-							<span className="w-full border-t" />
-						</div>
-						<div className="relative flex justify-center text-xs uppercase">
-							<span className="bg-background text-muted-foreground px-2">
-								{translations.email_or}
-							</span>
-						</div>
-					</div>
-				</>
-			) : null}
+			<SocialAuthDivider
+				dividerLabel={translations.email_or}
+				googleLabel={translations.google_continue}
+				loading={loading}
+				onSocialClick={onSocialLoginClick ? handleSocial : undefined}
+			/>
 
 			{/* Sign Up Form */}
 			<form className="space-y-4" noValidate onSubmit={handleSubmit}>
@@ -174,10 +159,7 @@ export const SignUp = ({
 							id={firstNameId}
 							onChange={(e) => {
 								setFirstName(e.target.value);
-								if (formError) {
-									setFormError(null);
-									setErrorField(null);
-								}
+								clearError();
 							}}
 							placeholder={translations.first_name_label}
 							ref={firstNameRef}
@@ -197,10 +179,7 @@ export const SignUp = ({
 							id={lastNameId}
 							onChange={(e) => {
 								setLastName(e.target.value);
-								if (formError) {
-									setFormError(null);
-									setErrorField(null);
-								}
+								clearError();
 							}}
 							placeholder={translations.last_name_label}
 							ref={lastNameRef}
@@ -222,10 +201,7 @@ export const SignUp = ({
 						id={emailId}
 						onChange={(e) => {
 							setEmail(e.target.value);
-							if (formError) {
-								setFormError(null);
-								setErrorField(null);
-							}
+							clearError();
 						}}
 						placeholder={translations.email_label}
 						ref={emailRef}
@@ -235,52 +211,23 @@ export const SignUp = ({
 					/>
 				</div>
 
-				<div className="space-y-2">
-					<Label className="text-sm font-medium" htmlFor={passwordId}>
-						{translations.password_label}
-					</Label>
-					<div className="relative">
-						<Input
-							aria-describedby={errorField === "password" ? errorId : undefined}
-							aria-invalid={errorField === "password" ? true : undefined}
-							autoComplete="new-password"
-							className="h-12 pe-12"
-							id={passwordId}
-							minLength={8}
-							onChange={(e) => {
-								setPassword(e.target.value);
-								if (formError) {
-									setFormError(null);
-									setErrorField(null);
-								}
-							}}
-							placeholder={translations.password_label}
-							ref={passwordRef}
-							required
-							type={showPassword ? "text" : "password"}
-							value={password}
-						/>
-						<button
-							aria-label={showPassword ? "Hide password" : "Show password"}
-							aria-pressed={showPassword}
-							className="text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute inset-e-1 top-1/2 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:outline-none"
-							onClick={() => setShowPassword(!showPassword)}
-							type="button"
-						>
-							{showPassword ? (
-								<EyeOff aria-hidden="true" className="h-5 w-5" />
-							) : (
-								<Eye aria-hidden="true" className="h-5 w-5" />
-							)}
-						</button>
-					</div>
-				</div>
+				<PasswordField
+					aria-describedby={errorField === "password" ? errorId : undefined}
+					aria-invalid={errorField === "password" ? true : undefined}
+					autoComplete="new-password"
+					id={passwordId}
+					label={translations.password_label}
+					minLength={8}
+					onChange={(e) => {
+						setPassword(e.target.value);
+						clearError();
+					}}
+					ref={passwordRef}
+					required
+					value={password}
+				/>
 
-				{formError ? (
-					<p className="text-destructive text-sm" id={errorId} role="alert">
-						{formError}
-					</p>
-				) : null}
+				<AuthFormError error={formError} id={errorId} />
 
 				{captchaSlot}
 
@@ -288,17 +235,7 @@ export const SignUp = ({
 					<p className="text-muted-foreground mt-6 mb-3 text-center text-xs">
 						{translations.terms}
 					</p>
-					<Button
-						className="h-12 w-full text-base font-medium"
-						disabled={loading}
-						type="submit"
-					>
-						{loading ? (
-							<Loader2 className="animate-spin" size={20} />
-						) : (
-							translations.submit
-						)}
-					</Button>
+					<AuthSubmitButton label={translations.submit} loading={loading} />
 				</div>
 			</form>
 

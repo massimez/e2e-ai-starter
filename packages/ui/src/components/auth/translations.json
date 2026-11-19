@@ -9,8 +9,7 @@
       "forgot_password": "Forgot Password?",
       "submit": "Sign in",
       "no_account": "Don't have an account?",
-      "register": "Create an account",
-      "loading": "Sign in"
+      "register": "Create an account"
     },
     "signUp": {
       "title": "Create your account",
@@ -23,8 +22,7 @@
       "terms": "By creating an account you agree to our terms and conditions.",
       "submit": "Create an account",
       "has_account": "Already have an account?",
-      "sign_in": "Sign in",
-      "loading": "Create an account"
+      "sign_in": "Sign in"
     },
     "forgetPassword": {
       "title": "Forgot Password",
@@ -65,7 +63,6 @@
       "otp_resent": "OTP resent to your email."
     },
     "captcha": {
-      "verifying": "Completing security check...",
       "failed": "Security verification failed. Please try again.",
       "unavailable": "Security check could not load. Please disable any blockers for this site or retry.",
       "retry": "Retry security check"
@@ -81,8 +78,7 @@
       "forgot_password": "Mot de passe oublié ?",
       "submit": "Se connecter",
       "no_account": "Vous n'avez pas de compte ?",
-      "register": "Inscrivez-vous gratuitement",
-      "loading": "Connexion en cours..."
+      "register": "Inscrivez-vous gratuitement"
     },
     "signUp": {
       "title": "Créez votre compte",
@@ -95,8 +91,7 @@
       "terms": "En créant un compte, vous acceptez nos conditions générales.",
       "submit": "Créer un compte",
       "has_account": "Vous avez déjà un compte ?",
-      "sign_in": "Se connecter",
-      "loading": "Création de compte..."
+      "sign_in": "Se connecter"
     },
     "forgetPassword": {
       "title": "Mot de passe oublié",
@@ -137,7 +132,6 @@
       "otp_resent": "OTP renvoyé à votre email."
     },
     "captcha": {
-      "verifying": "Vérification de sécurité en cours...",
       "failed": "La vérification de sécurité a échoué. Veuillez réessayer.",
       "unavailable": "La vérification de sécurité n'a pas pu se charger. Veuillez désactiver les bloqueurs ou réessayer.",
       "retry": "Réessayer la vérification"
@@ -153,8 +147,7 @@
       "forgot_password": "هل نسيت كلمة المرور؟",
       "submit": "تسجيل الدخول",
       "no_account": "ليس لديك حساب؟",
-      "register": "سجل مجانا",
-      "loading": "جاري تسجيل الدخول..."
+      "register": "سجل مجانا"
     },
     "signUp": {
       "title": "أنشئ حسابك",
@@ -167,8 +160,7 @@
       "terms": "من خلال إنشاء حساب فإنك توافق على الشروط والأحكام الخاصة بنا.",
       "submit": "إنشاء حساب",
       "has_account": "هل لديك حساب بالفعل؟",
-      "sign_in": "تسجيل الدخول",
-      "loading": "جاري إنشاء الحساب..."
+      "sign_in": "تسجيل الدخول"
     },
     "forgetPassword": {
       "title": "نسيت كلمة المرور",
@@ -209,7 +201,6 @@
       "otp_resent": "تم إعادة إرسال رمز التحقق إلى بريدك الإلكتروني."
     },
     "captcha": {
-      "verifying": "جارٍ إكمال التحقق الأمني...",
       "failed": "فشل التحقق الأمني. يرجى المحاولة مرة أخرى.",
       "unavailable": "تعذر تحميل التحقق الأمني. يرجى تعطيل أدوات الحظر أو المحاولة مرة أخرى.",
       "retry": "إعادة محاولة التحقق"

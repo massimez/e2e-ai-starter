@@ -109,3 +109,14 @@ export function resolveSameOriginUrl(
 	const safePath = sanitizeSameOriginPath(rawUrl);
 	return safePath ? `${window.location.origin}${safePath}` : fallback;
 }
+
+/**
+ * Normalizes display names or user input into lowercase hyphenated URL/role slugs.
+ */
+export function sanitizeSlug(raw: string): string {
+	return raw
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/gu, "-")
+		.replace(/^-+|-+$/gu, "");
+}

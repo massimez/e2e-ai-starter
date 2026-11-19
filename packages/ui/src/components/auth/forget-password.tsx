@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "@workspace/ui/components/button";
 import {
 	DialogDescription,
 	DialogFooter,
@@ -9,11 +8,13 @@ import {
 } from "@workspace/ui/components/dialog";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
-import { Loader2 } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useRef, useState } from "react";
+import {
+	AuthFormError,
+	AuthSubmitButton,
+	EMAIL_PATTERN,
+} from "./auth-form-primitives";
 import type defaultTranslations from "./translations.json";
-
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
 export const ForgetPassword = ({
 	captchaSlot,
@@ -87,25 +88,11 @@ export const ForgetPassword = ({
 					/>
 				</div>
 
-				{formError ? (
-					<p className="text-destructive text-sm" id={errorId} role="alert">
-						{formError}
-					</p>
-				) : null}
+				<AuthFormError error={formError} id={errorId} />
 
 				{captchaSlot}
 
-				<Button
-					className="h-12 w-full text-base font-medium"
-					disabled={loading}
-					type="submit"
-				>
-					{loading ? (
-						<Loader2 className="animate-spin" size={20} />
-					) : (
-						translations.submit
-					)}
-				</Button>
+				<AuthSubmitButton label={translations.submit} loading={loading} />
 			</form>
 
 			<DialogFooter className="flex justify-center sm:justify-center">

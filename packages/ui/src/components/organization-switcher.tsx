@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
+import { sanitizeSlug } from "../lib/utils";
 import { Button } from "./button";
 import {
 	Dialog,
@@ -43,14 +44,6 @@ export interface OrganizationSwitcherProps {
 	onCreateOrg?: (name: string, slug: string) => Promise<void>;
 	onSelectOrg?: (orgId: string) => Promise<void>;
 	organizations: OrganizationItem[];
-}
-
-export function sanitizeSlug(raw: string): string {
-	return raw
-		.toLowerCase()
-		.replace(/[^a-z0-9]/gu, "-")
-		.replace(/-+/gu, "-")
-		.replace(/^-+|-+$/gu, "");
 }
 
 export function OrganizationSwitcher({

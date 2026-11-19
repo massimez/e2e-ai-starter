@@ -1,8 +1,6 @@
 import { cn } from "@workspace/ui/lib/utils";
 import type { ReactNode } from "react";
 
-export const ORGANIZATION_SETTINGS_CONTAINER_CLASS = "mx-auto w-full max-w-6xl";
-
 interface SettingsPageProps {
 	action?: ReactNode;
 	children: ReactNode;

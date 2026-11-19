@@ -4,20 +4,11 @@ import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
 
 export interface BadgeProps
-	extends React.HTMLAttributes<HTMLDivElement>,
+	extends React.ComponentProps<"span">,
 		VariantProps<typeof badgeVariants> {
 	asChild?: boolean;
 	disabled?: boolean;
-	dotClassName?: string;
 }
-
-export interface BadgeButtonProps
-	extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-		VariantProps<typeof badgeButtonVariants> {
-	asChild?: boolean;
-}
-
-export type BadgeDotProps = React.HTMLAttributes<HTMLSpanElement>;
 
 const badgeVariants = cva(
 	"focus:ring-ring inline-flex items-center justify-center border border-transparent font-medium whitespace-nowrap focus:ring-2 focus:ring-offset-2 focus:outline-hidden [&_svg]:-ms-px [&_svg]:shrink-0",
@@ -169,20 +160,6 @@ const badgeVariants = cva(
 	}
 );
 
-const badgeButtonVariants = cva(
-	"-me-0.5 inline-flex size-3.5 cursor-pointer items-center justify-center rounded-md p-0 leading-none opacity-60 transition-all hover:opacity-100 [&>svg]:size-3.5! [&>svg]:opacity-100!",
-	{
-		variants: {
-			variant: {
-				default: "",
-			},
-		},
-		defaultVariants: {
-			variant: "default",
-		},
-	}
-);
-
 function Badge({
 	className,
 	variant,
@@ -192,8 +169,7 @@ function Badge({
 	asChild = false,
 	disabled,
 	...props
-}: React.ComponentProps<"span"> &
-	VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
+}: BadgeProps) {
 	const Comp = asChild ? SlotPrimitive : "span";
 
 	return (
@@ -208,44 +184,4 @@ function Badge({
 	);
 }
 
-function BadgeButton({
-	className,
-	variant,
-	asChild = false,
-	type,
-	...props
-}: BadgeButtonProps) {
-	if (asChild) {
-		return (
-			<SlotPrimitive
-				className={cn(badgeButtonVariants({ variant, className }))}
-				data-slot="badge-button"
-				{...props}
-			/>
-		);
-	}
-
-	return (
-		<button
-			className={cn(badgeButtonVariants({ variant, className }))}
-			data-slot="badge-button"
-			type={type ?? "button"}
-			{...props}
-		/>
-	);
-}
-
-function BadgeDot({ className, ...props }: React.ComponentProps<"span">) {
-	return (
-		<span
-			className={cn(
-				"size-1.5 rounded-full bg-[currentColor] opacity-75",
-				className
-			)}
-			data-slot="badge-dot"
-			{...props}
-		/>
-	);
-}
-
-export { Badge, BadgeButton, BadgeDot, badgeVariants };
+export { Badge, badgeVariants };
