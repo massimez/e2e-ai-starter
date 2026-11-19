@@ -6,11 +6,13 @@ import { createInterface } from "node:readline/promises";
 
 const ROOT_DIR = resolve(import.meta.dirname, "..");
 
-const APP_CONFIG_PATH = resolve(ROOT_DIR, "apps/api/src/lib/app-config.ts");
+const APP_CONFIG_PATH = resolve(ROOT_DIR, "packages/shared/src/config.ts");
 const PACKAGE_JSON_PATH = resolve(ROOT_DIR, "package.json");
 const ICON_SVG_PATH = resolve(ROOT_DIR, "apps/web/src/app/icon.svg");
 const ENV_EXAMPLE_PATH = resolve(ROOT_DIR, ".env.example");
 const ENV_PATH = resolve(ROOT_DIR, ".env");
+const WEB_ENV_EXAMPLE_PATH = resolve(ROOT_DIR, "apps/web/.env.example");
+const WEB_ENV_PATH = resolve(ROOT_DIR, "apps/web/.env");
 
 const LEADING_LOWER_LETTER_REGEX = /^[a-z]/u;
 const VALID_SLUG_REGEX = /^[a-z][a-z0-9-]{1,39}$/u;
@@ -252,12 +254,22 @@ async function main(): Promise<void> {
 	const nextAppConfig = buildAppConfigSource(targets);
 	const envExampleRaw = await readFile(ENV_EXAMPLE_PATH, "utf8");
 	const nextEnv = renderTemplateEnv(envExampleRaw, targets);
+	const webEnvExampleRaw = await readFile(WEB_ENV_EXAMPLE_PATH, "utf8");
 	const shouldWriteEnv = options.forceEnv || !existsSync(ENV_PATH);
+	const shouldWriteWebEnv = options.forceEnv || !existsSync(WEB_ENV_PATH);
 
 	if (options.dryRun) {
 		console.log("Dry run summary:");
 		console.log(
-			JSON.stringify({ ...targets, writeEnv: shouldWriteEnv }, null, 2)
+			JSON.stringify(
+				{
+					...targets,
+					writeEnv: shouldWriteEnv,
+					writeWebEnv: shouldWriteWebEnv,
+				},
+				null,
+				2
+			)
 		);
 		return;
 	}
@@ -269,12 +281,20 @@ async function main(): Promise<void> {
 	if (shouldWriteEnv) {
 		await writeFile(ENV_PATH, nextEnv, "utf8");
 	}
+	if (shouldWriteWebEnv) {
+		await writeFile(WEB_ENV_PATH, webEnvExampleRaw, "utf8");
+	}
 
 	console.log(`Configured template for "${targets.name}" (${targets.slug}).`);
 	console.log(
 		shouldWriteEnv
 			? "Generated .env with fresh BETTER_AUTH_SECRET and project defaults."
 			: "Kept existing .env (pass --force-env to regenerate from .env.example)."
+	);
+	console.log(
+		shouldWriteWebEnv
+			? "Generated apps/web/.env from apps/web/.env.example."
+			: "Kept existing apps/web/.env (pass --force-env to regenerate from apps/web/.env.example)."
 	);
 	console.log(
 		"Next: bun install && docker compose up -d && bun run db:push && bun run dev"
