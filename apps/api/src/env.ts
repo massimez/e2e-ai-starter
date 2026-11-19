@@ -1,6 +1,10 @@
+import { APP_CONFIG } from "@workspace/shared/config";
+import {
+	LOG_FORMATS,
+	LOG_LEVELS,
+	normalizeOptionalLogEnv,
+} from "@workspace/shared/logger";
 import { z } from "zod";
-import { APP_CONFIG } from "./lib/app-config";
-import { LOG_FORMATS, LOG_LEVELS, normalizeOptionalLogEnv } from "./lib/logger";
 
 const DEFAULT_DEV_SECRET =
 	"default_development_secret_key_32_characters_minimum";
@@ -102,6 +106,7 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 			S3_ACCESS_KEY_ID: z.string().default(""),
 			S3_SECRET_ACCESS_KEY: z.string().default(""),
 			S3_PUBLIC_URL: optionalUrlSchema,
+			QUEUE_DRIVER: z.enum(["redis", "inline"]).default("redis"),
 			REDIS_URL: z
 				.string()
 				.refine(isValidRedisUrl, "REDIS_URL must be a valid redis:// URL")
@@ -163,14 +168,17 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 				});
 			}
 
-			const requiredInProd = [
+			const requiredInProd: string[] = [
 				"DATABASE_URL",
-				"REDIS_URL",
 				"BETTER_AUTH_URL",
 				"CORS_ORIGIN",
 				"S3_ACCESS_KEY_ID",
 				"S3_SECRET_ACCESS_KEY",
-			] as const;
+			];
+
+			if (data.QUEUE_DRIVER === "redis") {
+				requiredInProd.push("REDIS_URL");
+			}
 
 			for (const key of requiredInProd) {
 				if (!rawInput[key]?.trim()) {
