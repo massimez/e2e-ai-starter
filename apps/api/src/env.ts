@@ -6,6 +6,13 @@ const DEFAULT_DEV_SECRET =
 	"default_development_secret_key_32_characters_minimum";
 const MODEL_ID_REGEX = /^[a-z0-9-]+\/.+$/iu;
 
+function parseCsvList(raw: string): string[] {
+	return raw
+		.split(",")
+		.map((item) => item.trim())
+		.filter(Boolean);
+}
+
 function isValidHttpUrl(value: string): boolean {
 	try {
 		const parsed = new URL(value);
@@ -24,16 +31,20 @@ function isValidRedisUrl(value: string): boolean {
 	}
 }
 
-const optionalUrlSchema = z
+const optionalTrimmedStringSchema = z
 	.string()
 	.optional()
 	.transform((value) => {
 		const trimmed = value?.trim();
 		return trimmed ? trimmed : undefined;
-	})
-	.refine((value) => (value ? isValidHttpUrl(value) : true), {
-		message: "Must be a valid http:// or https:// URL",
 	});
+
+const optionalUrlSchema = optionalTrimmedStringSchema.refine(
+	(value) => (value ? isValidHttpUrl(value) : true),
+	{
+		message: "Must be a valid http:// or https:// URL",
+	}
+);
 
 function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 	return z
@@ -69,10 +80,7 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 				.default("http://localhost:3000")
 				.refine(
 					(value) => {
-						const origins = value
-							.split(",")
-							.map((origin) => origin.trim())
-							.filter(Boolean);
+						const origins = parseCsvList(value);
 						return (
 							origins.length > 0 &&
 							origins.every((origin) => isValidHttpUrl(origin))
@@ -100,11 +108,11 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 				.default("redis://localhost:6379"),
 			REDIS_PREFIX: z.string().min(1).default(APP_CONFIG.defaultRedisPrefix),
 			// AI provider keys (Mastra reads these from process.env; listed here for validation & preflight checks)
-			GOOGLE_GENERATIVE_AI_API_KEY: z.string().trim().min(1).optional(),
-			GOOGLE_API_KEY: z.string().trim().min(1).optional(),
-			OPENAI_API_KEY: z.string().trim().min(1).optional(),
-			ANTHROPIC_API_KEY: z.string().trim().min(1).optional(),
-			OPENROUTER_API_KEY: z.string().trim().min(1).optional(),
+			GOOGLE_GENERATIVE_AI_API_KEY: optionalTrimmedStringSchema,
+			GOOGLE_API_KEY: optionalTrimmedStringSchema,
+			OPENAI_API_KEY: optionalTrimmedStringSchema,
+			ANTHROPIC_API_KEY: optionalTrimmedStringSchema,
+			OPENROUTER_API_KEY: optionalTrimmedStringSchema,
 			MASTRA_DB_SCHEMA: z.string().trim().min(1).default("mastra"),
 			MASTRA_DEFAULT_MODEL: z
 				.string()
@@ -192,17 +200,11 @@ export function parseApiEnv(
 	const rawEnv = parsed.data;
 	return {
 		...rawEnv,
-		CORS_ORIGINS: rawEnv.CORS_ORIGIN.split(",")
-			.map((origin) => origin.trim())
-			.filter(Boolean),
-		TRUSTED_PROXY_CIDRS_LIST: rawEnv.TRUSTED_PROXY_CIDRS.split(",")
-			.map((cidr) => cidr.trim())
-			.filter(Boolean),
-		TURNSTILE_ALLOWED_HOSTNAMES_LIST: rawEnv.TURNSTILE_ALLOWED_HOSTNAMES.split(
-			","
-		)
-			.map((hostname) => hostname.trim())
-			.filter(Boolean),
+		CORS_ORIGINS: parseCsvList(rawEnv.CORS_ORIGIN),
+		TRUSTED_PROXY_CIDRS_LIST: parseCsvList(rawEnv.TRUSTED_PROXY_CIDRS),
+		TURNSTILE_ALLOWED_HOSTNAMES_LIST: parseCsvList(
+			rawEnv.TURNSTILE_ALLOWED_HOSTNAMES
+		),
 	};
 }
 

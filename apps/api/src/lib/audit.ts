@@ -1,8 +1,9 @@
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 import { db } from "@workspace/db";
 import { type AuditLogDetails, auditLog } from "@workspace/db/schema";
 import type { Context } from "hono";
 import { env } from "../env";
+import type { AppEnv } from "./create-hono-app";
 import { logError } from "./logger";
 
 export interface AuditLogRecord {
@@ -44,67 +45,56 @@ function normalizeIpAddress(raw: string | undefined | null): string | null {
 	return isIP(unmapped) === 0 ? null : unmapped;
 }
 
-function ipv4ToUint32(ip: string): number | null {
-	if (isIP(ip) !== 4) {
-		return null;
+function addTrustedRuleToBlockList(
+	blockList: BlockList,
+	rawRule: string
+): void {
+	const rule = rawRule.trim();
+	if (!rule) {
+		return;
 	}
-	const parts = ip.split(".");
-	if (parts.length !== 4) {
-		return null;
-	}
-	let acc = 0;
-	for (const part of parts) {
-		const octet = Number(part);
-		if (!Number.isInteger(octet) || octet < 0 || octet > 255) {
-			return null;
-		}
-		acc = acc * 256 + octet;
-	}
-	return acc;
-}
-
-function isIpMatchCidr(ip: string, rule: string): boolean {
-	if (ip === rule) {
-		return true;
-	}
-
 	const slashIndex = rule.indexOf("/");
 	if (slashIndex === -1) {
-		return false;
+		const ruleFamily = isIP(rule);
+		if (ruleFamily === 4 || ruleFamily === 6) {
+			blockList.addAddress(rule, ruleFamily === 6 ? "ipv6" : "ipv4");
+		}
+		return;
 	}
-
 	const network = rule.slice(0, slashIndex);
-	const prefixLen = Number(rule.slice(slashIndex + 1));
-	const ipNum = ipv4ToUint32(ip);
-	const networkNum = ipv4ToUint32(network);
-
+	const prefix = Number(rule.slice(slashIndex + 1));
+	const networkFamily = isIP(network);
+	const maxPrefix = networkFamily === 6 ? 128 : 32;
 	if (
-		ipNum === null ||
-		networkNum === null ||
-		!Number.isInteger(prefixLen) ||
-		prefixLen < 0 ||
-		prefixLen > 32
+		(networkFamily === 4 || networkFamily === 6) &&
+		Number.isInteger(prefix) &&
+		prefix >= 0 &&
+		prefix <= maxPrefix
 	) {
-		return false;
+		blockList.addSubnet(network, prefix, networkFamily === 6 ? "ipv6" : "ipv4");
 	}
-
-	const blockSize = 2 ** (32 - prefixLen);
-	return Math.floor(ipNum / blockSize) === Math.floor(networkNum / blockSize);
 }
 
 export function isTrustedProxyIp(
 	ip: string | null,
 	trustedCidrs: readonly string[]
 ): boolean {
-	if (!ip || trustedCidrs.length === 0) {
+	const normalized = normalizeIpAddress(ip);
+	if (!normalized || trustedCidrs.length === 0) {
 		return false;
 	}
-	return trustedCidrs.some((cidr) => isIpMatchCidr(ip, cidr));
+
+	const blockList = new BlockList();
+	for (const rawRule of trustedCidrs) {
+		addTrustedRuleToBlockList(blockList, rawRule);
+	}
+
+	const targetFamily = isIP(normalized) === 6 ? "ipv6" : "ipv4";
+	return blockList.check(normalized, targetFamily);
 }
 
-export function extractClientIp(c: Context): string | null {
-	const rawEnv = c.env as { remoteAddress?: string | null } | undefined;
-	const peerIp = normalizeIpAddress(rawEnv?.remoteAddress ?? null);
+export function extractClientIp(c: Context<AppEnv>): string | null {
+	const peerIp = normalizeIpAddress(c.env?.remoteAddress ?? null);
 
 	// Never trust forwarded client headers unless the direct peer is an explicit trusted proxy.
 	if (!isTrustedProxyIp(peerIp, env.TRUSTED_PROXY_CIDRS_LIST)) {

@@ -3,11 +3,6 @@ import { createMiddleware } from "hono/factory";
 import { type AppEnv, createErrorResponse } from "../lib/create-hono-app";
 import type { TenantMismatchSecurityEvent } from "../lib/tenant";
 
-interface SessionLike {
-	activeOrganizationId?: string | null;
-	userId?: string | null;
-}
-
 const JSON_CONTENT_TYPE_REGEX = /application\/json/iu;
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const MAX_INSPECT_BODY_BYTES = 1_048_576; // 1 MB safety cap
@@ -118,7 +113,7 @@ export function createTenantBoundaryMiddleware(
 	options: TenantBoundaryMiddlewareOptions = {}
 ): MiddlewareHandler<AppEnv> {
 	return createMiddleware<AppEnv>(async (c, next) => {
-		const session = c.get("session") as SessionLike | null | undefined;
+		const session = c.get("session");
 		const activeOrgId = session?.activeOrganizationId?.trim();
 
 		if (!activeOrgId) {

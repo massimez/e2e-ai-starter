@@ -9,15 +9,14 @@ import {
 import { and, count, desc, eq } from "drizzle-orm";
 import { parseMemberRoles } from "../../lib/auth/permissions";
 import { ValidationError } from "../../lib/errors";
+import { resolveSafePushEndpoint } from "../../lib/network";
 import {
-	isBlockedIpAddress,
 	NOTIFICATION_CATEGORIES,
 	NOTIFICATION_CHANNELS,
 	type NotificationJobData,
-	validatePushEndpointUrl,
 } from "../../lib/queues";
 import { rolesService } from "../roles/service";
-import { enqueueNotification, enqueueNotificationsBulk } from "./queue";
+import { enqueueNotificationsBulk } from "./queue";
 import type {
 	ListNotificationsQuery,
 	PushSubscriptionInput,
@@ -29,31 +28,21 @@ export const pushEndpointResolver = {
 };
 
 async function assertSafePushEndpoint(endpoint: string): Promise<void> {
-	const validation = validatePushEndpointUrl(endpoint);
-	if (!validation.ok) {
-		throw new ValidationError(validation.reason, "INVALID_PUSH_ENDPOINT");
-	}
-
-	let addresses: Array<{ address: string; family: number }>;
-	try {
-		addresses = await pushEndpointResolver.lookup(validation.url.hostname);
-	} catch (error) {
-		throw new ValidationError("Push endpoint hostname could not be resolved", {
-			cause: error,
+	const resolved = await resolveSafePushEndpoint(
+		endpoint,
+		pushEndpointResolver.lookup
+	);
+	if (!resolved.ok) {
+		throw new ValidationError(resolved.reason, {
+			...(resolved.cause === undefined ? {} : { cause: resolved.cause }),
+			code: resolved.code,
 			field: "endpoint",
 		});
 	}
-
-	if (
-		addresses.length === 0 ||
-		addresses.some((entry) => isBlockedIpAddress(entry.address))
-	) {
-		throw new ValidationError(
-			"Push endpoint resolved to a restricted network address",
-			"BLOCKED_PUSH_ENDPOINT"
-		);
-	}
 }
+
+const EXPECTED_PREFERENCE_COUNT =
+	NOTIFICATION_CATEGORIES.length * NOTIFICATION_CHANNELS.length;
 
 export const notificationService = {
 	async deletePushSubscription(userId: string, endpoint: string) {
@@ -74,12 +63,17 @@ export const notificationService = {
 			.from(notificationPreference)
 			.where(eq(notificationPreference.userId, userId));
 
-		if (existing.length > 0) {
+		if (existing.length >= EXPECTED_PREFERENCE_COUNT) {
 			return existing;
 		}
 
-		const defaults = NOTIFICATION_CATEGORIES.flatMap((category) =>
-			NOTIFICATION_CHANNELS.map((channel) => ({
+		const existingKeys = new Set(
+			existing.map((pref) => `${pref.category}:${pref.channel}`)
+		);
+		const missingDefaults = NOTIFICATION_CATEGORIES.flatMap((category) =>
+			NOTIFICATION_CHANNELS.filter(
+				(channel) => !existingKeys.has(`${category}:${channel}`)
+			).map((channel) => ({
 				category,
 				channel,
 				enabled: true,
@@ -87,9 +81,13 @@ export const notificationService = {
 			}))
 		);
 
+		if (missingDefaults.length === 0) {
+			return existing;
+		}
+
 		await db
 			.insert(notificationPreference)
-			.values(defaults)
+			.values(missingDefaults)
 			.onConflictDoNothing();
 
 		return await db
@@ -115,6 +113,7 @@ export const notificationService = {
 		}
 
 		const whereClause = and(...conditions);
+		const isUnreadOnly = query.unreadOnly === "true";
 
 		const [items, totalResult, unreadCount] = await Promise.all([
 			db
@@ -125,7 +124,7 @@ export const notificationService = {
 				.limit(query.limit)
 				.offset(query.offset),
 			db.select({ total: count() }).from(notification).where(whereClause),
-			this.getUnreadCount(userId),
+			isUnreadOnly ? Promise.resolve(null) : this.getUnreadCount(userId),
 		]);
 
 		const total = totalResult[0]?.total ?? 0;
@@ -138,7 +137,7 @@ export const notificationService = {
 				offset: query.offset,
 				total,
 			},
-			unreadCount,
+			unreadCount: unreadCount ?? total,
 		};
 	},
 
@@ -190,10 +189,6 @@ export const notificationService = {
 			})
 			.returning();
 		return sub;
-	},
-
-	async send(payload: NotificationJobData) {
-		await enqueueNotification(payload);
 	},
 
 	async sendToOrganizationAdmins(

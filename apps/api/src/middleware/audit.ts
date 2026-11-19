@@ -11,6 +11,7 @@ import {
 } from "../lib/audit";
 import type { AppEnv } from "../lib/create-hono-app";
 import { logError, sanitizeRequestPath } from "../lib/logger";
+import { withTimeout } from "../lib/queues";
 import type { TenantMismatchSecurityEvent } from "../lib/tenant";
 
 export interface AccessAuditMiddlewareOptions {
@@ -33,17 +34,11 @@ export async function drainAuditLogs(timeoutMs = 3000): Promise<void> {
 	if (pendingAuditWrites.size === 0) {
 		return;
 	}
-	const drainPromise = Promise.allSettled(Array.from(pendingAuditWrites));
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	await Promise.race([
-		drainPromise,
-		new Promise<void>((resolve) => {
-			timer = setTimeout(resolve, timeoutMs);
-		}),
-	]);
-	if (timer) {
-		clearTimeout(timer);
-	}
+	await withTimeout(
+		Promise.allSettled(Array.from(pendingAuditWrites)),
+		timeoutMs,
+		"Audit log drain timed out"
+	).catch(() => undefined);
 }
 
 function extractEntityFromPath(path: string): {

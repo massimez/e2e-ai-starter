@@ -17,6 +17,10 @@
       "types": "./src/lib/logger.ts",
       "import": "./src/lib/logger.ts"
     },
+    "./network": {
+      "types": "./src/lib/network.ts",
+      "import": "./src/lib/network.ts"
+    },
     "./permissions": {
       "types": "./src/lib/auth/permissions.ts",
       "import": "./src/lib/auth/permissions.ts"

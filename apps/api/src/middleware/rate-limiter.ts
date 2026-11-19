@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
 import { extractClientIp } from "../lib/audit";
-import { createErrorResponse } from "../lib/create-hono-app";
+import { type AppEnv, createErrorResponse } from "../lib/create-hono-app";
 import { logWarning } from "../lib/logger";
 import { checkRateLimit, type RateLimitResult } from "../lib/redis/rate-limit";
 
@@ -96,14 +96,14 @@ function getMemoryRateLimitResult(
 	};
 }
 
-function resolveIdentifier(c: Context, identity?: "actor" | "ip"): string {
+function resolveIdentifier(
+	c: Context<AppEnv>,
+	identity?: "actor" | "ip"
+): string {
 	if (identity === "actor") {
-		const user = c.get("user") as { id?: string } | null | undefined;
+		const user = c.get("user");
 		if (user?.id) {
-			const session = c.get("session") as
-				| { activeOrganizationId?: string | null }
-				| null
-				| undefined;
+			const session = c.get("session");
 			return `user:${user.id}:tenant:${session?.activeOrganizationId ?? "personal"}`;
 		}
 	}
@@ -116,10 +116,10 @@ export function rateLimiter(
 	windowMs = 60_000,
 	maxRequests = 100,
 	options: RateLimiterOptions = {}
-): MiddlewareHandler {
+): MiddlewareHandler<AppEnv> {
 	const windowSeconds = Math.max(1, Math.ceil(windowMs / 1000));
 
-	return createMiddleware(async (c, next) => {
+	return createMiddleware<AppEnv>(async (c, next) => {
 		const identifier = resolveIdentifier(c, options.identity);
 		const routeKey =
 			options.operation ??

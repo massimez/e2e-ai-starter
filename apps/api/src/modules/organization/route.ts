@@ -125,14 +125,14 @@ export const organizationRoutes = createRouter()
 		hasOrgPermission("member:invite"),
 		jsonValidator(inviteOrganizationMemberSchema),
 		async (c) => {
-			const { organizationId, userId } = getActiveOrgContext(c);
+			const { organizationId } = getActiveOrgContext(c);
 			const user = requireUser(c);
 			const input = c.req.valid("json");
 			const result = await rolesService.inviteOrganizationMember(
 				organizationId,
 				input,
 				{
-					id: userId,
+					id: user.id,
 					name: user.name,
 				}
 			);

@@ -1,4 +1,6 @@
+import type { Context } from "hono";
 import {
+	type AppEnv,
 	createErrorResponse,
 	createRouter,
 	createSuccessResponse,
@@ -17,6 +19,18 @@ import {
 	updatePreferenceSchema,
 } from "./schema";
 import { notificationService } from "./service";
+
+async function handlePushUnsubscribe(c: Context<AppEnv>) {
+	const user = requireUser(c);
+	const input = deletePushSubscriptionSchema.parse(
+		(c.req as { valid: (target: "json") => unknown }).valid("json")
+	);
+	const result = await notificationService.deletePushSubscription(
+		user.id,
+		input.endpoint
+	);
+	return c.json(createSuccessResponse(result, "Push subscription removed"));
+}
 
 export const notificationRoutes = createRouter()
 	// All notification routes require authenticated session and per-actor rate limiting
@@ -91,26 +105,10 @@ export const notificationRoutes = createRouter()
 	.delete(
 		"/push/unsubscribe",
 		jsonValidator(deletePushSubscriptionSchema),
-		async (c) => {
-			const user = requireUser(c);
-			const input = c.req.valid("json");
-			const result = await notificationService.deletePushSubscription(
-				user.id,
-				input.endpoint
-			);
-			return c.json(createSuccessResponse(result, "Push subscription removed"));
-		}
+		handlePushUnsubscribe
 	)
 	.post(
 		"/push/unsubscribe",
 		jsonValidator(deletePushSubscriptionSchema),
-		async (c) => {
-			const user = requireUser(c);
-			const input = c.req.valid("json");
-			const result = await notificationService.deletePushSubscription(
-				user.id,
-				input.endpoint
-			);
-			return c.json(createSuccessResponse(result, "Push subscription removed"));
-		}
+		handlePushUnsubscribe
 	);

@@ -7,7 +7,6 @@ import {
 } from "../../lib/create-hono-app";
 import { withTimeout } from "../../lib/queues";
 import { redis } from "../../lib/redis/client";
-import { rateLimiter } from "../../middleware/rate-limiter";
 
 const READINESS_CHECK_TIMEOUT_MS = 3000;
 
@@ -25,39 +24,24 @@ export const healthRoutes = createRouter()
 	.get("/", (c) => c.json(buildLivenessPayload()))
 	.get("/live", (c) => c.json(buildLivenessPayload()))
 	// Readiness probe (verifies database & Redis connectivity)
-	.get("/ready", rateLimiter(60_000, 60), async (c) => {
+	.get("/ready", async (c) => {
+		const [dbResult, redisResult] = await Promise.allSettled([
+			withTimeout(db.execute(sql`SELECT 1`), READINESS_CHECK_TIMEOUT_MS),
+			withTimeout(redis.ping(), READINESS_CHECK_TIMEOUT_MS),
+		]);
+
 		const checks: {
 			database: "healthy" | "unhealthy";
 			redis: "healthy" | "unhealthy";
 		} = {
-			database: "healthy",
-			redis: "healthy",
+			database: dbResult.status === "fulfilled" ? "healthy" : "unhealthy",
+			redis:
+				redisResult.status === "fulfilled" && redisResult.value === "PONG"
+					? "healthy"
+					: "unhealthy",
 		};
-
-		let isHealthy = true;
-
-		// 1. Check PostgreSQL
-		try {
-			await withTimeout(db.execute(sql`SELECT 1`), READINESS_CHECK_TIMEOUT_MS);
-		} catch {
-			checks.database = "unhealthy";
-			isHealthy = false;
-		}
-
-		// 2. Check Redis
-		try {
-			const pingResult = await withTimeout(
-				redis.ping(),
-				READINESS_CHECK_TIMEOUT_MS
-			);
-			if (pingResult !== "PONG") {
-				checks.redis = "unhealthy";
-				isHealthy = false;
-			}
-		} catch {
-			checks.redis = "unhealthy";
-			isHealthy = false;
-		}
+		const isHealthy =
+			checks.database === "healthy" && checks.redis === "healthy";
 
 		const data = {
 			checks,

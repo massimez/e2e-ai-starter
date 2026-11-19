@@ -1,8 +1,8 @@
 import { z } from "zod";
+import { validatePushEndpointUrl } from "../../lib/network";
 import {
 	notificationCategorySchema,
 	notificationChannelSchema,
-	validatePushEndpointUrl,
 } from "../../lib/queues";
 
 export const notificationIdParamSchema = z.object({
