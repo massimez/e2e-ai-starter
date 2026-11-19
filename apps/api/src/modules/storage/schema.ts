@@ -44,6 +44,24 @@ export const createStorageFolderSchema = z.object({
 	parentId: z.string().uuid().nullable().optional(),
 });
 
+export const updateStorageFolderSchema = z.object({
+	name: z.string().trim().min(1, "Folder name is required").max(120),
+});
+
+export const updateUploadSchema = z
+	.object({
+		fileName: z
+			.string()
+			.trim()
+			.min(1, "File name is required")
+			.max(255)
+			.optional(),
+		folderId: z.string().uuid("Invalid folder ID").nullable().optional(),
+	})
+	.refine((val) => val.fileName !== undefined || val.folderId !== undefined, {
+		message: "Either fileName or folderId must be provided",
+	});
+
 export const folderIdParamSchema = z.object({
 	id: z.string().uuid("Invalid folder ID"),
 });
@@ -68,3 +86,7 @@ export type DeleteUploadBody = z.infer<typeof deleteUploadBodySchema>;
 export type CreateStorageFolderInput = z.infer<
 	typeof createStorageFolderSchema
 >;
+export type UpdateStorageFolderInput = z.infer<
+	typeof updateStorageFolderSchema
+>;
+export type UpdateUploadInput = z.infer<typeof updateUploadSchema>;

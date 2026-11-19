@@ -17,6 +17,8 @@ import {
 	folderIdParamSchema,
 	listUploadsQuerySchema,
 	presignUploadSchema,
+	updateStorageFolderSchema,
+	updateUploadSchema,
 	uploadIdParamSchema,
 } from "./schema";
 import {
@@ -31,6 +33,8 @@ import {
 	listStorageFolders,
 	listUploads,
 	presignUpload,
+	updateStorageFolder,
+	updateUpload,
 } from "./service";
 
 export const storageRoutes = createRouter()
@@ -115,6 +119,19 @@ export const storageRoutes = createRouter()
 			return c.json(createSuccessResponse(folder), 201);
 		}
 	)
+	.patch(
+		"/folders/:id",
+		hasOrgPermission("storage:update"),
+		paramValidator(folderIdParamSchema),
+		jsonValidator(updateStorageFolderSchema),
+		async (c) => {
+			const { organizationId } = getActiveOrgContext(c);
+			const { id } = c.req.valid("param");
+			const input = c.req.valid("json");
+			const folder = await updateStorageFolder({ id, input, organizationId });
+			return c.json(createSuccessResponse(folder));
+		}
+	)
 	.delete(
 		"/folders/:id",
 		hasOrgPermission("storage:delete"),
@@ -123,6 +140,21 @@ export const storageRoutes = createRouter()
 			const { organizationId } = getActiveOrgContext(c);
 			const { id } = c.req.valid("param");
 			const result = await deleteStorageFolder({ id, organizationId });
+			return c.json(createSuccessResponse(result));
+		}
+	)
+
+	// 4c. Rename file and/or move file to another folder (or root)
+	.patch(
+		"/files/:id",
+		hasOrgPermission("storage:update"),
+		paramValidator(uploadIdParamSchema),
+		jsonValidator(updateUploadSchema),
+		async (c) => {
+			const { organizationId } = getActiveOrgContext(c);
+			const { id } = c.req.valid("param");
+			const input = c.req.valid("json");
+			const result = await updateUpload({ id, input, organizationId });
 			return c.json(createSuccessResponse(result));
 		}
 	)

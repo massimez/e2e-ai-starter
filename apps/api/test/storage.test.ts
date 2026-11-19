@@ -8,14 +8,19 @@ import {
 	commitUploadsSchema,
 	deleteUploadBodySchema,
 	presignUploadSchema,
+	updateStorageFolderSchema,
+	updateUploadSchema,
 	uploadIdParamSchema,
 } from "../src/modules/storage/schema";
 import {
 	commitUploads,
+	deleteStorageFolder,
 	deleteUpload,
 	escapeIlikePattern,
 	getUploadSignedDownloadUrl,
 	presignUpload,
+	updateStorageFolder,
+	updateUpload,
 } from "../src/modules/storage/service";
 
 function createQueryChain<T>(result: T) {
@@ -77,6 +82,19 @@ describe("storage utilities and schemas", () => {
 			false
 		);
 		expect(deleteUploadBodySchema.safeParse({}).success).toBe(false);
+		expect(updateStorageFolderSchema.safeParse({ name: "  " }).success).toBe(
+			false
+		);
+		expect(
+			updateStorageFolderSchema.safeParse({ name: "Archive" }).success
+		).toBe(true);
+		expect(updateUploadSchema.safeParse({}).success).toBe(false);
+		expect(
+			updateUploadSchema.safeParse({
+				fileName: "renamed.pdf",
+				folderId: null,
+			}).success
+		).toBe(true);
 	});
 });
 
@@ -317,5 +335,142 @@ describe("storage service controls and route guards", () => {
 			env.S3_ACCESS_KEY_ID = originalKeyId;
 			env.S3_SECRET_ACCESS_KEY = originalSecret;
 		}
+	});
+
+	test("updateStorageFolder renames folder within organization boundary", async () => {
+		const folderId = "22222222-2222-4222-8222-222222222222";
+		const updatedRow = {
+			id: folderId,
+			name: "Contracts",
+			organizationId: "org_1",
+			parentId: null,
+		};
+
+		spyOn(db, "update").mockImplementation((() =>
+			createQueryChain([updatedRow])) as never);
+
+		const result = await updateStorageFolder({
+			id: folderId,
+			input: { name: "Contracts" },
+			organizationId: "org_1",
+		});
+
+		expect(result).toEqual(updatedRow as never);
+	});
+
+	test("deleteStorageFolder deletes all files inside folder, removes S3 objects, and decrements quota", async () => {
+		const folderId = "22222222-2222-4222-8222-222222222222";
+		const uploadA = {
+			bucket: "starter-uploads",
+			fileKey: "org_1/uploads/file-a.pdf",
+			folderId,
+			id: "33333333-3333-4333-8333-333333333333",
+			metadata: { originalName: "file-a.pdf" },
+			organizationId: "org_1",
+			size: 1024,
+			status: "committed",
+		};
+		const uploadB = {
+			bucket: "starter-uploads",
+			fileKey: "org_1/uploads/file-b.pdf",
+			folderId,
+			id: "44444444-4444-4444-8444-444444444444",
+			metadata: { originalName: "file-b.pdf" },
+			organizationId: "org_1",
+			size: 2048,
+			status: "committed",
+		};
+
+		const s3Spy = spyOn(S3Client.prototype, "send").mockResolvedValue(
+			{} as never
+		);
+		let decrementedQuota = false;
+		let deleteCalls = 0;
+
+		spyOn(db, "transaction").mockImplementation((async (
+			callback: (tx: unknown) => Promise<unknown>
+		) => {
+			let selectCalls = 0;
+			const txMock = {
+				delete: () => {
+					deleteCalls += 1;
+					return createQueryChain([{ id: folderId }]);
+				},
+				select: () => {
+					selectCalls += 1;
+					if (selectCalls === 1) {
+						return createQueryChain([{ id: folderId, parentId: null }]);
+					}
+					return createQueryChain([uploadA, uploadB]);
+				},
+				update: () => {
+					decrementedQuota = true;
+					return createQueryChain(undefined);
+				},
+			};
+			return await callback(txMock);
+		}) as never);
+
+		const result = await deleteStorageFolder({
+			id: folderId,
+			organizationId: "org_1",
+		});
+
+		expect(deleteCalls).toBe(2);
+		expect(decrementedQuota).toBe(true);
+		expect(s3Spy).toHaveBeenCalledTimes(2);
+		expect(result).toEqual({
+			deletedBytes: 3072,
+			deletedFilesCount: 2,
+			id: folderId,
+			success: true,
+		});
+	});
+
+	test("updateUpload renames file and moves it to target folder", async () => {
+		const uploadId = "11111111-1111-4111-8111-111111111111";
+		const targetFolderId = "22222222-2222-4222-8222-222222222222";
+		const existingRow = {
+			bucket: "starter-uploads",
+			contentType: "application/pdf",
+			fileKey: "org_1/uploads/old.pdf",
+			folderId: null,
+			id: uploadId,
+			metadata: { originalName: "old.pdf" },
+			organizationId: "org_1",
+			size: 1024,
+			status: "committed",
+		};
+
+		let selectCall = 0;
+		spyOn(db, "select").mockImplementation((() => {
+			selectCall += 1;
+			if (selectCall === 1) {
+				return createQueryChain([existingRow]);
+			}
+			return createQueryChain([{ id: targetFolderId }]);
+		}) as never);
+
+		spyOn(db, "update").mockImplementation((() =>
+			createQueryChain([
+				{
+					...existingRow,
+					folderId: targetFolderId,
+					metadata: { originalName: "new-report.pdf" },
+				},
+			])) as never);
+
+		const updated = await updateUpload({
+			id: uploadId,
+			input: {
+				fileName: "new-report.pdf",
+				folderId: targetFolderId,
+			},
+			organizationId: "org_1",
+		});
+
+		expect(updated.folderId).toBe(targetFolderId);
+		expect(updated.metadata).toEqual({ originalName: "new-report.pdf" });
+		expect(updated.fileUrl).toBe(`/api/storage/files/${uploadId}`);
 	});
 });

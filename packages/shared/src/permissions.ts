@@ -35,7 +35,7 @@ export const roles = {
 		ai: ["read", "execute"],
 		notification: ["read"],
 		setting: ["read"],
-		storage: ["create", "read"],
+		storage: ["create", "read", "update"],
 	}),
 	viewer: ac.newRole({
 		ai: ["read"],
@@ -168,6 +168,13 @@ export const PERMISSION_MATRIX: readonly PermissionMatrixEntry[] = [
 		"Read and download private workspace files",
 		"storage",
 		"read"
+	),
+	matrixEntry(
+		"Storage",
+		"Update Storage Assets",
+		"Rename files, move files between folders, and rename folders",
+		"storage",
+		"update"
 	),
 	matrixEntry(
 		"Storage",

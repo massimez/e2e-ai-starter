@@ -59,9 +59,12 @@ import type {
 	CreateStorageFolderInput,
 	ListUploadsQuery,
 	PresignUploadInput,
+	UpdateStorageFolderInput,
+	UpdateUploadInput,
 } from "./schema";
 
 const MAX_RAG_INDEX_BYTES = 256 * 1024;
+const UNSAFE_DISPOSITION_CHARS_REGEX = /[\r\n"\\]/gu;
 
 const SAFE_INLINE_IMAGE_TYPES = new Set([
 	"image/jpeg",
@@ -73,11 +76,16 @@ const SAFE_INLINE_IMAGE_TYPES = new Set([
 
 function resolveFilePresentation(
 	fileKey: string,
-	rawContentType: string | null
+	rawContentType: string | null,
+	originalName?: unknown
 ) {
 	const contentType = rawContentType ?? "application/octet-stream";
 	const isInline = SAFE_INLINE_IMAGE_TYPES.has(contentType);
-	const fileName = path.posix.basename(fileKey) || "download";
+	const preferredName =
+		typeof originalName === "string" && originalName.trim().length > 0
+			? originalName.trim().replace(UNSAFE_DISPOSITION_CHARS_REGEX, "_")
+			: "";
+	const fileName = preferredName || path.posix.basename(fileKey) || "download";
 	return {
 		contentType,
 		disposition: isInline ? "inline" : "attachment",
@@ -560,7 +568,8 @@ export async function getUploadSignedDownloadUrl(params: {
 
 	const { contentType, disposition } = resolveFilePresentation(
 		record.fileKey,
-		record.contentType
+		record.contentType,
+		record.metadata?.originalName
 	);
 
 	let url: string;
@@ -598,7 +607,8 @@ export async function getUploadFileStream(params: {
 
 	const { contentType, downloadDisposition } = resolveFilePresentation(
 		record.fileKey,
-		record.contentType
+		record.contentType,
+		record.metadata?.originalName
 	);
 
 	try {
@@ -736,11 +746,39 @@ export async function deleteUpload(params: {
 }
 
 export async function listStorageFolders(organizationId: string) {
-	return await db
-		.select()
-		.from(storageFolders)
-		.where(eq(storageFolders.organizationId, organizationId))
-		.orderBy(asc(storageFolders.name));
+	const [folders, fileCounts] = await Promise.all([
+		db
+			.select()
+			.from(storageFolders)
+			.where(eq(storageFolders.organizationId, organizationId))
+			.orderBy(asc(storageFolders.name)),
+		db
+			.select({
+				fileCount: count(),
+				folderId: uploads.folderId,
+			})
+			.from(uploads)
+			.where(
+				and(
+					eq(uploads.organizationId, organizationId),
+					eq(uploads.status, "committed"),
+					sql`${uploads.folderId} IS NOT NULL`
+				)
+			)
+			.groupBy(uploads.folderId),
+	]);
+
+	const countByFolderId = new Map<string, number>();
+	for (const row of fileCounts) {
+		if (row.folderId) {
+			countByFolderId.set(row.folderId, Number(row.fileCount ?? 0));
+		}
+	}
+
+	return folders.map((folder) => ({
+		...folder,
+		fileCount: countByFolderId.get(folder.id) ?? 0,
+	}));
 }
 
 export async function createStorageFolder(params: {
@@ -777,7 +815,10 @@ export async function createStorageFolder(params: {
 		if (!created) {
 			throw new AppError("Failed to create folder", 500);
 		}
-		return created;
+		return {
+			...created,
+			fileCount: 0,
+		};
 	} catch (error) {
 		if (isPgErrorCode(error, "23505")) {
 			throw new ConflictError("A folder with this name already exists", {
@@ -789,25 +830,234 @@ export async function createStorageFolder(params: {
 	}
 }
 
+export async function updateStorageFolder(params: {
+	id: string;
+	input: UpdateStorageFolderInput;
+	organizationId: string;
+}) {
+	const { id, input, organizationId } = params;
+	try {
+		const [updated] = await db
+			.update(storageFolders)
+			.set({
+				name: input.name,
+				updatedAt: new Date(),
+			})
+			.where(withOrg(storageFolders, organizationId, eq(storageFolders.id, id)))
+			.returning();
+
+		if (!updated) {
+			throw new NotFoundError("Folder");
+		}
+		return updated;
+	} catch (error) {
+		if (isPgErrorCode(error, "23505")) {
+			throw new ConflictError("A folder with this name already exists", {
+				cause: error,
+				field: "name",
+			});
+		}
+		throw error;
+	}
+}
+
+function collectDescendantFolderIds(
+	rootId: string,
+	allFolders: ReadonlyArray<{ id: string; parentId: string | null }>
+): string[] {
+	const childrenByParent = new Map<string, string[]>();
+	for (const folder of allFolders) {
+		if (!folder.parentId) {
+			continue;
+		}
+		const siblings = childrenByParent.get(folder.parentId) ?? [];
+		siblings.push(folder.id);
+		childrenByParent.set(folder.parentId, siblings);
+	}
+
+	const collected = new Set<string>([rootId]);
+	const queue = [rootId];
+
+	while (queue.length > 0) {
+		const currentId = queue.shift();
+		if (!currentId) {
+			continue;
+		}
+		for (const childId of childrenByParent.get(currentId) ?? []) {
+			if (!collected.has(childId)) {
+				collected.add(childId);
+				queue.push(childId);
+			}
+		}
+	}
+
+	return Array.from(collected);
+}
+
 export async function deleteStorageFolder(params: {
 	id: string;
 	organizationId: string;
 }) {
-	const [deleted] = await db
-		.delete(storageFolders)
-		.where(
-			withOrg(
-				storageFolders,
-				params.organizationId,
-				eq(storageFolders.id, params.id)
+	const { id, organizationId } = params;
+
+	const { deletedUploads, reclaimedBytes } = await db.transaction(
+		async (tx) => {
+			const orgFolders = await tx
+				.select({
+					id: storageFolders.id,
+					parentId: storageFolders.parentId,
+				})
+				.from(storageFolders)
+				.where(eq(storageFolders.organizationId, organizationId));
+
+			const targetExists = orgFolders.some((folder) => folder.id === id);
+			if (!targetExists) {
+				throw new NotFoundError("Folder");
+			}
+
+			const folderIdsToRemove = collectDescendantFolderIds(id, orgFolders);
+
+			const folderUploads = await tx
+				.select()
+				.from(uploads)
+				.where(
+					withOrg(
+						uploads,
+						organizationId,
+						inArray(uploads.folderId, folderIdsToRemove)
+					)
+				)
+				.for("update");
+
+			if (folderUploads.length > 0) {
+				await tx.delete(uploads).where(
+					withOrg(
+						uploads,
+						organizationId,
+						inArray(
+							uploads.id,
+							folderUploads.map((item) => item.id)
+						)
+					)
+				);
+			}
+
+			const totalCommittedBytes = folderUploads.reduce(
+				(sum, row) =>
+					row.status === "committed" && row.size && row.size > 0
+						? sum + row.size
+						: sum,
+				0
+			);
+
+			if (totalCommittedBytes > 0) {
+				await tx
+					.update(organizationStorageLimits)
+					.set({
+						currentUsage: sql`GREATEST(0, ${organizationStorageLimits.currentUsage} - ${totalCommittedBytes})`,
+						updatedAt: new Date(),
+					})
+					.where(eq(organizationStorageLimits.organizationId, organizationId));
+			}
+
+			const [deletedFolder] = await tx
+				.delete(storageFolders)
+				.where(
+					withOrg(storageFolders, organizationId, eq(storageFolders.id, id))
+				)
+				.returning();
+
+			if (!deletedFolder) {
+				throw new NotFoundError("Folder");
+			}
+
+			return {
+				deletedUploads: folderUploads,
+				reclaimedBytes: totalCommittedBytes,
+			};
+		}
+	);
+
+	await Promise.allSettled(
+		deletedUploads.flatMap((row) => [
+			deleteS3ObjectWithRetry(row.bucket, row.fileKey, row.id),
+			deleteUploadKnowledgeFromMastra({
+				organizationId,
+				uploadId: row.id,
+			}).catch((error) => {
+				logError("deleteStorageFolder:KnowledgeCleanup", error, {
+					folderId: id,
+					organizationId,
+					uploadId: row.id,
+				});
+			}),
+		])
+	);
+
+	return {
+		deletedBytes: reclaimedBytes,
+		deletedFilesCount: deletedUploads.length,
+		id,
+		success: true,
+	};
+}
+
+export async function updateUpload(params: {
+	id: string;
+	input: UpdateUploadInput;
+	organizationId: string;
+}) {
+	const { id, input, organizationId } = params;
+	const existing = await requireCommittedUpload(organizationId, id);
+
+	if (input.folderId !== undefined && input.folderId !== null) {
+		const [targetFolder] = await db
+			.select({ id: storageFolders.id })
+			.from(storageFolders)
+			.where(
+				withOrg(
+					storageFolders,
+					organizationId,
+					eq(storageFolders.id, input.folderId)
+				)
 			)
-		)
+			.limit(1);
+
+		if (!targetFolder) {
+			throw new NotFoundError("Folder", "folderId");
+		}
+	}
+
+	const nextFolderId =
+		input.folderId === undefined ? existing.folderId : input.folderId;
+	const nextMetadata =
+		input.fileName === undefined
+			? existing.metadata
+			: {
+					...(existing.metadata ?? {}),
+					originalName: input.fileName,
+				};
+
+	const [updated] = await db
+		.update(uploads)
+		.set({
+			folderId: nextFolderId,
+			metadata: nextMetadata,
+			updatedAt: new Date(),
+		})
+		.where(withOrg(uploads, organizationId, eq(uploads.id, existing.id)))
 		.returning();
 
-	if (!deleted) {
-		throw new NotFoundError("Folder");
+	if (!updated) {
+		throw new NotFoundError("File");
 	}
-	return { id: deleted.id, success: true };
+
+	const fileUrl = getPrivateFileProxyUrl(updated.id);
+	return {
+		...updated,
+		fileUrl,
+		publicUrl: fileUrl,
+	};
 }
 
 async function readBoundedStreamText(
