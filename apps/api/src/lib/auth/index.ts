@@ -4,7 +4,10 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, emailOTP, organization } from "better-auth/plugins";
 import { env } from "../../env";
-import { enqueueEmail } from "../../modules/email/queue";
+import {
+	enqueueEmail,
+	enqueueWorkspaceInvitationEmail,
+} from "../../modules/email/queue";
 import { ensureDefaultOrganizationRoles } from "../../modules/roles/service";
 import { APP_CONFIG } from "../app-config";
 import { logDebug, logError, logInfo, logWarning } from "../logger";
@@ -12,6 +15,10 @@ import { redis } from "../redis/client";
 import { createAuthCaptchaPlugin } from "./captcha";
 import { createOrganizationLifecycleHooks } from "./organization-lifecycle";
 import { ac, roles } from "./permissions";
+import {
+	authSecondaryKey,
+	incrementFallbackCounter,
+} from "./secondary-storage";
 
 const orgLifecycle = createOrganizationLifecycleHooks(undefined, {
 	onOrganizationCreated: async (organizationId) => {
@@ -35,11 +42,21 @@ function mapBetterAuthLogLevel(
 	return level;
 }
 
-function secondaryKey(key: string): string {
-	return `${env.REDIS_PREFIX}:auth:${key}`;
+async function runSecondaryStorageOp<T>(
+	op: string,
+	key: string,
+	fallback: T | (() => T),
+	fn: (scopedKey: string) => Promise<T>
+): Promise<T> {
+	try {
+		return await fn(authSecondaryKey(key));
+	} catch (error) {
+		logError(`AuthSecondaryStorage:${op}`, error, {
+			keyPrefix: key.slice(0, 12),
+		});
+		return typeof fallback === "function" ? (fallback as () => T)() : fallback;
+	}
 }
-
-const TRAILING_SLASH_REGEX = /\/$/u;
 
 const GET_AND_DELETE_LUA = `
 local value = redis.call("GET", KEYS[1])
@@ -169,20 +186,13 @@ export const auth = betterAuth({
 			organizationLimit: 5,
 			roles,
 			async sendInvitationEmail(data) {
-				const appOrigin = (
-					env.CORS_ORIGINS[0] ?? "http://localhost:3000"
-				).replace(TRAILING_SLASH_REGEX, "");
-				const inviteUrl = `${appOrigin}/accept-invitation?invitationId=${encodeURIComponent(data.id)}`;
-				await enqueueEmail({
-					payload: {
-						inviterName: data.inviter.user.name,
-						organizationName: data.organization.name,
-						role: data.role,
-						url: inviteUrl,
-					},
-					subject: `You're invited to join ${data.organization.name}`,
-					template: "invitation",
-					to: data.email,
+				await enqueueWorkspaceInvitationEmail({
+					corsOrigins: env.CORS_ORIGINS,
+					email: data.email,
+					invitationId: data.id,
+					inviterName: data.inviter.user.name,
+					organizationName: data.organization.name,
+					role: data.role,
 				});
 			},
 		}),
@@ -201,70 +211,42 @@ export const auth = betterAuth({
 		...(captchaPlugin ? [captchaPlugin] : []),
 	],
 	secondaryStorage: {
-		delete: async (key) => {
-			try {
-				await redis.del(secondaryKey(key));
-			} catch (error) {
-				logError("AuthSecondaryStorage:delete", error, {
-					keyPrefix: key.slice(0, 12),
-				});
-			}
-		},
-		get: async (key) => {
-			try {
-				return await redis.get(secondaryKey(key));
-			} catch (error) {
-				logError("AuthSecondaryStorage:get", error, {
-					keyPrefix: key.slice(0, 12),
-				});
-				return null;
-			}
-		},
-		getAndDelete: async (key) => {
-			try {
-				const result = await redis.eval(
-					GET_AND_DELETE_LUA,
-					1,
-					secondaryKey(key)
-				);
+		delete: (key) =>
+			runSecondaryStorageOp("delete", key, undefined, async (scopedKey) => {
+				await redis.del(scopedKey);
+			}),
+		get: (key) =>
+			runSecondaryStorageOp("get", key, null, (scopedKey) =>
+				redis.get(scopedKey)
+			),
+		getAndDelete: (key) =>
+			runSecondaryStorageOp("getAndDelete", key, null, async (scopedKey) => {
+				const result = await redis.eval(GET_AND_DELETE_LUA, 1, scopedKey);
 				return result ?? null;
-			} catch (error) {
-				logError("AuthSecondaryStorage:getAndDelete", error, {
-					keyPrefix: key.slice(0, 12),
-				});
-				return null;
-			}
-		},
-		increment: async (key, ttl) => {
-			try {
-				const raw = await redis.eval(
-					INCREMENT_WITH_TTL_LUA,
-					1,
-					secondaryKey(key),
-					String(Math.max(0, Math.ceil(ttl)))
-				);
-				return typeof raw === "number" ? raw : Number(raw ?? 1);
-			} catch (error) {
-				logError("AuthSecondaryStorage:increment", error, {
-					keyPrefix: key.slice(0, 12),
-				});
-				return 1;
-			}
-		},
-		set: async (key, value, ttl) => {
-			try {
-				const scopedKey = secondaryKey(key);
+			}),
+		increment: (key, ttl) =>
+			runSecondaryStorageOp(
+				"increment",
+				key,
+				() => incrementFallbackCounter(authSecondaryKey(key), ttl),
+				async (scopedKey) => {
+					const raw = await redis.eval(
+						INCREMENT_WITH_TTL_LUA,
+						1,
+						scopedKey,
+						String(Math.max(0, Math.ceil(ttl)))
+					);
+					return typeof raw === "number" ? raw : Number(raw ?? 1);
+				}
+			),
+		set: (key, value, ttl) =>
+			runSecondaryStorageOp("set", key, undefined, async (scopedKey) => {
 				if (ttl) {
 					await redis.set(scopedKey, value, "EX", ttl);
 				} else {
 					await redis.set(scopedKey, value);
 				}
-			} catch (error) {
-				logError("AuthSecondaryStorage:set", error, {
-					keyPrefix: key.slice(0, 12),
-				});
-			}
-		},
+			}),
 	},
 	secret: env.BETTER_AUTH_SECRET,
 	session: {

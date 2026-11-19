@@ -9,10 +9,10 @@ import {
 import { and, desc, eq } from "drizzle-orm";
 import { env } from "../../env";
 import { normalizeRoleSlug } from "../../lib/auth/permissions";
-import { AppError, NotFoundError } from "../../lib/errors";
+import { AppError, isPgErrorCode, NotFoundError } from "../../lib/errors";
 import { logError } from "../../lib/logger";
 import { scopedWhere } from "../../lib/tenant";
-import { enqueueEmail } from "../email/queue";
+import { enqueueWorkspaceInvitationEmail } from "../email/queue";
 import {
 	assertAssignableOrganizationRole,
 	assertOwner,
@@ -20,7 +20,6 @@ import {
 import type { InviteOrganizationMemberInput } from "./schema";
 
 const INVITATION_EXPIRES_IN_MS = 48 * 60 * 60 * 1000;
-const TRAILING_SLASH_REGEX = /\/$/u;
 
 async function assertNotExistingMember(organizationId: string, email: string) {
 	const existingUser = await db.query.user.findFirst({
@@ -64,23 +63,15 @@ async function enqueueInvitationEmail(params: {
 		roleSlug,
 		savedInvitation,
 	} = params;
-	const appOrigin = (env.CORS_ORIGINS[0] ?? "http://localhost:3000").replace(
-		TRAILING_SLASH_REGEX,
-		""
-	);
-	const inviteUrl = `${appOrigin}/accept-invitation?invitationId=${encodeURIComponent(savedInvitation.id)}`;
 
 	try {
-		await enqueueEmail({
-			payload: {
-				inviterName,
-				organizationName,
-				role: roleSlug,
-				url: inviteUrl,
-			},
-			subject: `You're invited to join ${organizationName}`,
-			template: "invitation",
-			to: savedInvitation.email,
+		await enqueueWorkspaceInvitationEmail({
+			corsOrigins: env.CORS_ORIGINS,
+			email: savedInvitation.email,
+			invitationId: savedInvitation.id,
+			inviterName,
+			organizationName,
+			role: roleSlug,
 		});
 	} catch (error) {
 		logError("Roles:SendInvitationEmail", error, {
@@ -124,6 +115,13 @@ export async function inviteOrganizationMember(
 
 	if (
 		pendingInvitation &&
+		normalizeRoleSlug(pendingInvitation.role) === "admin"
+	) {
+		await assertOwner(organizationId, inviter.id);
+	}
+
+	if (
+		pendingInvitation &&
 		!input.resend &&
 		pendingInvitation.expiresAt > new Date()
 	) {
@@ -137,30 +135,51 @@ export async function inviteOrganizationMember(
 
 	const expiresAt = new Date(Date.now() + INVITATION_EXPIRES_IN_MS);
 	const resent = Boolean(pendingInvitation);
-	const [savedInvitation] = pendingInvitation
-		? await db
-				.update(invitation)
-				.set({ expiresAt, role: roleSlug })
-				.where(eq(invitation.id, pendingInvitation.id))
-				.returning()
-		: await db
-				.insert(invitation)
-				.values({
-					email: input.email,
-					expiresAt,
-					id: randomUUID(),
-					inviterId: inviter.id,
-					organizationId,
-					role: roleSlug,
-					status: "pending",
-				})
-				.returning();
+	let savedInvitation: typeof invitation.$inferSelect | undefined;
+	try {
+		[savedInvitation] = pendingInvitation
+			? await db
+					.update(invitation)
+					.set({ expiresAt, role: roleSlug })
+					.where(
+						and(
+							eq(invitation.id, pendingInvitation.id),
+							scopedWhere(invitation, organizationId),
+							eq(invitation.status, "pending")
+						)
+					)
+					.returning()
+			: await db
+					.insert(invitation)
+					.values({
+						email: input.email,
+						expiresAt,
+						id: randomUUID(),
+						inviterId: inviter.id,
+						organizationId,
+						role: roleSlug,
+						status: "pending",
+					})
+					.returning();
+	} catch (error) {
+		if (isPgErrorCode(error, "23505")) {
+			throw new AppError("User is already invited to this organization", {
+				cause: error,
+				code: "USER_ALREADY_INVITED",
+				path: ["email"],
+				statusCode: 400,
+			});
+		}
+		throw error;
+	}
 
 	if (!savedInvitation) {
 		throw new AppError(
-			"Failed to save invitation",
-			500,
-			"INVITATION_SAVE_FAILED"
+			pendingInvitation
+				? "Invitation is no longer pending"
+				: "Failed to save invitation",
+			pendingInvitation ? 409 : 500,
+			pendingInvitation ? "INVITATION_NOT_PENDING" : "INVITATION_SAVE_FAILED"
 		);
 	}
 
@@ -205,8 +224,23 @@ export async function cancelOrganizationInvitation(
 	const [updated] = await db
 		.update(invitation)
 		.set({ status: "canceled" })
-		.where(eq(invitation.id, invitationId))
+		.where(
+			and(
+				eq(invitation.id, invitationId),
+				scopedWhere(invitation, organizationId),
+				eq(invitation.status, "pending")
+			)
+		)
 		.returning();
+
+	if (!updated) {
+		throw new AppError(
+			"Only pending invitations can be canceled",
+			409,
+			"INVITATION_NOT_PENDING",
+			["invitationId"]
+		);
+	}
 
 	return updated;
 }

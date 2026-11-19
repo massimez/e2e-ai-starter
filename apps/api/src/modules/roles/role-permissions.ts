@@ -16,6 +16,7 @@ import {
 	VALID_PERMISSION_KEYS,
 } from "../../lib/auth/permissions";
 import { AppError, NotFoundError, ValidationError } from "../../lib/errors";
+import { logWarning } from "../../lib/logger";
 import { redis } from "../../lib/redis/client";
 import { scopedWhere } from "../../lib/tenant";
 
@@ -104,8 +105,13 @@ export async function invalidateRolePermissionCache(
 ): Promise<void> {
 	try {
 		await redis.del(rolePermissionCacheKey(organizationId, roleSlug));
-	} catch {
+	} catch (error) {
 		// Authorization must keep working if Redis is briefly unavailable.
+		logWarning("Roles:PermissionCache", "Failed to invalidate role cache", {
+			error: error instanceof Error ? error.message : String(error),
+			organizationId,
+			roleSlug,
+		});
 	}
 }
 
@@ -126,8 +132,12 @@ async function getOrCachePermissionKeys(
 				);
 			}
 		}
-	} catch {
-		// Fall through to database.
+	} catch (error) {
+		logWarning("Roles:PermissionCache", "Failed to read role cache", {
+			error: error instanceof Error ? error.message : String(error),
+			organizationId,
+			roleSlug,
+		});
 	}
 
 	const fresh = await factory();
@@ -142,8 +152,12 @@ async function getOrCachePermissionKeys(
 			"EX",
 			ROLE_PERMISSION_CACHE_TTL_SECONDS
 		);
-	} catch {
-		// Cache is an optimization only.
+	} catch (error) {
+		logWarning("Roles:PermissionCache", "Failed to write role cache", {
+			error: error instanceof Error ? error.message : String(error),
+			organizationId,
+			roleSlug,
+		});
 	}
 
 	return fresh;

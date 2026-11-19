@@ -1,10 +1,11 @@
 import { db } from "@workspace/db";
 import {
+	invitation,
 	member,
 	organizationRole,
 	organizationRolePermission,
 } from "@workspace/db/schema";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq } from "drizzle-orm";
 import {
 	NON_DELEGABLE_PERMISSIONS,
 	normalizeRoleSlug,
@@ -18,6 +19,7 @@ import {
 import {
 	AppError,
 	ConflictError,
+	isPgErrorCode,
 	NotFoundError,
 	ValidationError,
 } from "../../lib/errors";
@@ -180,17 +182,36 @@ async function getRoleWithPermissions(
 	return role;
 }
 
+async function countMembersByRoleSlug(
+	organizationId: string,
+	executor: Pick<typeof db, "select"> = db
+): Promise<Map<string, number>> {
+	const grouped = await executor
+		.select({
+			memberCount: count(),
+			role: member.role,
+		})
+		.from(member)
+		.where(scopedWhere(member, organizationId))
+		.groupBy(member.role);
+
+	const memberCounts = new Map<string, number>();
+	for (const row of grouped) {
+		const rowCount = Number(row.memberCount);
+		for (const slug of parseMemberRoles(row.role)) {
+			memberCounts.set(slug, (memberCounts.get(slug) ?? 0) + rowCount);
+		}
+	}
+	return memberCounts;
+}
+
 async function countMembersForRole(
 	organizationId: string,
-	roleSlug: string
+	roleSlug: string,
+	executor: Pick<typeof db, "select"> = db
 ): Promise<number> {
-	const rows = await db
-		.select({ role: member.role })
-		.from(member)
-		.where(scopedWhere(member, organizationId));
-
-	return rows.filter((row) => parseMemberRoles(row.role).includes(roleSlug))
-		.length;
+	const counts = await countMembersByRoleSlug(organizationId, executor);
+	return counts.get(roleSlug) ?? 0;
 }
 
 async function getSerializedRole(
@@ -223,7 +244,7 @@ async function assertRoleSlugAvailable(
 export async function listOrganizationRoles(
 	organizationId: string
 ): Promise<OrganizationRoleSummary[]> {
-	const [orgRoles, members] = await Promise.all([
+	const [orgRoles, memberCounts] = await Promise.all([
 		db.query.organizationRole.findMany({
 			orderBy: [
 				desc(organizationRole.isSystem),
@@ -235,18 +256,8 @@ export async function listOrganizationRoles(
 				permissions: true,
 			},
 		}),
-		db
-			.select({ role: member.role })
-			.from(member)
-			.where(scopedWhere(member, organizationId)),
+		countMembersByRoleSlug(organizationId),
 	]);
-
-	const memberCounts = new Map<string, number>();
-	for (const row of members) {
-		for (const slug of parseMemberRoles(row.role)) {
-			memberCounts.set(slug, (memberCounts.get(slug) ?? 0) + 1);
-		}
-	}
 
 	return orgRoles.map((role) =>
 		serializeRole(role, memberCounts.get(role.slug) ?? 0)
@@ -264,30 +275,41 @@ async function insertRoleWithPermissions(params: {
 	const { description, isDefault, name, organizationId, permissions, slug } =
 		params;
 
-	const created = await db.transaction(async (tx) => {
-		if (isDefault) {
-			await clearDefaultRoleFlag(tx, organizationId);
+	let created: typeof organizationRole.$inferSelect;
+	try {
+		created = await db.transaction(async (tx) => {
+			if (isDefault) {
+				await clearDefaultRoleFlag(tx, organizationId);
+			}
+
+			const [role] = await tx
+				.insert(organizationRole)
+				.values({
+					description,
+					isDefault,
+					isSystem: false,
+					name,
+					organizationId,
+					slug,
+				})
+				.returning();
+
+			if (!role) {
+				throw new AppError("Failed to create role", 500, "ROLE_CREATE_FAILED");
+			}
+
+			await insertRolePermissions(tx, role.id, permissions);
+			return role;
+		});
+	} catch (error) {
+		if (isPgErrorCode(error, "23505")) {
+			throw new ConflictError("A role with this slug already exists", {
+				cause: error,
+				field: "slug",
+			});
 		}
-
-		const [role] = await tx
-			.insert(organizationRole)
-			.values({
-				description,
-				isDefault,
-				isSystem: false,
-				name,
-				organizationId,
-				slug,
-			})
-			.returning();
-
-		if (!role) {
-			throw new AppError("Failed to create role", 500, "ROLE_CREATE_FAILED");
-		}
-
-		await insertRolePermissions(tx, role.id, permissions);
-		return role;
-	});
+		throw error;
+	}
 
 	await invalidateRolePermissionCache(organizationId, slug);
 	return await getSerializedRole(organizationId, created.id);
@@ -334,16 +356,62 @@ function resolveUpdatedPermissions(
 	return [...new Set([...preservedSystemKeys, ...validated])];
 }
 
-export async function updateOrganizationRole(
+async function migrateRenamedRoleAssignments(
+	tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
 	organizationId: string,
-	roleId: string,
-	input: UpdateOrganizationRoleInput,
-	userId: string
-): Promise<OrganizationRoleSummary> {
-	await assertOwner(organizationId, userId);
+	previousSlug: string,
+	nextSlug: string
+): Promise<void> {
+	const [orgMembers] = await Promise.all([
+		tx
+			.select({ id: member.id, role: member.role })
+			.from(member)
+			.where(scopedWhere(member, organizationId)),
+		tx
+			.update(invitation)
+			.set({ role: nextSlug })
+			.where(
+				and(
+					scopedWhere(invitation, organizationId),
+					eq(invitation.role, previousSlug),
+					eq(invitation.status, "pending")
+				)
+			),
+	]);
 
-	const current = await getRoleWithPermissions(organizationId, roleId);
+	const memberUpdates = orgMembers.flatMap((orgMember) => {
+		const assigned = parseMemberRoles(orgMember.role);
+		if (!assigned.includes(previousSlug)) {
+			return [];
+		}
+		const updatedRole = [
+			...new Set(
+				assigned.map((slug) => (slug === previousSlug ? nextSlug : slug))
+			),
+		].join(",");
+		return [
+			tx
+				.update(member)
+				.set({ role: updatedRole })
+				.where(
+					and(
+						scopedWhere(member, organizationId),
+						eq(member.id, orgMember.id),
+						eq(member.role, orgMember.role)
+					)
+				),
+		];
+	});
 
+	if (memberUpdates.length > 0) {
+		await Promise.all(memberUpdates);
+	}
+}
+
+function validateRoleUpdateGuards(
+	current: RoleWithPermissions,
+	input: UpdateOrganizationRoleInput
+): string {
 	if (current.slug === "owner") {
 		throw new AppError(
 			"The owner role is managed by the system",
@@ -372,40 +440,125 @@ export async function updateOrganizationRole(
 		);
 	}
 
-	if (nextSlug !== current.slug) {
-		await assertRoleSlugAvailable(organizationId, nextSlug, roleId);
+	return nextSlug;
+}
+
+export async function updateOrganizationRole(
+	organizationId: string,
+	roleId: string,
+	input: UpdateOrganizationRoleInput,
+	userId: string
+): Promise<OrganizationRoleSummary> {
+	await assertOwner(organizationId, userId);
+
+	let previousSlug = "";
+	let nextSlug = "";
+
+	try {
+		await db.transaction(async (tx) => {
+			const [lockedRole] = await tx
+				.select()
+				.from(organizationRole)
+				.where(
+					and(
+						eq(organizationRole.id, roleId),
+						scopedWhere(organizationRole, organizationId)
+					)
+				)
+				.for("update")
+				.limit(1);
+
+			if (!lockedRole) {
+				throw new NotFoundError("Role");
+			}
+
+			const permissions = await tx
+				.select()
+				.from(organizationRolePermission)
+				.where(eq(organizationRolePermission.roleId, roleId));
+
+			const current: RoleWithPermissions = {
+				...lockedRole,
+				permissions,
+			};
+
+			previousSlug = current.slug;
+			nextSlug = validateRoleUpdateGuards(current, input);
+
+			if (nextSlug !== current.slug) {
+				const [existingSlug] = await tx
+					.select({ id: organizationRole.id })
+					.from(organizationRole)
+					.where(
+						and(
+							scopedWhere(organizationRole, organizationId),
+							eq(organizationRole.slug, nextSlug)
+						)
+					)
+					.limit(1);
+				if (existingSlug && existingSlug.id !== roleId) {
+					throw new ConflictError(
+						"A role with this slug already exists",
+						"slug"
+					);
+				}
+			}
+
+			const nextPermissions = resolveUpdatedPermissions(
+				input.permissions,
+				current
+			);
+
+			if (input.isDefault) {
+				await clearDefaultRoleFlag(tx, organizationId);
+			}
+
+			await tx
+				.update(organizationRole)
+				.set({
+					description:
+						input.description === undefined
+							? current.description
+							: input.description,
+					isDefault: input.isDefault ?? current.isDefault,
+					name: input.name ?? current.name,
+					slug: nextSlug,
+				})
+				.where(
+					and(
+						eq(organizationRole.id, roleId),
+						scopedWhere(organizationRole, organizationId)
+					)
+				);
+
+			if (nextPermissions !== undefined) {
+				await tx
+					.delete(organizationRolePermission)
+					.where(eq(organizationRolePermission.roleId, roleId));
+				await insertRolePermissions(tx, roleId, nextPermissions);
+			}
+
+			if (nextSlug !== current.slug) {
+				await migrateRenamedRoleAssignments(
+					tx,
+					organizationId,
+					current.slug,
+					nextSlug
+				);
+			}
+		});
+	} catch (error) {
+		if (isPgErrorCode(error, "23505")) {
+			throw new ConflictError("A role with this slug already exists", {
+				cause: error,
+				field: "slug",
+			});
+		}
+		throw error;
 	}
 
-	const nextPermissions = resolveUpdatedPermissions(input.permissions, current);
-
-	await db.transaction(async (tx) => {
-		if (input.isDefault) {
-			await clearDefaultRoleFlag(tx, organizationId);
-		}
-
-		await tx
-			.update(organizationRole)
-			.set({
-				description:
-					input.description === undefined
-						? current.description
-						: input.description,
-				isDefault: input.isDefault ?? current.isDefault,
-				name: input.name ?? current.name,
-				slug: nextSlug,
-			})
-			.where(eq(organizationRole.id, roleId));
-
-		if (nextPermissions !== undefined) {
-			await tx
-				.delete(organizationRolePermission)
-				.where(eq(organizationRolePermission.roleId, roleId));
-			await insertRolePermissions(tx, roleId, nextPermissions);
-		}
-	});
-
-	await invalidateRolePermissionCache(organizationId, current.slug);
-	if (nextSlug !== current.slug) {
+	await invalidateRolePermissionCache(organizationId, previousSlug);
+	if (nextSlug !== previousSlug) {
 		await invalidateRolePermissionCache(organizationId, nextSlug);
 	}
 
@@ -423,41 +576,92 @@ export async function deleteOrganizationRole(
 }> {
 	await assertOwner(organizationId, userId);
 
-	const role = await getRoleWithPermissions(organizationId, roleId);
-
-	if (role.isSystem) {
-		throw new AppError(
-			"System roles cannot be deleted",
-			403,
-			"SYSTEM_ROLE_LOCKED",
-			["roleId"]
-		);
-	}
-
-	const memberCount = await countMembersForRole(organizationId, role.slug);
-	if (memberCount > 0) {
-		throw new AppError(
-			"Reassign members before deleting this role",
-			409,
-			"ROLE_HAS_MEMBERS",
-			["roleId"]
-		);
-	}
-
-	await db
-		.delete(organizationRole)
-		.where(
-			and(
-				eq(organizationRole.id, role.id),
-				scopedWhere(organizationRole, organizationId)
+	const deletedRole = await db.transaction(async (tx) => {
+		const [role] = await tx
+			.select()
+			.from(organizationRole)
+			.where(
+				and(
+					eq(organizationRole.id, roleId),
+					scopedWhere(organizationRole, organizationId)
+				)
 			)
-		);
-	await invalidateRolePermissionCache(organizationId, role.slug);
+			.for("update")
+			.limit(1);
+
+		if (!role) {
+			throw new NotFoundError("Role");
+		}
+
+		if (role.isSystem) {
+			throw new AppError(
+				"System roles cannot be deleted",
+				403,
+				"SYSTEM_ROLE_LOCKED",
+				["roleId"]
+			);
+		}
+
+		if (role.isDefault) {
+			throw new AppError(
+				"Select another role as default before deleting this role",
+				400,
+				"DEFAULT_ROLE_LOCKED",
+				["roleId"]
+			);
+		}
+
+		const [memberCount, pendingInvites] = await Promise.all([
+			countMembersForRole(organizationId, role.slug, tx),
+			tx
+				.select({ id: invitation.id })
+				.from(invitation)
+				.where(
+					and(
+						scopedWhere(invitation, organizationId),
+						eq(invitation.role, role.slug),
+						eq(invitation.status, "pending")
+					)
+				)
+				.limit(1),
+		]);
+
+		if (memberCount > 0) {
+			throw new AppError(
+				"Reassign members before deleting this role",
+				409,
+				"ROLE_HAS_MEMBERS",
+				["roleId"]
+			);
+		}
+
+		if (pendingInvites.length > 0) {
+			throw new AppError(
+				"Cancel pending invitations for this role before deleting it",
+				409,
+				"ROLE_HAS_PENDING_INVITATIONS",
+				["roleId"]
+			);
+		}
+
+		await tx
+			.delete(organizationRole)
+			.where(
+				and(
+					eq(organizationRole.id, role.id),
+					scopedWhere(organizationRole, organizationId)
+				)
+			);
+
+		return role;
+	});
+
+	await invalidateRolePermissionCache(organizationId, deletedRole.slug);
 
 	return {
 		deletedBy: userId,
-		deletedRoleId: role.id,
-		deletedRoleSlug: role.slug,
+		deletedRoleId: deletedRole.id,
+		deletedRoleSlug: deletedRole.slug,
 	};
 }
 

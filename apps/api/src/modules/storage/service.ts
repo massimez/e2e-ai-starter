@@ -5,7 +5,17 @@ import {
 	storageFolders,
 	uploads,
 } from "@workspace/db/schema";
-import { and, count, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	count,
+	desc,
+	eq,
+	gt,
+	inArray,
+	type SQL,
+	sql,
+} from "drizzle-orm";
 import { env } from "../../env";
 import { AppError, NotFoundError, ValidationError } from "../../lib/errors";
 import { logError } from "../../lib/logger";
@@ -92,7 +102,7 @@ async function assertWithinStorageQuota(
 	]);
 
 	const [limit] = limitRow;
-	const storageLimit = limit?.storageLimit ?? 1_073_741_824; // 1GB default
+	const storageLimit = limit?.storageLimit ?? STORAGE_CONFIG.BYTES_PER_GB;
 	const currentUsage = limit?.currentUsage ?? 0;
 	const pendingReserved = Number(pendingRow[0]?.reservedBytes ?? 0);
 
@@ -183,25 +193,46 @@ export async function presignUpload(params: {
 		});
 	}
 
-	const [created] = await db
-		.insert(uploads)
-		.values({
-			bucket: env.S3_BUCKET,
-			contentType: input.contentType,
-			expiresAt,
-			fileKey,
-			folderId: input.folderId ?? null,
-			metadata: input.metadata ?? {},
-			organizationId,
-			size: input.size,
-			status: "pending",
-			userId,
-		})
-		.returning();
+	const created = await db.transaction(async (tx) => {
+		await tx
+			.insert(organizationStorageLimits)
+			.values({
+				currentUsage: 0,
+				organizationId,
+			})
+			.onConflictDoNothing({
+				target: organizationStorageLimits.organizationId,
+			});
 
-	if (!created) {
-		throw new AppError("Failed to create upload record", 500);
-	}
+		await tx
+			.select({ organizationId: organizationStorageLimits.organizationId })
+			.from(organizationStorageLimits)
+			.where(eq(organizationStorageLimits.organizationId, organizationId))
+			.for("update");
+
+		await assertWithinStorageQuota(organizationId, input.size, tx);
+
+		const [inserted] = await tx
+			.insert(uploads)
+			.values({
+				bucket: env.S3_BUCKET,
+				contentType: input.contentType,
+				expiresAt,
+				fileKey,
+				folderId: input.folderId ?? null,
+				metadata: input.metadata ?? {},
+				organizationId,
+				size: input.size,
+				status: "pending",
+				userId,
+			})
+			.returning();
+
+		if (!inserted) {
+			throw new AppError("Failed to create upload record", 500);
+		}
+		return inserted;
+	});
 
 	const fileUrl = getPrivateFileProxyUrl(created.id);
 
@@ -327,6 +358,7 @@ export async function commitUploads(params: {
 					gt(uploads.expiresAt, now)
 				)
 			)
+			.orderBy(asc(uploads.id))
 			.for("update");
 
 		if (lockedUploads.length !== uniqueKeys.length) {
@@ -352,7 +384,8 @@ export async function commitUploads(params: {
 			.for("update");
 
 		const currentUsage = lockedLimit?.currentUsage ?? 0;
-		const storageLimit = lockedLimit?.storageLimit ?? 1_073_741_824;
+		const storageLimit =
+			lockedLimit?.storageLimit ?? STORAGE_CONFIG.BYTES_PER_GB;
 
 		if (currentUsage + totalVerifiedBytes > storageLimit) {
 			throw new ValidationError(
@@ -467,18 +500,15 @@ export async function listUploads(params: {
 	};
 }
 
-export async function getUploadSignedDownloadUrl(params: {
-	id: string;
-	organizationId: string;
-}) {
+async function requireCommittedUpload(organizationId: string, id: string) {
 	const [record] = await db
 		.select()
 		.from(uploads)
 		.where(
 			withOrg(
 				uploads,
-				params.organizationId,
-				eq(uploads.id, params.id),
+				organizationId,
+				eq(uploads.id, id),
 				eq(uploads.status, "committed")
 			)
 		)
@@ -487,6 +517,14 @@ export async function getUploadSignedDownloadUrl(params: {
 	if (!record) {
 		throw new NotFoundError("File");
 	}
+	return record;
+}
+
+export async function getUploadSignedDownloadUrl(params: {
+	id: string;
+	organizationId: string;
+}) {
+	const record = await requireCommittedUpload(params.organizationId, params.id);
 
 	const { contentType, disposition } = resolveFilePresentation(
 		record.fileKey,
@@ -511,22 +549,7 @@ export async function getUploadFileStream(params: {
 	id: string;
 	organizationId: string;
 }) {
-	const [record] = await db
-		.select()
-		.from(uploads)
-		.where(
-			withOrg(
-				uploads,
-				params.organizationId,
-				eq(uploads.id, params.id),
-				eq(uploads.status, "committed")
-			)
-		)
-		.limit(1);
-
-	if (!record) {
-		throw new NotFoundError("File");
-	}
+	const record = await requireCommittedUpload(params.organizationId, params.id);
 
 	const { contentType, downloadDisposition } = resolveFilePresentation(
 		record.fileKey,
@@ -571,6 +594,30 @@ function resolveDeleteFilter(params: {
 		return withOrg(uploads, organizationId, eq(uploads.fileKey, fileKey));
 	}
 	return null;
+}
+
+async function deleteS3ObjectWithRetry(
+	bucket: string,
+	fileKey: string,
+	uploadId: string,
+	retriesLeft = 1
+): Promise<void> {
+	try {
+		await deleteS3Object({ bucket, fileKey });
+	} catch (error) {
+		if (isS3NotFoundError(error)) {
+			return;
+		}
+		if (retriesLeft > 0) {
+			await deleteS3ObjectWithRetry(bucket, fileKey, uploadId, retriesLeft - 1);
+			return;
+		}
+		logError("deleteUpload:S3Orphan", error, {
+			bucket,
+			fileKey,
+			uploadId,
+		});
+	}
 }
 
 export async function deleteUpload(params: {
@@ -622,29 +669,7 @@ export async function deleteUpload(params: {
 		}
 	);
 
-	try {
-		await deleteS3Object({
-			bucket: deletedBucket,
-			fileKey: deletedFileKey,
-		});
-	} catch (error) {
-		if (!isS3NotFoundError(error)) {
-			try {
-				await deleteS3Object({
-					bucket: deletedBucket,
-					fileKey: deletedFileKey,
-				});
-			} catch (retryError) {
-				if (!isS3NotFoundError(retryError)) {
-					logError("deleteUpload:S3Orphan", retryError, {
-						bucket: deletedBucket,
-						fileKey: deletedFileKey,
-						uploadId: deletedId,
-					});
-				}
-			}
-		}
-	}
+	await deleteS3ObjectWithRetry(deletedBucket, deletedFileKey, deletedId);
 
 	return {
 		fileKey: deletedFileKey,
@@ -661,7 +686,7 @@ export async function getStorageUsage(organizationId: string) {
 		.limit(1);
 
 	const currentUsage = record?.currentUsage ?? 0;
-	const storageLimit = record?.storageLimit ?? 1_073_741_824; // 1GB default
+	const storageLimit = record?.storageLimit ?? STORAGE_CONFIG.BYTES_PER_GB;
 	const availableSpace = Math.max(0, storageLimit - currentUsage);
 	const usagePercent =
 		storageLimit > 0

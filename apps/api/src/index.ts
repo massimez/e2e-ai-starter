@@ -1,7 +1,8 @@
 import { closeDb } from "@workspace/db";
 import { app } from "./app";
 import { env } from "./env";
-import { logError, logInfo } from "./lib/logger";
+import { logError, logInfo, logWarning } from "./lib/logger";
+import { withTimeout } from "./lib/queues";
 import { closeRedis } from "./lib/redis/client";
 import { closeQueues } from "./lib/redis/queue";
 import { drainAuditLogs } from "./middleware/audit";
@@ -12,6 +13,7 @@ const server = Bun.serve({
 		const remoteAddress = bunServer.requestIP(req)?.address ?? null;
 		return app.fetch(req, { remoteAddress });
 	},
+	idleTimeout: 120,
 	port: env.PORT,
 });
 
@@ -42,7 +44,19 @@ async function shutdown(signal: string): Promise<void> {
 	}
 
 	try {
-		await server.stop(false);
+		try {
+			await withTimeout(server.stop(false), 3000);
+		} catch (stopError) {
+			logWarning(
+				"APIServer",
+				"Graceful HTTP drain timed out; forcing socket close",
+				{
+					error:
+						stopError instanceof Error ? stopError.message : String(stopError),
+				}
+			);
+			await server.stop(true);
+		}
 		await drainAuditLogs(3000);
 		await Promise.allSettled([
 			closeAiRuntime(),

@@ -1,7 +1,8 @@
 import { db } from "@workspace/db";
 import { member, organization, session } from "@workspace/db/schema";
-import { and, eq, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { parseMemberRoles } from "../../lib/auth/permissions";
+import { invalidateUserSessionCache } from "../../lib/auth/secondary-storage";
 import {
 	ConflictError,
 	ForbiddenError,
@@ -9,7 +10,10 @@ import {
 	ValidationError,
 } from "../../lib/errors";
 import { scopedWhere } from "../../lib/tenant";
-import { healDefaultOrganizationAfterMembershipLoss } from "./default-organization";
+import {
+	createDrizzleDefaultOrganizationStore,
+	healDefaultOrganizationAfterMembershipLoss,
+} from "./default-organization";
 import type { UpdateOrganizationInput } from "./schema";
 
 export async function getUserOrganizations(userId: string) {
@@ -50,11 +54,22 @@ export async function transferOwnership(params: {
 	return await db.transaction(async (tx) => {
 		const orgPredicate = scopedWhere(member, organizationId);
 
-		const [currentMember] = await tx
+		// Lock both rows in deterministic member.id order to avoid deadlocks
+		const lockedMembers = await tx
 			.select()
 			.from(member)
-			.where(and(orgPredicate, eq(member.userId, currentOwnerUserId)))
-			.limit(1);
+			.where(
+				and(
+					orgPredicate,
+					inArray(member.userId, [currentOwnerUserId, newOwnerUserId])
+				)
+			)
+			.orderBy(asc(member.id))
+			.for("update");
+
+		const currentMember = lockedMembers.find(
+			(row) => row.userId === currentOwnerUserId
+		);
 
 		if (
 			!(currentMember && parseMemberRoles(currentMember.role).includes("owner"))
@@ -64,11 +79,9 @@ export async function transferOwnership(params: {
 			);
 		}
 
-		const [targetMember] = await tx
-			.select()
-			.from(member)
-			.where(and(orgPredicate, eq(member.userId, newOwnerUserId)))
-			.limit(1);
+		const targetMember = lockedMembers.find(
+			(row) => row.userId === newOwnerUserId
+		);
 
 		if (!targetMember) {
 			throw new NotFoundError("Target organization member", "newOwnerUserId");
@@ -85,16 +98,42 @@ export async function transferOwnership(params: {
 		const [promoted] = await tx
 			.update(member)
 			.set({ role: "owner" })
-			.where(eq(member.id, targetMember.id))
+			.where(
+				and(
+					orgPredicate,
+					eq(member.id, targetMember.id),
+					eq(member.role, targetMember.role)
+				)
+			)
 			.returning();
 
-		await tx
+		if (!promoted) {
+			throw new ConflictError(
+				"Target member role changed during ownership transfer",
+				"newOwnerUserId"
+			);
+		}
+
+		const [demoted] = await tx
 			.update(member)
 			.set({ role: "admin" })
-			.where(eq(member.id, currentMember.id));
+			.where(
+				and(
+					orgPredicate,
+					eq(member.id, currentMember.id),
+					eq(member.role, currentMember.role)
+				)
+			)
+			.returning();
+
+		if (!demoted) {
+			throw new ConflictError(
+				"Current owner role changed during ownership transfer"
+			);
+		}
 
 		return {
-			newOwnerUserId: promoted?.userId ?? newOwnerUserId,
+			newOwnerUserId: promoted.userId,
 			organizationId,
 			previousOwnerUserId: currentOwnerUserId,
 		};
@@ -162,48 +201,79 @@ export async function removeOrganizationMember(params: {
 	const { actorUserId, memberId, organizationId } = params;
 	const orgPredicate = scopedWhere(member, organizationId);
 
-	const [targetMember] = await db
-		.select()
-		.from(member)
-		.where(and(orgPredicate, eq(member.id, memberId)))
-		.limit(1);
+	const { sessionTokens, targetMember } = await db.transaction(async (tx) => {
+		const [lockedMember] = await tx
+			.select()
+			.from(member)
+			.where(and(orgPredicate, eq(member.id, memberId)))
+			.for("update")
+			.limit(1);
 
-	if (!targetMember) {
-		throw new NotFoundError("Organization member", "memberId");
-	}
+		if (!lockedMember) {
+			throw new NotFoundError("Organization member", "memberId");
+		}
 
-	if (parseMemberRoles(targetMember.role).includes("owner")) {
-		throw new ForbiddenError(
-			"Organization owner cannot be removed; transfer ownership first"
-		);
-	}
+		if (parseMemberRoles(lockedMember.role).includes("owner")) {
+			throw new ForbiddenError(
+				"Organization owner cannot be removed; transfer ownership first"
+			);
+		}
 
-	if (targetMember.userId === actorUserId) {
-		throw new ValidationError(
-			"Use Leave Organization to remove yourself from the workspace",
-			"memberId"
-		);
-	}
+		if (lockedMember.userId === actorUserId) {
+			throw new ValidationError(
+				"Use Leave Organization to remove yourself from the workspace",
+				"memberId"
+			);
+		}
 
-	await db
-		.delete(member)
-		.where(and(orgPredicate, eq(member.id, targetMember.id)));
-
-	const fallbackOrganizationId =
-		await healDefaultOrganizationAfterMembershipLoss({
-			lostOrganizationId: organizationId,
-			userId: targetMember.userId,
-		});
-
-	await db
-		.update(session)
-		.set({ activeOrganizationId: fallbackOrganizationId })
-		.where(
-			and(
-				eq(session.userId, targetMember.userId),
-				eq(session.activeOrganizationId, organizationId)
+		const [deletedMember] = await tx
+			.delete(member)
+			.where(
+				and(
+					orgPredicate,
+					eq(member.id, lockedMember.id),
+					eq(member.role, lockedMember.role)
+				)
 			)
+			.returning();
+
+		if (!deletedMember) {
+			throw new ConflictError(
+				"Organization member was modified concurrently",
+				"memberId"
+			);
+		}
+
+		const txDefaultOrgStore = createDrizzleDefaultOrganizationStore(
+			tx as unknown as typeof db
 		);
+		const fallbackOrganizationId =
+			await healDefaultOrganizationAfterMembershipLoss(
+				{
+					lostOrganizationId: organizationId,
+					userId: lockedMember.userId,
+				},
+				txDefaultOrgStore
+			);
+
+		const updatedSessions = await tx
+			.update(session)
+			.set({ activeOrganizationId: fallbackOrganizationId })
+			.where(
+				and(
+					eq(session.userId, lockedMember.userId),
+					eq(session.activeOrganizationId, organizationId)
+				)
+			)
+			.returning({ token: session.token });
+
+		return {
+			sessionTokens: updatedSessions.map((row) => row.token),
+			targetMember: deletedMember,
+		};
+	});
+
+	await invalidateUserSessionCache(targetMember.userId, sessionTokens);
 
 	return {
 		member: targetMember,

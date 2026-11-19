@@ -5,6 +5,7 @@ export interface AppErrorOptions extends ErrorOptions {
 }
 
 export interface DomainErrorOptions extends ErrorOptions {
+	code?: string;
 	field?: string;
 }
 
@@ -31,9 +32,11 @@ function resolveDomainErrorArgs(
 ) {
 	const field =
 		typeof fieldOrOptions === "string" ? fieldOrOptions : fieldOrOptions?.field;
+	const code =
+		typeof fieldOrOptions === "object" ? fieldOrOptions?.code : undefined;
 	const resolvedOptions =
 		typeof fieldOrOptions === "object" ? fieldOrOptions : options;
-	return { field, options: resolvedOptions };
+	return { code, field, options: resolvedOptions };
 }
 
 export class AppError extends Error {
@@ -69,7 +72,7 @@ export class ValidationError extends AppError {
 		super(
 			message,
 			400,
-			"VALIDATION_ERROR",
+			resolved.code ?? "VALIDATION_ERROR",
 			resolved.field ? [resolved.field] : undefined,
 			resolved.options
 		);
@@ -112,7 +115,7 @@ export class NotFoundError extends AppError {
 		super(
 			`${resource} not found`,
 			404,
-			"NOT_FOUND",
+			resolved.code ?? "NOT_FOUND",
 			resolved.field ? [resolved.field] : undefined,
 			resolved.options
 		);
@@ -130,10 +133,24 @@ export class ConflictError extends AppError {
 		super(
 			message,
 			409,
-			"CONFLICT",
+			resolved.code ?? "CONFLICT",
 			resolved.field ? [resolved.field] : undefined,
 			resolved.options
 		);
 		this.name = "ConflictError";
 	}
+}
+
+export function isPgErrorCode(error: unknown, code: string): boolean {
+	if (typeof error !== "object" || error === null) {
+		return false;
+	}
+	const record = error as { cause?: unknown; code?: unknown };
+	if (record.code === code) {
+		return true;
+	}
+	if (typeof record.cause === "object" && record.cause !== null) {
+		return (record.cause as { code?: unknown }).code === code;
+	}
+	return false;
 }
