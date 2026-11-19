@@ -7,7 +7,10 @@ import {
 	isSensitiveReadPath,
 	isTrustedProxyIp,
 } from "../src/lib/audit";
+import { incrementFallbackCounter } from "../src/lib/auth/secondary-storage";
 import type { AppEnv } from "../src/lib/create-hono-app";
+import { isPgErrorCode } from "../src/lib/errors";
+import { isBlockedIpAddress } from "../src/lib/network";
 import {
 	createAccessAuditMiddleware,
 	drainAuditLogs,
@@ -31,6 +34,22 @@ describe("API environment validation", () => {
 		expect(parsed.PORT).toBe(3001);
 		expect(parsed.CORS_ORIGINS).toEqual(["http://localhost:3000"]);
 		expect(parsed.TRUSTED_PROXY_CIDRS_LIST).toEqual([]);
+	});
+
+	test("normalizes blank .env.example AI provider key placeholders to undefined", () => {
+		const parsed = parseApiEnv({
+			ANTHROPIC_API_KEY: "",
+			GOOGLE_API_KEY: "   ",
+			GOOGLE_GENERATIVE_AI_API_KEY: "",
+			NODE_ENV: "development",
+			OPENAI_API_KEY: "",
+			OPENROUTER_API_KEY: "  sk-or-test  ",
+		});
+		expect(parsed.GOOGLE_GENERATIVE_AI_API_KEY).toBeUndefined();
+		expect(parsed.GOOGLE_API_KEY).toBeUndefined();
+		expect(parsed.OPENAI_API_KEY).toBeUndefined();
+		expect(parsed.ANTHROPIC_API_KEY).toBeUndefined();
+		expect(parsed.OPENROUTER_API_KEY).toBe("sk-or-test");
 	});
 
 	test("rejects partial Google OAuth configuration", () => {
@@ -88,11 +107,29 @@ describe("API environment validation", () => {
 });
 
 describe("proxy trust and client IP extraction", () => {
-	test("matches exact IPs and IPv4 CIDR subnets safely", () => {
+	test("matches exact IPs and IPv4/IPv6 CIDR subnets safely", () => {
 		expect(isTrustedProxyIp("10.24.19.8", ["10.0.0.0/8"])).toBe(true);
 		expect(isTrustedProxyIp("192.168.1.5", ["10.0.0.0/8"])).toBe(false);
 		expect(isTrustedProxyIp("172.16.0.1", ["172.16.0.1"])).toBe(true);
+		expect(isTrustedProxyIp("2001:db8:1::1", ["2001:db8::/32"])).toBe(true);
 		expect(isTrustedProxyIp(null, ["10.0.0.0/8"])).toBe(false);
+	});
+
+	test("blocks private, loopback, metadata, and non-global IPs while allowing public IPs", () => {
+		expect(isBlockedIpAddress("127.0.0.1")).toBe(true);
+		expect(isBlockedIpAddress("10.0.0.5")).toBe(true);
+		expect(isBlockedIpAddress("169.254.169.254")).toBe(true);
+		expect(isBlockedIpAddress("::1")).toBe(true);
+		expect(isBlockedIpAddress("::ffff:127.0.0.1")).toBe(true);
+		expect(isBlockedIpAddress("fd00::1")).toBe(true);
+		expect(isBlockedIpAddress("fe80::1")).toBe(true);
+		expect(isBlockedIpAddress("2001:db8::1")).toBe(true);
+		expect(isBlockedIpAddress("not-an-ip")).toBe(true);
+
+		expect(isBlockedIpAddress("8.8.8.8")).toBe(false);
+		expect(isBlockedIpAddress("1.1.1.1")).toBe(false);
+		expect(isBlockedIpAddress("2606:4700:4700::1111")).toBe(false);
+		expect(isBlockedIpAddress("::ffff:8.8.8.8")).toBe(false);
 	});
 
 	test("ignores spoofed forwarding headers when direct peer is not a trusted proxy", async () => {
@@ -202,5 +239,19 @@ describe("audit path detection and access audit middleware", () => {
 		expect(recorded[1]?.entityType).toBe("organizations/roles");
 		expect(recorded[1]?.entityId).toBe(roleId);
 		expect(recorded[1]?.action).toBe("app.organizations/roles.create");
+	});
+
+	test("isPgErrorCode matches direct and wrapped Postgres error codes", () => {
+		expect(isPgErrorCode({ code: "23505" }, "23505")).toBe(true);
+		expect(isPgErrorCode({ cause: { code: "23505" } }, "23505")).toBe(true);
+		expect(isPgErrorCode({ cause: { code: "23503" } }, "23505")).toBe(false);
+		expect(isPgErrorCode(null, "23505")).toBe(false);
+	});
+
+	test("incrementFallbackCounter enforces monotonic counts on Redis outages", () => {
+		const key = `test-fallback-${Date.now()}`;
+		expect(incrementFallbackCounter(key, 60)).toBe(1);
+		expect(incrementFallbackCounter(key, 60)).toBe(2);
+		expect(incrementFallbackCounter(key, 60)).toBe(3);
 	});
 });

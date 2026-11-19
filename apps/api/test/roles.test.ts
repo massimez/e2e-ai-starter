@@ -35,7 +35,9 @@ const SYSTEM_ROLE_UUID = "22222222-2222-4222-8222-222222222222";
 
 function createQueryChain<T>(result: T) {
 	const chain = {
+		for: () => chain,
 		from: () => chain,
+		groupBy: () => Promise.resolve(result),
 		limit: () => Promise.resolve(result),
 		onConflictDoNothing: () => chain,
 		onConflictDoUpdate: () => chain,
@@ -294,16 +296,57 @@ describe("dynamic roles service", () => {
 			role: "owner",
 		} as never);
 
-		spyOn(db.query.organizationRole, "findFirst").mockResolvedValueOnce({
-			description: "Owner",
-			id: SYSTEM_ROLE_UUID,
-			isDefault: false,
-			isSystem: true,
-			name: "Owner",
-			organizationId: ORG_ID,
-			permissions: [],
-			slug: "owner",
-		} as never);
+		spyOn(db, "transaction")
+			.mockImplementationOnce((async (
+				callback: (tx: unknown) => Promise<unknown>
+			) => {
+				let selectCall = 0;
+				return await callback({
+					select: () => {
+						selectCall += 1;
+						return createQueryChain(
+							selectCall === 1
+								? [
+										{
+											description: "Owner",
+											id: SYSTEM_ROLE_UUID,
+											isDefault: false,
+											isSystem: true,
+											name: "Owner",
+											organizationId: ORG_ID,
+											slug: "owner",
+										},
+									]
+								: []
+						);
+					},
+				});
+			}) as never)
+			.mockImplementationOnce((async (
+				callback: (tx: unknown) => Promise<unknown>
+			) => {
+				let selectCall = 0;
+				return await callback({
+					select: () => {
+						selectCall += 1;
+						return createQueryChain(
+							selectCall === 1
+								? [
+										{
+											description: "Member",
+											id: SYSTEM_ROLE_UUID,
+											isDefault: true,
+											isSystem: true,
+											name: "Member",
+											organizationId: ORG_ID,
+											slug: "member",
+										},
+									]
+								: []
+						);
+					},
+				});
+			}) as never);
 
 		await expect(
 			updateOrganizationRole(
@@ -316,17 +359,6 @@ describe("dynamic roles service", () => {
 			code: "OWNER_ROLE_LOCKED",
 			statusCode: 403,
 		});
-
-		spyOn(db.query.organizationRole, "findFirst").mockResolvedValueOnce({
-			description: "Member",
-			id: SYSTEM_ROLE_UUID,
-			isDefault: true,
-			isSystem: true,
-			name: "Member",
-			organizationId: ORG_ID,
-			permissions: [],
-			slug: "member",
-		} as never);
 
 		await expect(
 			updateOrganizationRole(
@@ -347,13 +379,64 @@ describe("dynamic roles service", () => {
 			role: "owner",
 		} as never);
 
-		spyOn(db.query.organizationRole, "findFirst").mockResolvedValueOnce({
-			id: SYSTEM_ROLE_UUID,
-			isSystem: true,
-			organizationId: ORG_ID,
-			permissions: [],
-			slug: "admin",
-		} as never);
+		spyOn(db, "transaction")
+			.mockImplementationOnce(
+				(async (callback: (tx: unknown) => Promise<unknown>) =>
+					await callback({
+						select: () =>
+							createQueryChain([
+								{
+									id: SYSTEM_ROLE_UUID,
+									isDefault: false,
+									isSystem: true,
+									organizationId: ORG_ID,
+									slug: "admin",
+								},
+							]),
+					})) as never
+			)
+			.mockImplementationOnce(
+				(async (callback: (tx: unknown) => Promise<unknown>) =>
+					await callback({
+						select: () =>
+							createQueryChain([
+								{
+									id: ROLE_UUID,
+									isDefault: true,
+									isSystem: false,
+									organizationId: ORG_ID,
+									slug: "default-custom",
+								},
+							]),
+					})) as never
+			)
+			.mockImplementationOnce((async (
+				callback: (tx: unknown) => Promise<unknown>
+			) => {
+				let selectCall = 0;
+				return await callback({
+					select: () => {
+						selectCall += 1;
+						if (selectCall === 1) {
+							return createQueryChain([
+								{
+									id: ROLE_UUID,
+									isDefault: false,
+									isSystem: false,
+									organizationId: ORG_ID,
+									slug: "finance-reviewer",
+								},
+							]);
+						}
+						if (selectCall === 2) {
+							return createQueryChain([
+								{ memberCount: 1, role: "finance-reviewer" },
+							]);
+						}
+						return createQueryChain([]);
+					},
+				});
+			}) as never);
 
 		await expect(
 			deleteOrganizationRole(ORG_ID, SYSTEM_ROLE_UUID, OWNER_USER_ID)
@@ -362,16 +445,12 @@ describe("dynamic roles service", () => {
 			statusCode: 403,
 		});
 
-		spyOn(db.query.organizationRole, "findFirst").mockResolvedValueOnce({
-			id: ROLE_UUID,
-			isSystem: false,
-			organizationId: ORG_ID,
-			permissions: [],
-			slug: "finance-reviewer",
-		} as never);
-		spyOn(db, "select").mockReturnValue(
-			createQueryChain([{ role: "finance-reviewer" }]) as never
-		);
+		await expect(
+			deleteOrganizationRole(ORG_ID, ROLE_UUID, OWNER_USER_ID)
+		).rejects.toMatchObject({
+			code: "DEFAULT_ROLE_LOCKED",
+			statusCode: 400,
+		});
 
 		await expect(
 			deleteOrganizationRole(ORG_ID, ROLE_UUID, OWNER_USER_ID)
@@ -681,16 +760,31 @@ describe("roles & invitations HTTP routes", () => {
 		spyOn(db.query.member, "findFirst").mockResolvedValue({
 			role: "owner",
 		} as never);
-		spyOn(db.query.organizationRole, "findFirst").mockResolvedValue({
-			description: "Standard collaborator",
-			id: SYSTEM_ROLE_UUID,
-			isDefault: true,
-			isSystem: true,
-			name: "Member",
-			organizationId: ORG_ID,
-			permissions: [],
-			slug: "member",
-		} as never);
+		spyOn(db, "transaction").mockImplementationOnce((async (
+			callback: (tx: unknown) => Promise<unknown>
+		) => {
+			let selectCall = 0;
+			return await callback({
+				select: () => {
+					selectCall += 1;
+					return createQueryChain(
+						selectCall === 1
+							? [
+									{
+										description: "Standard collaborator",
+										id: SYSTEM_ROLE_UUID,
+										isDefault: true,
+										isSystem: true,
+										name: "Member",
+										organizationId: ORG_ID,
+										slug: "member",
+									},
+								]
+							: []
+					);
+				},
+			});
+		}) as never);
 
 		await expect(
 			updateOrganizationRole(

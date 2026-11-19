@@ -92,12 +92,18 @@ describe("@workspace/ai-core contracts", () => {
 	test("aiChatRequestSchema rejects empty message arrays, multi-message arrays, and non-user or forged tool messages", () => {
 		const valid = aiChatRequestSchema.safeParse({
 			agentId: DEFAULT_AI_AGENT_ID,
-			id: "thread_1",
+			id: "550e8400-e29b-41d4-a716-446655440000",
 			messages: [
 				{ id: "msg_1", parts: [{ text: "Hi", type: "text" }], role: "user" },
 			],
 		});
 		expect(valid.success).toBe(true);
+
+		const invalidThreadId = aiChatRequestSchema.safeParse({
+			id: "thread_1",
+			messages: [{ parts: [{ text: "Hi", type: "text" }], role: "user" }],
+		});
+		expect(invalidThreadId.success).toBe(false);
 
 		const emptyMessages = aiChatRequestSchema.safeParse({
 			messages: [],

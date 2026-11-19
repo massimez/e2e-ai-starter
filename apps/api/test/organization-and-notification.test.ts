@@ -15,8 +15,10 @@ import { rolesService } from "../src/modules/roles/service";
 
 function createQueryChain<T>(result: T) {
 	const chain = {
+		for: () => chain,
 		from: () => chain,
 		limit: () => Promise.resolve(result),
+		orderBy: () => chain,
 		returning: () => Promise.resolve(result),
 		set: () => chain,
 		// biome-ignore lint/suspicious/noThenProperty: test double emulates Drizzle awaitable builder
@@ -88,19 +90,12 @@ describe("organization ownership transfer service", () => {
 		spyOn(db, "transaction").mockImplementation((async (
 			callback: (tx: unknown) => Promise<unknown>
 		) => {
-			let selectCount = 0;
 			const txMock = {
-				select: () => {
-					selectCount += 1;
-					if (selectCount === 1) {
-						return createQueryChain([
-							{ id: "mem_owner", role: "owner", userId: "user_owner" },
-						]);
-					}
-					return createQueryChain([
+				select: () =>
+					createQueryChain([
+						{ id: "mem_owner", role: "owner", userId: "user_owner" },
 						{ id: "mem_target", role: "member", userId: "user_target" },
-					]);
-				},
+					]),
 			};
 			return await callback(txMock);
 		}) as never);
@@ -118,34 +113,28 @@ describe("organization ownership transfer service", () => {
 
 	test("promotes active admin to owner and demotes current owner atomically", async () => {
 		const appliedRoles: Array<{ id: string; role: string }> = [];
+		let updateCount = 0;
 
 		spyOn(db, "transaction").mockImplementation((async (
 			callback: (tx: unknown) => Promise<unknown>
 		) => {
-			let selectCount = 0;
 			const txMock = {
-				select: () => {
-					selectCount += 1;
-					if (selectCount === 1) {
-						return createQueryChain([
-							{ id: "mem_owner", role: "owner", userId: "user_owner" },
-						]);
-					}
-					return createQueryChain([
+				select: () =>
+					createQueryChain([
+						{ id: "mem_owner", role: "owner", userId: "user_owner" },
 						{ id: "mem_admin", role: "admin", userId: "user_admin" },
-					]);
-				},
+					]),
 				update: () => ({
 					set: (vals: { role: string }) => ({
 						where: () => ({
 							returning: () => {
-								appliedRoles.push({ id: "promoted", role: vals.role });
-								return Promise.resolve([{ userId: "user_admin" }]);
-							},
-							// biome-ignore lint/suspicious/noThenProperty: Drizzle awaitable mock
-							then: (resolve: (val: unknown) => void) => {
+								updateCount += 1;
+								if (updateCount === 1) {
+									appliedRoles.push({ id: "promoted", role: vals.role });
+									return Promise.resolve([{ userId: "user_admin" }]);
+								}
 								appliedRoles.push({ id: "demoted", role: vals.role });
-								return Promise.resolve(undefined).then(resolve);
+								return Promise.resolve([{ userId: "user_owner" }]);
 							},
 						}),
 					}),
@@ -311,7 +300,11 @@ describe("notification routes and fan-out controls", () => {
 				endpoint: "https://internal-dns.example.com/v1/sub",
 				keys: { auth: "auth-token", p256dh: "public-key" },
 			})
-		).rejects.toThrow("restricted network address");
+		).rejects.toMatchObject({
+			code: "BLOCKED_PUSH_ENDPOINT",
+			field: "endpoint",
+			path: ["endpoint"],
+		});
 	});
 
 	test("updateOrganizationSchema restricts logo to https://, /api/, empty, or null and transfer-ownership requires owner role", async () => {

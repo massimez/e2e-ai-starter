@@ -346,7 +346,7 @@ describe("/api/ai routes security and behavior", () => {
 
 		const res = await app.request("/api/ai/chat", {
 			body: JSON.stringify({
-				id: "thread_chat_1",
+				id: "550e8400-e29b-41d4-a716-446655440000",
 				messages: [
 					{
 						id: "msg_1",

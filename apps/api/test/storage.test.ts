@@ -24,6 +24,7 @@ function createQueryChain<T>(result: T) {
 		from: () => chain,
 		limit: () => Promise.resolve(result),
 		onConflictDoNothing: () => chain,
+		orderBy: () => chain,
 		returning: () => Promise.resolve(result),
 		set: () => chain,
 		// biome-ignore lint/suspicious/noThenProperty: test double emulates Drizzle awaitable builder

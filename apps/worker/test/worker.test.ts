@@ -95,13 +95,16 @@ describe("worker environment validation", () => {
 
 describe("email template escaping and delivery retries", () => {
 	const originalResendKey = env.RESEND_API_KEY;
+	const originalNodeEnv = env.NODE_ENV;
 
 	beforeEach(() => {
 		(env as { RESEND_API_KEY: string }).RESEND_API_KEY = originalResendKey;
+		(env as { NODE_ENV: typeof env.NODE_ENV }).NODE_ENV = originalNodeEnv;
 	});
 
 	afterEach(() => {
 		(env as { RESEND_API_KEY: string }).RESEND_API_KEY = originalResendKey;
+		(env as { NODE_ENV: typeof env.NODE_ENV }).NODE_ENV = originalNodeEnv;
 		mock.restore();
 	});
 
@@ -178,6 +181,33 @@ describe("email template escaping and delivery retries", () => {
 		expect(JSON.parse(String(init?.body))).toMatchObject({
 			subject: "Line 1 Line 2",
 		});
+	});
+
+	test("prints dev email simulator preview in development mode while keeping test mode redacted", async () => {
+		(env as { RESEND_API_KEY: string }).RESEND_API_KEY = "";
+		const infoSpy = spyOn(console, "info").mockImplementation(() => undefined);
+
+		(env as { NODE_ENV: typeof env.NODE_ENV }).NODE_ENV = "test";
+		await sendEmail({
+			html: "<p>Code: 123456</p>",
+			redactBodyInLogs: true,
+			subject: "Verification Code",
+			text: "Your verification code is: 123456",
+			to: "dev@example.com",
+		});
+		expect(infoSpy).not.toHaveBeenCalled();
+
+		(env as { NODE_ENV: typeof env.NODE_ENV }).NODE_ENV = "development";
+		await sendEmail({
+			html: "<p>Code: 123456</p>",
+			redactBodyInLogs: true,
+			subject: "Verification Code",
+			text: "Your verification code is: 123456",
+			to: "dev@example.com",
+		});
+		expect(infoSpy).toHaveBeenCalledTimes(1);
+		expect(String(infoSpy.mock.calls[0]?.[0])).toContain("123456");
+		expect(String(infoSpy.mock.calls[0]?.[0])).toContain("dev@example.com");
 	});
 });
 
@@ -520,5 +550,98 @@ describe("web push delivery and notification processor", () => {
 			"https://push.example.com/sub-flaky",
 			"https://push.example.com/sub-flaky",
 		]);
+	});
+
+	test("throws UnrecoverableError for permanent 401/403 push rejections and tolerates checkpoint failure", async () => {
+		(env as { VAPID_PUBLIC_KEY: string }).VAPID_PUBLIC_KEY = "vapid-pub";
+		(env as { VAPID_PRIVATE_KEY: string }).VAPID_PRIVATE_KEY = "vapid-priv";
+
+		spyOn(pushTransport, "lookup").mockResolvedValue([
+			{ address: "93.184.216.34", family: 4 },
+		]);
+		spyOn(db, "select").mockImplementation((() =>
+			createQueryChain([
+				{
+					endpoint: "https://push.example.com/rejected",
+					id: "sub_bad_auth",
+					keys: { auth: "a1", p256dh: "p1" },
+					userId: "user_1",
+				},
+			])) as never);
+		spyOn(pushTransport, "sendNotification").mockRejectedValueOnce(
+			new WebPushError(
+				"Unauthorized",
+				401,
+				{},
+				"invalid vapid",
+				"https://push.example.com/rejected"
+			)
+		);
+
+		await expect(
+			handlePushNotification({
+				category: "team",
+				content: "Bad VAPID auth",
+				title: "Update",
+				type: "invite",
+				userId: "user_1",
+			})
+		).rejects.toBeInstanceOf(UnrecoverableError);
+
+		mock.restore();
+		(env as { VAPID_PUBLIC_KEY: string }).VAPID_PUBLIC_KEY = "vapid-pub";
+		(env as { VAPID_PRIVATE_KEY: string }).VAPID_PRIVATE_KEY = "vapid-priv";
+		spyOn(pushTransport, "lookup").mockResolvedValue([
+			{ address: "93.184.216.34", family: 4 },
+		]);
+
+		let callIdx = 0;
+		spyOn(db, "select").mockImplementation((() => {
+			callIdx += 1;
+			return createQueryChain(
+				callIdx === 1
+					? [
+							{ channel: "in_app", enabled: true },
+							{ channel: "push", enabled: true },
+						]
+					: [
+							{
+								endpoint: "https://push.example.com/sub-err",
+								id: "sub_err",
+								keys: { auth: "a1", p256dh: "p1" },
+								userId: "user_55",
+							},
+						]
+			);
+		}) as never);
+		spyOn(db, "insert").mockImplementation((() => ({
+			values: () => createQueryChain(undefined),
+		})) as never);
+		spyOn(pushTransport, "sendNotification").mockRejectedValueOnce(
+			new WebPushError(
+				"Forbidden",
+				403,
+				{},
+				"forbidden",
+				"https://push.example.com/sub-err"
+			)
+		);
+
+		const failingCheckpointJob = {
+			data: {
+				category: "team",
+				channels: ["in_app", "push"],
+				content: "Checkpoint down",
+				title: "Alert",
+				type: "invite",
+				userId: "user_55",
+			},
+			id: "notif-unrec-1",
+			updateData: () => Promise.reject(new Error("Redis unavailable")),
+		} as unknown as Job<NotificationJobData>;
+
+		await expect(
+			processNotificationJob(failingCheckpointJob)
+		).rejects.toBeInstanceOf(UnrecoverableError);
 	});
 });
