@@ -1,16 +1,16 @@
-# Repository Guidelines
+# Repository & Engineering Guidelines
 
 ## Project Structure & Module Organization
 
 This is a Bun workspaces monorepo using Turborepo:
-- `apps/api`: Hono API service running natively on Bun (Port 3001). Hosts Better Auth endpoints, session/ban validation, RBAC permission checks (`src/lib/auth/permissions.ts`), dynamic organization roles & invitations (`src/modules/roles/`), tenant isolation middleware, organization ownership transfer, private object storage endpoints (`src/modules/storage/config.ts`), queue definitions (`src/lib/queues.ts`), unified structured logger (`src/lib/logger.ts`), Mastra AI runtime endpoints (`/api/ai/*`), and notification endpoints. Exposes typed RPC (`@workspace/api/hc`) and pure subpath exports (`@workspace/api/config`, `@workspace/api/logger`, `@workspace/api/permissions`, `@workspace/api/queues`, `@workspace/api/storage`).
-- `apps/web`: Next.js 16 App Router web application (Port 3000) with Tailwind CSS v4, React 19, `src/proxy.ts` optimistic session routing guard (`["/dashboard/:path*", "/onboarding"]`), `/onboarding` workspace creation flow, `/dashboard/settings/{general,members,roles,notifications,advanced}` routes, Server Component session checks, transparent `/api/*` rewrites, typed Hono RPC client (`client`, `parseApiResponse`), Better Auth browser client (`authClient`), React Query organization hooks in `src/lib/`, `SiteFooter` (`src/components/site-footer.tsx`, rendering all 11 brand icons from `@workspace/ui/components/icons/brands/*`), and the `/dashboard/ai` streaming chat UI using `@ai-sdk/react`.
-- `apps/worker`: Standalone BullMQ worker process (Port 3002 health probe server) processing `email` and `notification` queues (in-app, email, Web Push via `web-push`).
-- `packages/ai-core`: Mastra AI core workspace (`@workspace/ai-core`) containing provider-agnostic agent definitions (`workspace-assistant`; Google Gemini, OpenAI, Anthropic, or OpenRouter via Mastra's `provider/model` router and the `AI_PROVIDERS` registry), tenant-scoped `RequestContext` tools backed by `@workspace/db`, `@mastra/pg` (`PostgresStore` + `PgVector`) isolated in the `mastra` schema, workflow definitions (`workspace-brief`), and browser-safe contracts (`@workspace/ai-core/contracts`).
-- `packages/db`: Drizzle ORM schema (`schemaFilter: ["public"]`), SQL migrations (including `pgvector` extension enablement and Docker init SQL), connection pool with HMR caching and graceful shutdown, relations, and seed script.
-- `packages/ui`: Shared React components, complete auth modal/form flows, and 11 brand icons (`src/components/icons/brands/*`, rendered in `apps/web` `SiteFooter`).
+- `packages/shared`: Leaf shared package (`@workspace/shared`) with pure subpath exports (`config`, `logger`, `network`, `permissions`, `queues`, `storage`) using `"default"` export conditions for both Bun and Node tooling (`drizzle-kit`). Contains `APP_CONFIG`, Pino logger/redaction, SSRF IP checks, Better Auth RBAC `ac`/`roles`/`statements`, BullMQ queue schemas, and storage allowlists.
+- `apps/api`: Hono API service running natively on Bun (Port 3001). Hosts Better Auth endpoints (`organization` + native `dynamicAccessControl`), `hasOrgPermission` (`auth.api.hasPermission`), tenant isolation middleware (`query`, `param`, `x-organization-id`), `auditMiddleware` (`audit_log`), organization ownership transfer, private S3/R2/MinIO object storage, BullMQ/inline queue producers (`QUEUE_DRIVER=redis|inline`), Mastra AI runtime endpoints (`/api/ai/*`), and notifications. Exposes type-only RPC via `@workspace/api/hc`.
+- `apps/web`: Next.js 16 App Router web application (Port 3000) with Tailwind CSS v4, React 19, `src/proxy.ts` optimistic session routing guard (`["/dashboard/:path*", "/onboarding"]`), runtime streaming `/api/[...path]` proxy (`getInternalApiUrl()`), isolated `apps/web/.env` configuration (no backend secrets), typed Hono RPC client (`client`, `parseApiResponse`), Better Auth browser client (`authClient`), React Query organization hooks in `src/lib/`, `SiteFooter`, and `/dashboard/ai` streaming chat UI using `@ai-sdk/react`.
+- `apps/worker`: Standalone BullMQ worker process (Port 3002 health probe server) processing `email` and `notification` queues (in-app, Resend/dev-preview email, Web Push via `web-push`).
+- `packages/ai-core`: Mastra AI core workspace (`@workspace/ai-core`) containing `workspace-assistant` (`AI_PROVIDERS` registry), tenant-scoped `RequestContext` tools backed by `@workspace/db`, `@mastra/pg` (`PostgresStore` + `PgVector`) isolated in `MASTRA_DB_SCHEMA` (`mastra`), `workspace-brief` workflow, and browser-safe contracts (`@workspace/ai-core/contracts`).
+- `packages/db`: Drizzle ORM schema (`schemaFilter: ["public"]`), SQL migrations (with `pgvector`), connection pool with HMR caching and graceful shutdown, relations, and seed script.
+- `packages/ui`: Shared React components, auth modal/form flows, notification center, organization switcher, and brand icons.
 - `.agents/skills`: Specialized agent skills for architecture, security, design, and Next.js best practices.
-- `.planning/codebase`: System architecture, conventions, and integration specs for AI context.
 - `docs/specs`: Optional short design specs (`YYYY-MM-DD-<feature>-design.md`) for major or radical changes.
 - `docs/DECISIONS.md`: Lightweight log of major architectural changes and replaced core tools (`D1`, `D2`, ...).
 
@@ -19,30 +19,31 @@ This is a Bun workspaces monorepo using Turborepo:
 - `bun install`: Install workspace dependencies.
 - `bun run dev`: Run Web, API, and Worker concurrently via Turborepo.
 - `bun run dev:ai`: Run Mastra Studio (`mastra dev`) for `@workspace/ai-core`.
-- `bun run dev:web`: Run only the Next.js web application.
-- `bun run dev:api`: Run only the Hono backend API.
-- `bun run dev:worker`: Run only the BullMQ worker service.
+- `bun run dev:web` / `dev:api` / `dev:worker`: Run individual services.
 - `bun run build`: Build all workspaces.
 - `bun run check`: Run Ultracite/Biome quality checks across all files.
 - `bun run fix`: Apply automatic Ultracite/Biome code and formatting fixes.
 - `bun run check-types`: Run TypeScript checks across workspaces.
 - `bun run test`: Run Bun test suite.
-- `bun run db:push`: Push Drizzle schema directly to PostgreSQL.
-- `bun run db:generate`: Generate Drizzle migration files.
-- `bun run db:migrate`: Run pending database migrations.
-- `bun run db:seed`: Seed demo organization, storage quota, and notification preferences.
-- `bun run db:studio`: Launch Drizzle Studio GUI.
+- `bun run db:push` / `db:generate` / `db:migrate` / `db:seed` / `db:studio`: Manage PostgreSQL schema & seed data.
 
-## Coding Style & Naming Conventions
+## Coding Standards (Ultracite / Biome & TypeScript)
 
-- **Language**: TypeScript with strict mode enabled (`noUncheckedIndexedAccess` and workspace isolation via `bunfig.toml` `linker = "isolated"`).
-- **Formatter & Linter**: Biome via Ultracite with tabs and double quotes. Run `bun run fix` before committing.
-- **Naming Conventions**: Prefer kebab-case for filenames (`auth-client.ts`, `sign-in.tsx`). Use PascalCase for React components and `useXxx` for hooks.
-- **Next.js & API Boundaries**:
-  - `apps/api` owns database persistence, Better Auth configuration, S3/R2 storage access, and BullMQ job enqueueing.
-  - `apps/web` forwards browser `/api/*` requests via `next.config.ts` rewrites to `INTERNAL_API_URL || NEXT_PUBLIC_API_URL || "http://localhost:3001"` and verifies server sessions via `getServerSession()`.
-  - Shared constants (RBAC role/permission matrices, storage allowlists, queue names, notification categories/channels, app branding defaults) live in concrete `apps/api` modules and are exported via pure `@workspace/api/{config,permissions,queues,storage}` subpaths.
-  - `@workspace/ai-core` (`packages/ai-core`) depends only on Mastra, AI SDK, Zod, Drizzle, and `@workspace/db`—never `@workspace/api`—and persists Mastra state/vectors via `PostgresStore` + `PgVector` (`pgvector/pgvector:pg16`) inside `MASTRA_DB_SCHEMA` (`mastra`). AI env vars (`MASTRA_DEFAULT_MODEL`, provider keys `GOOGLE_GENERATIVE_AI_API_KEY`/`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`, `MASTRA_EMBEDDING_MODEL` (google/* or openai/*), `MASTRA_EMBEDDING_DIMENSIONS`, `MASTRA_DB_SCHEMA`) live at root `.env`. Add new providers in `AI_PROVIDERS` (`packages/ai-core/src/contracts.ts`) and `apps/api/src/env.ts`.
+- **Formatting & Linting**: Biome via Ultracite with **tabs** and **double quotes**. Always run `bun run fix`, `bun run check`, and `bun run check-types` before finishing tasks.
+- **TypeScript Strictness**: Strict mode enabled (`noUncheckedIndexedAccess`, `verbatimModuleSyntax`). Prefer `unknown` over `any`, const assertions (`as const`) for literal tables, and type narrowing over assertions.
+- **Code Style**: Use `const` by default, `let` only when reassigned, never `var`. Prefer `for...of` over `.forEach()`, template literals, optional chaining (`?.`), nullish coalescing (`??`), and early returns to keep nesting shallow.
+- **React & Next.js**: Keep Server and Client boundaries clear. Pass `ref` directly in React 19 (no `forwardRef`). Call hooks unconditionally at the top level with exhaustive dependencies. Use semantic HTML (`<button type="button">`, `<dialog>`), explicit labels, keyboard navigation, and ARIA attributes.
+- **Error Handling**: Never swallow errors silently. Catch, log with context, and rethrow or return typed error responses.
+- **Naming Conventions**: Prefer kebab-case filenames (`auth-client.ts`, `sign-in.tsx`), PascalCase React components, and `useXxx` hooks.
+- **Security & Data Rules**:
+  - Guard protected API routes with `authMiddleware`, `hasOrgPermission`, and `tenantBoundaryMiddleware`, and validate all untrusted inputs and env schemas with Zod.
+  - Keep object storage private (no SVG uploads), infer Drizzle row types via `typeof table.$inferSelect`, and populate Mastra `RequestContext` + `${organizationId}:${userId}` memory `resourceId` strictly server-side.
+  - Declare every package dependency explicitly in its workspace `package.json` (`bunfig.toml` uses `linker = "isolated"`).
+- **Package Boundaries**:
+  - `apps/api` owns database persistence, Better Auth configuration, object storage access, and BullMQ job enqueueing.
+  - `apps/web` reads only web-scoped variables from `apps/web/.env` and forwards `/api/*` via `apps/web/src/app/api/[...path]/route.ts`.
+  - Shared constants/contracts live in `@workspace/shared/{config,logger,network,permissions,queues,storage}` — never import runtime code from `@workspace/api`.
+  - `@workspace/ai-core` depends only on Mastra, AI SDK, Zod, Drizzle, and `@workspace/db` — never `@workspace/api`.
 
 ## Architecture Decisions Rule (Major Changes Only)
 

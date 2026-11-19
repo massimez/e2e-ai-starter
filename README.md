@@ -1,6 +1,6 @@
 # e2e-ai-starter
 
-> **Production-Ready Multi-Tenant SaaS Starter**: Next.js 16 App Router · Hono API on Bun · Mastra AI Agents with pgvector · Better Auth RBAC · Drizzle ORM · BullMQ · Tailwind CSS v4 · Turborepo
+> **Production-Ready Multi-Tenant SaaS & AI Starter**: Next.js 16 App Router · Hono API on Bun · Mastra AI Agents with pgvector · Better Auth Dynamic RBAC · Drizzle ORM · BullMQ · Tailwind CSS v4 · Turborepo
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-7.0.2-blue.svg)](https://www.typescriptlang.org/)
@@ -10,7 +10,7 @@
 [![Mastra AI](https://img.shields.io/badge/Mastra-AI%20Agents-purple.svg)](https://mastra.ai/)
 [![Better Auth](https://img.shields.io/badge/Better%20Auth-Multi--Tenant-red.svg)](https://better-auth.com/)
 
-A TypeScript Turborepo monorepo template powered by **Next.js 16 (App Router)**, **Hono API** (running natively on Bun), **Mastra AI** (Google Gemini, OpenAI, Anthropic, or OpenRouter + `pgvector` memory), **Better Auth** (with multi-tenant organizations, Email OTP, and RBAC), **Drizzle ORM** (PostgreSQL + `pgvector`), **BullMQ** (Redis background worker), **Tailwind CSS v4**, and pure subpath API exports (`@workspace/api/{config,hc,logger,permissions,queues,storage}`).
+A TypeScript Turborepo monorepo template powered by **Next.js 16 (App Router)**, **Hono API** (running natively on Bun), **Mastra AI** (Google Gemini, OpenAI, Anthropic, or OpenRouter + `pgvector` memory), **Better Auth** (with multi-tenant organizations, Email OTP, and native Dynamic Access Control), **Drizzle ORM** (PostgreSQL + `pgvector`), **BullMQ** (Redis background worker), **Tailwind CSS v4**, and a leaf shared contracts package (`@workspace/shared/{config,logger,network,permissions,queues,storage}`).
 
 ---
 
@@ -21,9 +21,9 @@ A TypeScript Turborepo monorepo template powered by **Next.js 16 (App Router)**,
    ```bash
    bun run setup --name "My App" --slug my-app
    ```
-   Running `bun run setup` updates [package.json](package.json), [apps/api/src/lib/app-config.ts](apps/api/src/lib/app-config.ts) (`APP_CONFIG`), [apps/web/src/app/icon.svg](apps/web/src/app/icon.svg), and creates `.env` from `.env.example` when missing (`--force-env` overwrites an existing `.env`).
+   Running `bun run setup` updates [package.json](package.json), [packages/shared/src/config.ts](packages/shared/src/config.ts) (`APP_CONFIG`), [apps/web/src/app/icon.svg](apps/web/src/app/icon.svg), and generates root `.env` (from `.env.example`) plus standalone [apps/web/.env](apps/web/.env) (from `apps/web/.env.example`) when missing (`--force-env` overwrites both).
 3. [docker-compose.yml](docker-compose.yml) scopes container names per Compose project directory automatically, preventing collisions when running multiple cloned projects on one machine.
-4. For advanced rebranding, edit `APP_CONFIG` in [apps/api/src/lib/app-config.ts](apps/api/src/lib/app-config.ts) and replace [apps/web/src/app/icon.svg](apps/web/src/app/icon.svg) / [apps/web/src/components/brand-mark.tsx](apps/web/src/components/brand-mark.tsx).
+4. For advanced rebranding, edit `APP_CONFIG` in [packages/shared/src/config.ts](packages/shared/src/config.ts) and replace [apps/web/src/app/icon.svg](apps/web/src/app/icon.svg) / [apps/web/src/components/brand-mark.tsx](apps/web/src/components/brand-mark.tsx).
 
 ---
 
@@ -32,13 +32,13 @@ A TypeScript Turborepo monorepo template powered by **Next.js 16 (App Router)**,
 | Domain | Technology |
 |---|---|
 | **Runtime & Monorepo** | [Bun](https://bun.sh) (workspaces, `isolated` linker, package catalog) & [Turborepo](https://turbo.build) |
-| **API Subpath Contracts** | `@workspace/api/{config,hc,logger,permissions,queues,storage}` (app branding, Hono RPC, structured logger, RBAC roles, queue names, notification categories/channels, storage allowlists) |
-| **Backend API** | [Hono](https://hono.dev) (running natively on Bun at `http://localhost:3001`) |
-| **Frontend Web** | [Next.js 16](https://nextjs.org) (App Router, React 19 at `http://localhost:3000`, `src/proxy.ts`) |
-| **Authentication** | [Better Auth](https://better-auth.com) (Drizzle adapter, Email/Password, Email OTP, optional Google OAuth, Organizations, RBAC) |
+| **Shared Leaf Contracts** | `@workspace/shared/{config,logger,network,permissions,queues,storage}` (branding, Pino logger, SSRF IP checks, Better Auth RBAC `ac`/`roles`, queue schemas, storage allowlists) |
+| **Backend API** | [Hono](https://hono.dev) (running natively on Bun at `http://localhost:3001`, exporting type-only `AppType` via `@workspace/api/hc`) |
+| **Frontend Web** | [Next.js 16](https://nextjs.org) (App Router, React 19 at `http://localhost:3000`, `src/proxy.ts` & runtime streaming `/api/[...path]` proxy) |
+| **Authentication & RBAC** | [Better Auth](https://better-auth.com) (Drizzle adapter, Email/Password, Email OTP, optional Google OAuth, Organizations + native `dynamicAccessControl`) |
 | **Database & Vector ORM** | [PostgreSQL 16 + pgvector](https://github.com/pgvector/pgvector) & [Drizzle ORM](https://orm.drizzle.team) (`schemaFilter: ["public"]`, isolated `mastra` AI schema) |
-| **AI Agents & Memory** | [Mastra](https://mastra.ai) (`@workspace/ai-core`), multi-provider model router (Google Gemini default, OpenAI, Anthropic, OpenRouter; embeddings via Google or OpenAI), `@mastra/pg` (`PostgresStore` & `PgVector`), & [AI SDK](https://ai-sdk.dev) |
-| **Worker & Queues** | [BullMQ](https://bullmq.io) & [Redis](https://redis.io) (isolated worker service in `apps/worker` + Web Push via `web-push`) |
+| **AI Agents & Memory** | [Mastra](https://mastra.ai) (`@workspace/ai-core`), multi-provider model router (Gemini default, OpenAI, Anthropic, OpenRouter; Google/OpenAI embeddings), `@mastra/pg`, & [AI SDK](https://ai-sdk.dev) |
+| **Worker & Storage** | [BullMQ](https://bullmq.io) & Redis (`QUEUE_DRIVER=redis|inline`) + S3/R2/MinIO (`@aws-sdk/client-s3`) |
 | **Styling & UI** | [Tailwind CSS v4](https://tailwindcss.com), Lucide React, Sonner Toasts, Radix UI Primitives |
 | **Linter & Formatter** | [Ultracite](https://github.com/biomejs/biome) / Biome |
 
@@ -50,50 +50,43 @@ A TypeScript Turborepo monorepo template powered by **Next.js 16 (App Router)**,
 e2e-ai-starter/
 ├── apps/
 │   ├── api/                        # Hono backend API (Port 3001)
-│   │   ├── src/app.ts              # App composition mounting domain routes, CORS & audit logging
+│   │   ├── src/app.ts              # App composition mounting domain routes, audit logs & CORS
 │   │   ├── src/env.ts              # Zod runtime env validation (fail-fast in production)
 │   │   ├── src/lib/
-│   │   │   ├── app-config.ts       # Canonical APP_CONFIG defaults (`@workspace/api/config`)
-│   │   │   ├── auth/               # Better Auth setup & RBAC permissions (`@workspace/api/permissions`)
-│   │   │   ├── hc/                 # Hono RPC client exporter (`@workspace/api/hc`)
+│   │   │   ├── audit.ts            # PostgreSQL audit_log writer & sensitive read path helpers
+│   │   │   ├── auth/               # Better Auth setup, Turnstile captcha, org lifecycle
+│   │   │   ├── hc/                 # Type-only Hono RPC client exporter (`@workspace/api/hc`)
 │   │   │   ├── redis/              # Shared IORedis client, BullMQ producer & atomic rate-limit scripts
-│   │   │   ├── audit.ts            # Client IP resolution & fire-and-forget PostgreSQL audit logs
 │   │   │   ├── create-hono-app.ts  # Standard response envelopes, secure headers & CORS
 │   │   │   ├── errors.ts           # Typed AppError subclasses
-│   │   │   ├── logger.ts           # Unified pretty/JSON logger & redaction (`@workspace/api/logger`)
-│   │   │   ├── queues.ts           # Queue names, notification categories/channels & schemas (`@workspace/api/queues`)
-│   │   │   ├── storage.ts          # Safe key generation & storage allowlist/size helpers
+│   │   │   ├── ip.ts               # Trusted proxy matching & client IP resolution
+│   │   │   ├── storage.ts          # Safe key generation & shared storage re-exports
 │   │   │   └── tenant.ts           # Drizzle tenant query helpers (withOrg, scopedWhere)
 │   │   ├── src/middleware/         # Request ID, auth/ban, rate limit, tenant boundary, RBAC, audit
 │   │   └── src/modules/
 │   │       ├── ai/                 # Mastra /api/ai/* chat stream, agents & tenant thread history
 │   │       ├── auth/               # Better Auth handler with per-endpoint rate limiting
-│   │       ├── email/              # Typed BullMQ email queue producer
+│   │       ├── email/              # Typed BullMQ (or dev inline) email producer
 │   │       ├── health/             # /api/health, /api/health/live, /api/health/ready
 │   │       ├── notification/       # In-app notifications, preferences, Web Push & BullMQ producer
-│   │       ├── organization/       # Active org lookup, profile updates & atomic ownership transfer
-│   │       ├── roles/              # Dynamic organization RBAC, role permissions & invitations
+│   │       ├── organization/       # Active org lookup, profile updates, member removal & ownership transfer
 │   │       └── storage/            # Private S3/R2/MinIO presign, commit, stream/URL, quota & delete
 │   ├── web/                        # Next.js 16 App Router web app (Port 3000)
+│   │   ├── .env.example            # Strictly web-scoped env template (copied to apps/web/.env)
 │   │   ├── public/sw.js            # Web Push Service Worker (push + safe notification click)
+│   │   ├── src/app/api/[...path]/  # Streaming runtime Route Handler proxying to INTERNAL_API_URL
 │   │   ├── src/app/dashboard/ai/   # Tenant-scoped Mastra streaming chat UI (@ai-sdk/react)
 │   │   ├── src/app/dashboard/settings/ # Workspace settings (general, members, roles, notifications, advanced)
 │   │   ├── src/app/onboarding/     # New-user workspace creation onboarding flow
-│   │   ├── src/components/         # AppHeader, BrandMark & SiteFooter (renders all 11 brand icons)
+│   │   ├── src/components/         # AppHeader, BrandMark & SiteFooter
 │   │   ├── src/env.ts              # Browser-safe publicWebEnv & server env validation
 │   │   ├── src/proxy.ts            # Optimistic cookie guard matching /dashboard/:path* and /onboarding
-│   │   ├── src/lib/                # Hono RPC client, Better Auth client, server session & org hooks
-│   │   ├── src/providers/          # ThemeProvider, QueryProvider & AuthModalProvider
-│   │   └── next.config.ts          # /api/* rewrite, security headers & CSP
+│   │   └── src/lib/                # Hono RPC client, Better Auth client, server session & org hooks
 │   └── worker/                     # Dedicated BullMQ worker process (Port 3002 probes)
-│       ├── src/env.ts              # Worker env schema (PostgreSQL, Redis, Resend, VAPID)
-│       ├── src/index.ts            # Email & notification workers + /healthz & /readyz probes
-│       └── src/processors/
-│           ├── email/              # Verification OTP, welcome, invitation & password reset emails
-│           └── notification/       # Multi-channel dispatcher (in-app, email, Web Push)
 ├── packages/
 │   ├── ai-core/                    # Mastra agents, tools, workflows, @mastra/pg & browser contracts
 │   ├── db/                         # Drizzle ORM schemas (public), pgvector init/migrations & seed
+│   ├── shared/                     # Leaf shared contracts (@workspace/shared/{config,logger,network,permissions,queues,storage})
 │   └── ui/                         # Tailwind CSS v4 tokens, components, auth flows, brand icons & notifications
 ├── .github/workflows/ci.yml        # CI pipeline (check, check-types, test, build)
 ├── Dockerfile.api / web / worker   # Multi-stage non-root Alpine Dockerfiles using turbo prune
@@ -116,15 +109,19 @@ bun install
 ### 3. Environment Variables
 ```bash
 cp .env.example .env
+cp apps/web/.env.example apps/web/.env
 ```
-Review `.env.example` for API, Web, Worker, Database, Mastra AI (`MASTRA_DEFAULT_MODEL`, provider keys, `MASTRA_EMBEDDING_MODEL`, `MASTRA_EMBEDDING_DIMENSIONS`, `MASTRA_DB_SCHEMA`), Storage, and VAPID settings. Configure `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` (e.g. from local MinIO, Cloudflare R2, or AWS S3) for direct presigned uploads, and the API key for your chosen AI provider (see [AI Providers](#ai-providers)) to enable live chat in `/dashboard/ai` and Mastra Studio; in production, real S3/R2/MinIO credentials, database/Redis URLs, a strong `BETTER_AUTH_SECRET`, and `RESEND_API_KEY` are enforced at startup.
+- **Root `.env`** holds backend secrets (Postgres, Redis, `BETTER_AUTH_SECRET`, S3/MinIO, Resend, VAPID, AI provider keys). Local MinIO defaults match `docker-compose.yml`.
+- **`apps/web/.env`** is isolated to web-only configuration (`INTERNAL_API_URL`, `NEXT_PUBLIC_*`) so server secrets are never bundled into Next.js standalone outputs.
+- Review [AI Providers](#ai-providers) and set the API key for your chosen provider in root `.env` to enable live chat in `/dashboard/ai` and Mastra Studio.
 
 ### 4. Push Schema & Start Development
 ```bash
 bun run db:push
+bun run db:seed
 bun run dev
 ```
-- **Next.js Web**: `http://localhost:3000`
+- **Next.js Web**: `http://localhost:3000` (dev seed credentials: `admin@acme.example` / `Password123!`)
 - **Hono API**: `http://localhost:3001`
 - **BullMQ Worker Probes**: `http://localhost:3002/healthz` and `http://localhost:3002/readyz`
 
@@ -134,7 +131,7 @@ bun run dev
 
 | Command | Action |
 |---|---|
-| `bun run setup` | Initialize project name, APP_CONFIG branding, and `.env` secrets |
+| `bun run setup` | Initialize project name, APP_CONFIG branding, `.env`, and `apps/web/.env` |
 | `bun run dev` | Start Web, API, and Worker via Turborepo |
 | `bun run dev:ai` | Launch Mastra Studio (`mastra dev`) for `@workspace/ai-core` |
 | `bun run dev:web` | Start only the Next.js frontend |
@@ -148,7 +145,7 @@ bun run dev
 | `bun run db:push` | Push Drizzle schema to PostgreSQL |
 | `bun run db:generate` | Generate Drizzle SQL migrations |
 | `bun run db:migrate` | Run pending database migrations |
-| `bun run db:seed` | Seed demo user/org, storage quota & default notification preferences |
+| `bun run db:seed` | Seed demo user/org (`admin@acme.example`), storage quota & notification preferences |
 | `bun run db:studio` | Launch Drizzle Studio GUI |
 
 ---
@@ -164,39 +161,34 @@ The Mastra workspace (`packages/ai-core`) uses Mastra's `provider/model` router 
 | **Anthropic** | `anthropic/claude-sonnet-4-5` | `ANTHROPIC_API_KEY` | Use a `google/*` or `openai/*` embedder *(or omit for thread-only memory)* |
 | **OpenRouter** | `openrouter/anthropic/claude-sonnet-4.5` | `OPENROUTER_API_KEY` | Use a `google/*` or `openai/*` embedder *(or omit for thread-only memory)* |
 
-- **Decoupled embeddings:** `MASTRA_EMBEDDING_MODEL` (`google/*` or `openai/*`) is independent of `MASTRA_DEFAULT_MODEL`. For example, you can chat with `anthropic/claude-sonnet-4-5` (`ANTHROPIC_API_KEY`) while semantic recall uses `openai/text-embedding-3-small` (`OPENAI_API_KEY`). If the embedding provider's key is not set, thread history still persists in PostgreSQL and semantic recall is automatically disabled.
-- **pgvector dimension limit:** `MASTRA_EMBEDDING_DIMENSIONS` defaults to `768` and must be `<= 2000` (pgvector HNSW limit). Pick your embedding model and dimensions once; changing them after vectors are stored requires dropping or re-indexing the Mastra vector tables inside the `mastra` schema.
+- **Decoupled embeddings:** `MASTRA_EMBEDDING_MODEL` (`google/*` or `openai/*`) is independent of `MASTRA_DEFAULT_MODEL`. If the embedding provider's key is missing, thread history still persists in PostgreSQL and semantic recall is automatically disabled.
+- **pgvector dimension limit:** `MASTRA_EMBEDDING_DIMENSIONS` defaults to `768` and must be `<= 2000` (pgvector HNSW limit).
 
 ---
 
 ## 🏛️ Key Architecture Notes
 
-1. **Shared API Contracts (`@workspace/api/{config,hc,logger,permissions,queues,storage}`)**:
-   - Concrete `apps/api` modules (`src/lib/app-config.ts`, `src/lib/hc/hc.ts`, `src/lib/logger.ts`, `src/lib/auth/permissions.ts`, `src/lib/queues.ts`, `src/modules/storage/config.ts`) exported as pure TypeScript subpath entrypoints (no Node/DB/Redis runtime dependencies) defining `APP_CONFIG` branding defaults, typed Hono RPC contracts, structured logger helpers, Better Auth access control (`ac`, `roles`: `owner`, `admin`, `member`, `viewer`, `PERMISSION_MATRIX`), queue identifiers, notification categories (`system`, `security`, `team`, `project`, `billing`) and channels (`in_app`, `email`, `push`), plus upload limits and MIME allowlists (excluding SVG).
-2. **Authentication, Tenant Isolation & Governance**:
-   - `apps/api/src/lib/auth/index.ts` configures Better Auth with Drizzle ORM, Redis `secondaryStorage`, hashed Email OTPs (`storeOTP: "hashed"`), `requireEmailVerification: true`, and asynchronous queued verification, reset-password, and organization invitation emails.
-   - `createTenantBoundaryMiddleware` enforces strict active-organization matching across route params, query strings, `x-organization-id`, and JSON bodies.
-   - `apps/api/src/modules/roles/` implements dynamic organization roles, permission assignments, and member invitations mounted under `/api/organizations/roles` and `/api/organizations/invitations`.
-   - `POST /api/organizations/transfer-ownership` executes an atomic transaction transferring ownership from the current `owner` to an active `admin` and demoting the previous owner to `admin`.
+1. **Leaf Shared Contracts (`@workspace/shared/{config,logger,network,permissions,queues,storage}`)**:
+   - Concrete, runtime-neutral modules in `packages/shared/src/` shared by `apps/api`, `apps/web`, `apps/worker`, and `packages/db`. Export paths use `"default"` conditions so both Bun and Node tooling (`drizzle-kit`) resolve cleanly.
+2. **Authentication, Tenant Isolation & Dynamic RBAC**:
+   - `apps/api/src/lib/auth/index.ts` configures Better Auth with Drizzle ORM (`organizationRole`), Redis `secondaryStorage`, hashed Email OTPs (`storeOTP: "hashed"`), `requireEmailVerification: true`, and `organization({ ac, roles, dynamicAccessControl: { enabled: true } })`.
+   - `createTenantBoundaryMiddleware` enforces strict active-organization matching across route params, query strings, and `x-organization-id` headers.
+   - `hasOrgPermission` delegates permission checks to `auth.api.hasPermission(...)` with per-request caching on Hono context.
+   - `POST /api/organizations/transfer-ownership` transfers ownership atomically from `owner` to an active `admin`.
 3. **Private Multi-Tenant Storage (`apps/api/src/modules/storage/`)**:
-   - `POST /api/storage/presign`, `POST /api/storage/commit`, `GET /api/storage`, `GET /api/storage/usage`, `GET /api/storage/files/:id` (authenticated file stream), `GET /api/storage/files/:id/url` (short-lived presigned URL), `DELETE /api/storage/files/:id`, and `DELETE /api/storage`.
-   - Buckets stay private by default; SVG uploads (`image/svg+xml`) are disallowed to prevent stored XSS.
+   - Uses S3/R2/MinIO presigned PUT uploads, `HeadObject` size/MIME verification on commit, row-locked per-organization storage quotas, and private file streaming / short-lived signed downloads.
+   - Buckets remain private by default; SVG uploads (`image/svg+xml`) are rejected to prevent stored XSS.
 4. **Multi-Channel Notifications (`apps/api/src/modules/notification/` & `apps/worker`)**:
-   - `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`, `GET/PATCH /api/notifications/preferences`, `POST /api/notifications/push/subscribe`, `DELETE /api/notifications/push/unsubscribe`.
-   - `apps/web/src/app/dashboard/settings/notifications/page.tsx` + `apps/web/public/sw.js` wire category/channel preferences and Web Push subscriptions when `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and worker VAPID keys are configured.
-5. **Web Routing & Next.js Boundaries**:
-   - `apps/web/src/proxy.ts` performs optimistic session cookie checks for `["/dashboard/:path*", "/onboarding"]`, while Server Components in `apps/web/src/app/dashboard/layout.tsx` and `apps/web/src/app/onboarding/page.tsx` validate sessions via `getServerSession()`.
-   - `/dashboard/settings/{general,members,roles,notifications,advanced}` manage workspace profile, member roles/invitations, dynamic RBAC roles, notification preferences, and workspace deletion/ownership transfer; `/onboarding` handles workspace creation for users without an organization; `/accept-invitation` completes email organization invitations end-to-end.
-   - `apps/web/src/components/site-footer.tsx` (`SiteFooter`) renders all 11 brand icons exported by `@workspace/ui/components/icons/brands/*`.
-   - `next.config.ts` rewrites `/api/*` to `INTERNAL_API_URL || NEXT_PUBLIC_API_URL || "http://localhost:3001"` and applies CSP and security response headers.
+   - Supports in-app, Resend HTML email (with console preview in `NODE_ENV=development` when `RESEND_API_KEY` is unset), and Web Push via `web-push` (`apps/web/public/sw.js`). Set `QUEUE_DRIVER="inline"` in local dev to skip Redis email queueing if running without `apps/worker`.
+5. **Web Routing & Next.js Proxy (`apps/web`)**:
+   - `apps/web/src/proxy.ts` performs optimistic session cookie checks for `["/dashboard/:path*", "/onboarding"]`; Server Components verify sessions via `getServerSession()`.
+   - `apps/web/src/app/api/[...path]/route.ts` streams all `/api/*` requests to runtime `getInternalApiUrl()` (`INTERNAL_API_URL || NEXT_PUBLIC_API_URL || "http://localhost:3001"`) preserving multi-`Set-Cookie` headers and SSE streams with no 30s timeout.
 6. **Mastra AI, Tenant Memory & `pgvector` Isolation (`packages/ai-core`, `/api/ai/*`, `/dashboard/ai`)**:
-   - `packages/ai-core` (`@workspace/ai-core` and browser-safe `@workspace/ai-core/contracts`) defines the provider-agnostic `workspace-assistant` agent (model from `MASTRA_DEFAULT_MODEL`), the `AI_PROVIDERS` registry, `workspace-brief` workflow, and read-only `get-workspace-context` Drizzle tool reading `organizationId` and `userId` strictly from Mastra `RequestContext`.
-   - `@mastra/pg` (`PostgresStore` + `PgVector`) persists memory threads, semantic recall embeddings, and redacted observability traces inside `MASTRA_DB_SCHEMA` (`mastra`), isolated from Drizzle's `schemaFilter: ["public"]`.
-   - `apps/api/src/modules/ai/` exposes `GET /api/ai/agents`, `POST /api/ai/chat` (AI SDK v7 SSE stream with heartbeat), `GET /api/ai/threads`, and `GET /api/ai/threads/:id`, gated by `authMiddleware`, `tenantBoundaryMiddleware`, and `hasOrgPermission("ai:read" | "ai:execute")` with threads scoped to `${organizationId}:${userId}`.
-   - `apps/web/src/app/dashboard/ai/page.tsx` integrates `@ai-sdk/react` (`useChat` + `DefaultChatTransport`) on the same-origin `/api/ai/chat` rewrite.
+   - `packages/ai-core` defines `workspace-assistant`, `AI_PROVIDERS`, `workspace-brief` workflow, and read-only Drizzle tools (`workspaceContextTool`, `workspaceMembersTool`, `workspaceFilesTool`) scoped strictly via `RequestContext`.
+   - `@mastra/pg` (`PostgresStore` + `PgVector`) persists state inside `MASTRA_DB_SCHEMA` (`mastra`), isolated from Drizzle's `schemaFilter: ["public"]`.
 
 ---
 
 ## License
 
-MIT: see [LICENSE](LICENSE).
+MIT
