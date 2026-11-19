@@ -97,6 +97,12 @@ export async function sendEmail(options: SendEmailOptions): Promise<{
 		subject,
 	});
 
+	if (env.NODE_ENV === "development") {
+		console.info(
+			`\n[Dev Email Simulator] To: ${emailCheck.data} | Subject: ${subject}\n${plainText}\n`
+		);
+	}
+
 	return {
 		messageId: `sim_${crypto.randomUUID()}`,
 		simulated: true,

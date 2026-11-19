@@ -101,39 +101,25 @@ const healthServer =
 							);
 						}
 
+						const [dbResult, redisResult] = await Promise.allSettled([
+							withTimeout(db.execute(sql`SELECT 1`), READINESS_TIMEOUT_MS),
+							withTimeout(pingWorkerRedis(), READINESS_TIMEOUT_MS),
+						]);
+
 						const checks: Record<
 							"database" | "redis",
 							"healthy" | "unhealthy"
 						> = {
-							database: "healthy",
-							redis: "healthy",
+							database:
+								dbResult.status === "fulfilled" ? "healthy" : "unhealthy",
+							redis:
+								redisResult.status === "fulfilled" &&
+								redisResult.value === "PONG"
+									? "healthy"
+									: "unhealthy",
 						};
-
-						let isHealthy = true;
-
-						try {
-							await withTimeout(
-								db.execute(sql`SELECT 1`),
-								READINESS_TIMEOUT_MS
-							);
-						} catch {
-							checks.database = "unhealthy";
-							isHealthy = false;
-						}
-
-						try {
-							const pong = await withTimeout(
-								pingWorkerRedis(),
-								READINESS_TIMEOUT_MS
-							);
-							if (pong !== "PONG") {
-								checks.redis = "unhealthy";
-								isHealthy = false;
-							}
-						} catch {
-							checks.redis = "unhealthy";
-							isHealthy = false;
-						}
+						const isHealthy =
+							checks.database === "healthy" && checks.redis === "healthy";
 
 						return Response.json(
 							{
@@ -181,18 +167,29 @@ async function shutdown(signal: string): Promise<void> {
 		forceExitTimer.unref();
 	}
 
+	let exitCode = 0;
 	try {
-		healthServer?.stop(true);
-		await Promise.all([emailWorker.close(), notificationWorker.close()]);
-		await closeWorkerHealthRedis();
-		await closeDb();
-		clearTimeout(forceExitTimer);
-		logInfo("WorkerService", "All workers shut down cleanly");
-		process.exit(0);
+		await healthServer?.stop(true);
+		const workerResults = await Promise.allSettled([
+			emailWorker.close(),
+			notificationWorker.close(),
+		]);
+		for (const result of workerResults) {
+			if (result.status === "rejected") {
+				exitCode = 1;
+				logError("WorkerService", result.reason, { phase: "shutdown-worker" });
+			}
+		}
+		if (exitCode === 0) {
+			logInfo("WorkerService", "All workers shut down cleanly");
+		}
 	} catch (error) {
-		clearTimeout(forceExitTimer);
+		exitCode = 1;
 		logError("WorkerService", error, { phase: "shutdown" });
-		process.exit(1);
+	} finally {
+		await Promise.allSettled([closeWorkerHealthRedis(), closeDb()]);
+		clearTimeout(forceExitTimer);
+		process.exit(exitCode);
 	}
 }
 

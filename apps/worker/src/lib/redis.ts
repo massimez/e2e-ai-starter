@@ -28,17 +28,30 @@ export const queuePrefix = `{${env.REDIS_PREFIX}}`;
 
 let healthRedisClient: Redis | null = null;
 
+function createHealthRedisClient(): Redis {
+	const client = new Redis(env.REDIS_URL, {
+		connectTimeout: 3000,
+		enableOfflineQueue: false,
+		lazyConnect: true,
+		maxRetriesPerRequest: 1,
+		retryStrategy: (times) => (times <= 5 ? Math.min(times * 200, 2000) : null),
+	});
+	client.on("error", (err) => {
+		logError("WorkerHealthRedis", err);
+	});
+	return client;
+}
+
 function getHealthRedisClient(): Redis {
-	if (!healthRedisClient) {
-		healthRedisClient = new Redis(env.REDIS_URL, {
-			connectTimeout: 3000,
-			enableOfflineQueue: false,
-			lazyConnect: true,
-			maxRetriesPerRequest: 1,
-		});
-		healthRedisClient.on("error", (err) => {
-			logError("WorkerHealthRedis", err);
-		});
+	if (
+		!healthRedisClient ||
+		healthRedisClient.status === "end" ||
+		healthRedisClient.status === "close"
+	) {
+		if (healthRedisClient) {
+			healthRedisClient.disconnect();
+		}
+		healthRedisClient = createHealthRedisClient();
 	}
 	return healthRedisClient;
 }
@@ -55,12 +68,20 @@ export async function closeWorkerHealthRedis(): Promise<void> {
 	if (!healthRedisClient) {
 		return;
 	}
+	const client = healthRedisClient;
+	healthRedisClient = null;
+	if (
+		client.status === "wait" ||
+		client.status === "end" ||
+		client.status === "close"
+	) {
+		client.disconnect();
+		return;
+	}
 	try {
-		await healthRedisClient.quit();
+		await client.quit();
 	} catch {
-		healthRedisClient.disconnect();
-	} finally {
-		healthRedisClient = null;
+		client.disconnect();
 	}
 }
 

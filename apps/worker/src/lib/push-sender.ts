@@ -1,10 +1,7 @@
 import type { LookupAddress } from "node:dns";
 import { lookup } from "node:dns/promises";
 import { Agent as HttpsAgent } from "node:https";
-import {
-	isBlockedIpAddress,
-	validatePushEndpointUrl,
-} from "@workspace/api/queues";
+import { resolveSafePushEndpoint } from "@workspace/api/network";
 import { UnrecoverableError } from "bullmq";
 import { sendNotification, WebPushError } from "web-push";
 import { env } from "../env";
@@ -31,11 +28,13 @@ export interface PushSubscriptionTarget {
 
 export interface PushDeliveryErrorOptions extends ErrorOptions {
 	isGone?: boolean;
+	isPermanent?: boolean;
 	statusCode?: number;
 }
 
 export class PushDeliveryError extends Error {
 	readonly isGone: boolean;
+	readonly isPermanent: boolean;
 	readonly statusCode?: number;
 
 	constructor(message: string, options: PushDeliveryErrorOptions = {}) {
@@ -43,6 +42,7 @@ export class PushDeliveryError extends Error {
 		this.name = "PushDeliveryError";
 		this.statusCode = options.statusCode;
 		this.isGone = options.isGone ?? false;
+		this.isPermanent = options.isPermanent ?? false;
 	}
 }
 
@@ -52,39 +52,20 @@ const GONE_PUSH_STATUSES = new Set([404, 410]);
 async function resolveSafePushAddresses(
 	endpoint: string
 ): Promise<{ addresses: LookupAddress[]; url: URL }> {
-	const validation = validatePushEndpointUrl(endpoint);
-	if (!validation.ok) {
-		throw new PushDeliveryError(validation.reason, {
-			isGone: true,
-			statusCode: 400,
+	const resolved = await resolveSafePushEndpoint(
+		endpoint,
+		pushTransport.lookup
+	);
+	if (!resolved.ok) {
+		const isDnsError = resolved.code === "DNS_LOOKUP_FAILED";
+		throw new PushDeliveryError(resolved.reason, {
+			...(resolved.cause === undefined ? {} : { cause: resolved.cause }),
+			isGone: !isDnsError,
+			statusCode: isDnsError ? 503 : 400,
 		});
 	}
 
-	let addresses: LookupAddress[];
-	try {
-		addresses = await pushTransport.lookup(validation.url.hostname);
-	} catch (error) {
-		throw new PushDeliveryError("Push endpoint DNS resolution failed", {
-			cause: error,
-			isGone: false,
-			statusCode: 503,
-		});
-	}
-
-	if (
-		addresses.length === 0 ||
-		addresses.some((entry) => isBlockedIpAddress(entry.address))
-	) {
-		throw new PushDeliveryError(
-			"Push endpoint resolved to a restricted network address",
-			{
-				isGone: true,
-				statusCode: 400,
-			}
-		);
-	}
-
-	return { addresses, url: validation.url };
+	return { addresses: resolved.addresses, url: resolved.url };
 }
 
 function createPinnedPushAgent(addresses: LookupAddress[]): HttpsAgent {
@@ -158,7 +139,12 @@ export async function sendWebPush(
 				if (PERMANENT_PUSH_STATUSES.has(error.statusCode)) {
 					throw new PushDeliveryError(
 						`Push service rejected request (${error.statusCode})`,
-						{ cause: error, isGone: false, statusCode: error.statusCode }
+						{
+							cause: error,
+							isGone: false,
+							isPermanent: true,
+							statusCode: error.statusCode,
+						}
 					);
 				}
 				throw new PushDeliveryError(
@@ -176,7 +162,6 @@ export async function sendWebPush(
 		throw new UnrecoverableError("VAPID keys are not configured in production");
 	}
 
-	await Promise.resolve();
 	logWarning("PushSender:Simulator", "Simulated Web Push dispatch (dev mode)", {
 		endpointOrigin: url.origin,
 		title: payload.title,

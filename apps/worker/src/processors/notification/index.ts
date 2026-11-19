@@ -3,7 +3,7 @@ import { notificationPreference } from "@workspace/db/schema";
 import { type Job, UnrecoverableError } from "bullmq";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { logInfo } from "../../lib/logger";
+import { logInfo, logWarning } from "../../lib/logger";
 import { handleEmailNotification } from "./handlers/handle-email-notification";
 import { handleInAppNotification } from "./handlers/handle-in-app";
 import { handlePushNotification } from "./handlers/handle-push-notification";
@@ -113,16 +113,6 @@ export async function processNotificationJob(job: Job<NotificationJobData>) {
 		})
 	);
 
-	if (typeof job.updateData === "function") {
-		await job.updateData({
-			...job.data,
-			_deliveryState: {
-				channels: Array.from(completedChannels),
-				pushSubscriptionIds: Array.from(deliveredPushSubIds),
-			},
-		} as NotificationJobData);
-	}
-
 	const channelFailures = channelResults
 		.filter(
 			(result): result is PromiseRejectedResult => result.status === "rejected"
@@ -133,13 +123,56 @@ export async function processNotificationJob(job: Job<NotificationJobData>) {
 				: new Error(String(result.reason))
 		);
 
-	if (channelFailures.length === 1) {
-		throw channelFailures[0];
+	if (
+		channelFailures.length > 0 &&
+		typeof job.updateData === "function" &&
+		(completedChannels.size > 0 || deliveredPushSubIds.size > 0)
+	) {
+		try {
+			await job.updateData({
+				...job.data,
+				_deliveryState: {
+					channels: Array.from(completedChannels),
+					pushSubscriptionIds: Array.from(deliveredPushSubIds),
+				},
+			} as NotificationJobData);
+		} catch (checkpointError) {
+			logWarning(
+				"NotificationWorker",
+				"Failed to persist delivery retry checkpoint",
+				{
+					error:
+						checkpointError instanceof Error
+							? checkpointError.message
+							: String(checkpointError),
+					jobId: job.id,
+				}
+			);
+		}
 	}
-	if (channelFailures.length > 1) {
+
+	const retryableFailures = channelFailures.filter(
+		(error) => !(error instanceof UnrecoverableError)
+	);
+	const unrecoverableFailures = channelFailures.filter(
+		(error): error is UnrecoverableError => error instanceof UnrecoverableError
+	);
+
+	if (retryableFailures.length === 1) {
+		throw retryableFailures[0];
+	}
+	if (retryableFailures.length > 1) {
 		throw new AggregateError(
-			channelFailures,
-			`${channelFailures.length} notification delivery channels failed`
+			retryableFailures,
+			`${retryableFailures.length} notification delivery channels failed`
+		);
+	}
+	if (unrecoverableFailures.length === 1) {
+		throw unrecoverableFailures[0];
+	}
+	if (unrecoverableFailures.length > 1) {
+		throw new UnrecoverableError(
+			`${unrecoverableFailures.length} notification delivery channels failed permanently: ${unrecoverableFailures.map((err) => err.message).join("; ")}`
 		);
 	}
 
