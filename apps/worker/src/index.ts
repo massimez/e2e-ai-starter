@@ -1,5 +1,5 @@
-import { withTimeout } from "@workspace/api/queues";
 import { closeDb, db } from "@workspace/db";
+import { withTimeout } from "@workspace/shared/queues";
 import type { Worker } from "bullmq";
 import { sql } from "drizzle-orm";
 import { env } from "./env";
@@ -71,6 +71,30 @@ logInfo("WorkerService", "Workers registered", {
 
 let isShuttingDown = false;
 
+function handleWorkerLivenessRequest(): Response {
+	const workersHealthy =
+		emailWorker.isRunning() && notificationWorker.isRunning();
+	let status = "degraded";
+	if (isShuttingDown) {
+		status = "draining";
+	} else if (workersHealthy) {
+		status = "ok";
+	}
+	return Response.json(
+		{
+			service: "worker",
+			status,
+			timestamp: new Date().toISOString(),
+			uptime: process.uptime(),
+			workers: {
+				email: emailWorker.isRunning(),
+				notification: notificationWorker.isRunning(),
+			},
+		},
+		{ status: !isShuttingDown && workersHealthy ? 200 : 503 }
+	);
+}
+
 const healthServer =
 	env.WORKER_HEALTH_PORT > 0
 		? Bun.serve({
@@ -78,19 +102,7 @@ const healthServer =
 					const { pathname } = new URL(req.url);
 
 					if (pathname === "/healthz" || pathname === "/live") {
-						return Response.json(
-							{
-								service: "worker",
-								status: isShuttingDown ? "draining" : "ok",
-								timestamp: new Date().toISOString(),
-								uptime: process.uptime(),
-								workers: {
-									email: emailWorker.isRunning(),
-									notification: notificationWorker.isRunning(),
-								},
-							},
-							{ status: isShuttingDown ? 503 : 200 }
-						);
+						return handleWorkerLivenessRequest();
 					}
 
 					if (pathname === "/readyz") {
