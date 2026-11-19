@@ -10,6 +10,8 @@ import {
 	createWorkspaceAssistantAgent,
 	createWorkspaceMemoryOptions,
 	DEFAULT_AI_AGENT_ID,
+	deleteTenantMemoryData,
+	EnsureFinalResponseProcessor,
 	workspaceContextTool,
 	workspaceFilesTool,
 	workspaceMembersTool,
@@ -99,11 +101,17 @@ describe("@workspace/ai-core contracts", () => {
 		});
 		expect(valid.success).toBe(true);
 
-		const invalidThreadId = aiChatRequestSchema.safeParse({
+		const customThreadId = aiChatRequestSchema.safeParse({
 			id: "thread_1",
 			messages: [{ parts: [{ text: "Hi", type: "text" }], role: "user" }],
 		});
-		expect(invalidThreadId.success).toBe(false);
+		expect(customThreadId.success).toBe(true);
+
+		const blankThreadId = aiChatRequestSchema.safeParse({
+			id: "   ",
+			messages: [{ parts: [{ text: "Hi", type: "text" }], role: "user" }],
+		});
+		expect(blankThreadId.success).toBe(false);
 
 		const emptyMessages = aiChatRequestSchema.safeParse({
 			messages: [],
@@ -558,13 +566,13 @@ describe("guardrails, working memory, and createMastraRuntime", () => {
 	test("configures input/output guardrail processors, generateTitle, and dynamic storage tool gating", async () => {
 		const inputProcessors = createInputGuardrailProcessors();
 		const outputProcessors = createOutputGuardrailProcessors();
-		expect(inputProcessors).toHaveLength(2);
+		expect(inputProcessors).toHaveLength(3);
 		expect(outputProcessors).toHaveLength(1);
 
 		const memoryWithVectors = createWorkspaceMemoryOptions({
 			enableSemanticRecall: true,
 		});
-		expect(memoryWithVectors.generateTitle).toBe(true);
+		expect(memoryWithVectors.generateTitle).toEqual({ emitEvent: true });
 		expect(memoryWithVectors.workingMemory?.enabled).toBe(true);
 		expect(memoryWithVectors.workingMemory?.scope).toBe("resource");
 		expect(memoryWithVectors.semanticRecall).toBeTruthy();
@@ -572,7 +580,7 @@ describe("guardrails, working memory, and createMastraRuntime", () => {
 		const memoryThreadOnly = createWorkspaceMemoryOptions({
 			enableSemanticRecall: false,
 		});
-		expect(memoryThreadOnly.generateTitle).toBe(true);
+		expect(memoryThreadOnly.generateTitle).toEqual({ emitEvent: true });
 		expect(memoryThreadOnly.workingMemory?.enabled).toBe(true);
 		expect(memoryThreadOnly.semanticRecall).toBe(false);
 
@@ -674,5 +682,77 @@ describe("guardrails, working memory, and createMastraRuntime", () => {
 		expect(runtime.mastra.getWorkflowById("workspace-brief")).toBeDefined();
 
 		await expect(runtime.close()).resolves.toBeUndefined();
+	});
+
+	test("EnsureFinalResponseProcessor forces toolChoice none only on final step", () => {
+		const processor = new EnsureFinalResponseProcessor(5);
+		const baseArgs = {
+			abort: (() => {
+				throw new Error("abort should not be called");
+			}) as never,
+			messageList: {} as never,
+			messages: [],
+			model: {} as never,
+			retryCount: 0,
+			state: {},
+			stepNumber: 0,
+			steps: [],
+			systemMessages: [],
+		};
+
+		expect(
+			processor.processInputStep({ ...baseArgs, stepNumber: 0 })
+		).toBeUndefined();
+		expect(
+			processor.processInputStep({ ...baseArgs, stepNumber: 3 })
+		).toBeUndefined();
+		expect(processor.processInputStep({ ...baseArgs, stepNumber: 4 })).toEqual({
+			toolChoice: "none",
+		});
+	});
+
+	test("deleteTenantMemoryData deletes all paginated threads for target users", async () => {
+		const deletedIds: string[] = [];
+		const listThreadsMock = mock(({ page }: { page: number }) =>
+			Promise.resolve(
+				page === 0
+					? {
+							hasMore: false,
+							threads: [{ id: "thread_a" }, { id: "thread_b" }],
+						}
+					: { hasMore: false, threads: [] }
+			)
+		);
+		const deleteThreadMock = mock((id: string) => {
+			deletedIds.push(id);
+			return Promise.resolve();
+		});
+
+		const runtimeWithoutMemory = { memory: undefined } as unknown as ReturnType<
+			typeof createMastraRuntime
+		>;
+		expect(
+			await deleteTenantMemoryData({
+				organizationId: "org_1",
+				runtime: runtimeWithoutMemory,
+				userIds: ["user_1"],
+			})
+		).toBe(0);
+
+		const runtimeWithMemory = {
+			memory: {
+				deleteThread: deleteThreadMock,
+				listThreads: listThreadsMock,
+			},
+		} as unknown as ReturnType<typeof createMastraRuntime>;
+
+		const count = await deleteTenantMemoryData({
+			organizationId: "org_1",
+			runtime: runtimeWithMemory,
+			userIds: ["user_1"],
+		});
+
+		expect(count).toBe(2);
+		expect(deletedIds).toEqual(["thread_a", "thread_b"]);
 	});
 });

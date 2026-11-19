@@ -204,10 +204,9 @@ export type AiChatUserMessage = z.infer<typeof aiChatUserMessageSchema>;
 
 export const aiChatRequestSchema = z.object({
 	agentId: z.string().trim().min(1).max(128).optional(),
-	id: z.string().uuid().optional(),
-	messageId: z.string().trim().min(1).max(128).optional(),
+	id: z.string().trim().min(1).max(128).optional(),
 	messages: z.array(aiChatUserMessageSchema).min(1).max(1),
-	trigger: z.enum(["submit-message", "regenerate-message"]).optional(),
+	trigger: z.literal("submit-message").optional(),
 });
 
 export type AiChatRequest = z.infer<typeof aiChatRequestSchema>;

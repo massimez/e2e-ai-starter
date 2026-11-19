@@ -47,7 +47,7 @@ export function createWorkspaceAssistantAgent(
 			const allowedTools = canReadStorage
 				? "workspaceContextTool, workspaceMembersTool, or workspaceFilesTool"
 				: "workspaceContextTool or workspaceMembersTool";
-			const groundingLine = `Always ground answers about the user's current workspace, membership role, team roster, or committed files by calling ${allowedTools} instead of guessing.`;
+			const groundingLine = `When tools are available, ground answers about the user's current workspace, membership role, team roster, or committed files by calling ${allowedTools} instead of guessing.`;
 
 			if (organizationId && userRole) {
 				return `${BASE_INSTRUCTIONS} ${groundingLine} Active context: organizationId=${organizationId}, callerRole=${userRole}.`;

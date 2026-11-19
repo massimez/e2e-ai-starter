@@ -7,6 +7,7 @@ export {
 export {
 	createInputGuardrailProcessors,
 	createOutputGuardrailProcessors,
+	EnsureFinalResponseProcessor,
 } from "./mastra/processors/guardrails";
 export { workspaceContextTool } from "./mastra/tools/workspace-context-tool";
 export { workspaceFilesTool } from "./mastra/tools/workspace-files-tool";
@@ -15,6 +16,7 @@ export { workspaceBriefWorkflow } from "./mastra/workflows/workspace-brief-workf
 export {
 	createMastraRuntime,
 	createTenantRequestContext,
+	deleteTenantMemoryData,
 	type MastraRuntime,
 	type MastraRuntimeConfig,
 } from "./runtime";

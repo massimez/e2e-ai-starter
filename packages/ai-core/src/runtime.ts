@@ -1,13 +1,10 @@
 import type { Agent } from "@mastra/core/agent";
+import { ConsoleLogger, LogLevel, noopLogger } from "@mastra/core/logger";
 import { Mastra } from "@mastra/core/mastra";
 import { RequestContext } from "@mastra/core/request-context";
 import { Memory } from "@mastra/memory";
-import {
-	MastraStorageExporter,
-	Observability,
-	SensitiveDataFilter,
-} from "@mastra/observability";
-import { PgVector, PostgresStore } from "@mastra/pg";
+import { MastraStorageExporter, Observability } from "@mastra/observability";
+import { PgVector, PostgresStoreVNext } from "@mastra/pg";
 import {
 	AI_CONTEXT_KEYS,
 	buildEmbeddingProviderOptions,
@@ -16,6 +13,7 @@ import {
 	DEFAULT_EMBEDDING_DIMENSIONS,
 	DEFAULT_EMBEDDING_MODEL,
 	DEFAULT_MASTRA_DB_SCHEMA,
+	formatTenantMemoryResourceId,
 	type TenantAiContext,
 	tenantAiContextSchema,
 } from "./contracts";
@@ -27,6 +25,7 @@ import { workspaceMembersTool } from "./mastra/tools/workspace-members-tool";
 import { workspaceBriefWorkflow } from "./mastra/workflows/workspace-brief-workflow";
 
 export interface MastraRuntimeConfig {
+	databaseSsl?: boolean;
 	databaseUrl?: string;
 	defaultModel?: string;
 	disableStorageInit?: boolean;
@@ -34,6 +33,7 @@ export interface MastraRuntimeConfig {
 	embeddingModel?: string;
 	/** Enable pgvector semantic recall (requires an API key for the embedding provider). Defaults to true. */
 	enableSemanticRecall?: boolean;
+	logLevel?: "debug" | "info" | "warn" | "error";
 	/** Maximum connections for the shared Mastra PostgreSQL pool. Defaults to 5. */
 	maxPoolConnections?: number;
 	schemaName?: string;
@@ -45,8 +45,33 @@ export interface MastraRuntime {
 	mastra: Mastra;
 	memory: Memory | undefined;
 	model: string;
-	storage: PostgresStore | undefined;
+	storage: PostgresStoreVNext | undefined;
 	vector: PgVector | undefined;
+}
+
+function resolveMastraSslConfig(
+	databaseUrl: string,
+	databaseSsl?: boolean
+): { rejectUnauthorized: boolean } | undefined {
+	if (databaseSsl || databaseUrl.includes("sslmode=require")) {
+		return { rejectUnauthorized: true };
+	}
+	return undefined;
+}
+
+function resolveMastraLogLevel(
+	level: MastraRuntimeConfig["logLevel"]
+): (typeof LogLevel)[keyof typeof LogLevel] {
+	switch (level) {
+		case "debug":
+			return LogLevel.DEBUG;
+		case "warn":
+			return LogLevel.WARN;
+		case "error":
+			return LogLevel.ERROR;
+		default:
+			return LogLevel.INFO;
+	}
 }
 
 /**
@@ -76,9 +101,54 @@ export function createTenantRequestContext(
 	return requestContext;
 }
 
+async function deleteThreadsForResource(
+	memory: Memory,
+	resourceId: string
+): Promise<number> {
+	const page = await memory.listThreads({
+		filter: { resourceId },
+		page: 0,
+		perPage: 100,
+	});
+	if (page.threads.length === 0) {
+		return 0;
+	}
+	await Promise.all(
+		page.threads.map((thread) => memory.deleteThread(thread.id))
+	);
+	const remaining = page.hasMore
+		? await deleteThreadsForResource(memory, resourceId)
+		: 0;
+	return page.threads.length + remaining;
+}
+
 /**
- * Instantiates Mastra with PostgreSQL/pgvector persistence (in an isolated schema),
- * provider-agnostic agent defaults (Google Gemini unless overridden), semantic recall memory, and trace redaction.
+ * Deletes persisted Mastra threads owned by the specified `(organizationId, userId)` pairs.
+ */
+export async function deleteTenantMemoryData(params: {
+	organizationId: string;
+	runtime: MastraRuntime;
+	userIds: readonly string[];
+}): Promise<number> {
+	const { organizationId, runtime, userIds } = params;
+	if (!runtime.memory || userIds.length === 0) {
+		return 0;
+	}
+	const { memory } = runtime;
+	const counts = await Promise.all(
+		userIds.map((userId) =>
+			deleteThreadsForResource(
+				memory,
+				formatTenantMemoryResourceId(organizationId, userId)
+			)
+		)
+	);
+	return counts.reduce((sum, count) => sum + count, 0);
+}
+
+/**
+ * Instantiates Mastra with PostgreSQL vNext storage/observability & pgvector persistence
+ * (isolated schema), provider-agnostic agent defaults, semantic recall memory, and trace context.
  */
 export function createMastraRuntime(
 	config: MastraRuntimeConfig = {}
@@ -89,29 +159,34 @@ export function createMastraRuntime(
 		config.embeddingDimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
 	const schemaName = config.schemaName ?? DEFAULT_MASTRA_DB_SCHEMA;
 
-	let storage: PostgresStore | undefined;
+	let storage: PostgresStoreVNext | undefined;
 	let vector: PgVector | undefined;
 	let memory: Memory | undefined;
 
 	if (config.databaseUrl) {
 		const maxPoolConnections = config.maxPoolConnections ?? 5;
+		const ssl = resolveMastraSslConfig(config.databaseUrl, config.databaseSsl);
 		vector = new PgVector({
 			connectionString: config.databaseUrl,
 			disableInit: config.disableStorageInit,
 			id: "mastra-pg-vector",
 			pgPoolOptions: {
+				connectionTimeoutMillis: 10_000,
 				max: maxPoolConnections,
+				...(ssl ? { ssl } : {}),
 			},
 			schemaName,
 		});
-		storage = new PostgresStore({
+		storage = new PostgresStoreVNext({
 			disableInit: config.disableStorageInit,
 			id: "mastra-pg-store",
+			observability: {
+				pool: vector.pool,
+				schemaName,
+			},
 			pool: vector.pool,
 			schemaName,
 		});
-		// Embedders are resolved eagerly and throw without a provider API key, so
-		// semantic recall is only wired when the caller confirms one is configured.
 		const enableSemanticRecall = config.enableSemanticRecall ?? true;
 		memory = new Memory({
 			...(enableSemanticRecall
@@ -140,23 +215,34 @@ export function createMastraRuntime(
 		[DEFAULT_AI_AGENT_ID]: workspaceAssistant,
 	};
 
-	// Mastra requires at least one exporter, so tracing is only enabled when
-	// PostgreSQL storage is active and background storage init is not disabled.
 	const observability =
 		storage && !config.disableStorageInit
 			? new Observability({
 					configs: {
 						default: {
 							exporters: [new MastraStorageExporter()],
+							requestContextKeys: [
+								AI_CONTEXT_KEYS.organizationId,
+								AI_CONTEXT_KEYS.userId,
+								AI_CONTEXT_KEYS.userRole,
+								AI_CONTEXT_KEYS.requestId,
+							],
 							serviceName: "e2e-ai-starter",
-							spanOutputProcessors: [new SensitiveDataFilter()],
 						},
 					},
 				})
 			: undefined;
 
+	const logger = config.disableStorageInit
+		? noopLogger
+		: new ConsoleLogger({
+				level: resolveMastraLogLevel(config.logLevel),
+				name: "mastra",
+			});
+
 	const mastra = new Mastra({
 		agents,
+		logger,
 		...(storage ? { storage } : {}),
 		...(observability ? { observability } : {}),
 		tools: {

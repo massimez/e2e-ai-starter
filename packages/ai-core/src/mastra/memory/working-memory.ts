@@ -13,7 +13,9 @@ export function createWorkspaceMemoryOptions({
 	enableSemanticRecall,
 }: WorkspaceMemoryOptions): MemoryConfig {
 	return {
-		generateTitle: true,
+		generateTitle: {
+			emitEvent: true,
+		},
 		messageHistory: {
 			maxTokens: 8000,
 		},
