@@ -29,7 +29,14 @@ describe("onboarding redirect safety", () => {
 describe("proxy onboarding gate protection and CSP", () => {
 	test("protects both /dashboard/:path* and /onboarding and sets CSP header", () => {
 		expect(proxyConfig.matcher).toEqual([
-			"/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+			{
+				missing: [
+					{ key: "next-router-prefetch", type: "header" },
+					{ key: "purpose", type: "header", value: "prefetch" },
+				],
+				source:
+					"/((?!api|_next/static|_next/image|favicon.ico|sw.js|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml)$).*)",
+			},
 		]);
 
 		const unauthOnboardingResponse = proxy(

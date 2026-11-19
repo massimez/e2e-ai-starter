@@ -1,6 +1,6 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@workspace/ui/components/badge";
 import { Button } from "@workspace/ui/components/button";
 import {
@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense } from "react";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/app-header";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -43,28 +43,16 @@ interface InvitationSummary {
 
 async function fetchInvitationDetails(
 	invitationId: string
-): Promise<{ data?: InvitationSummary; error?: string }> {
-	try {
-		const res = await authClient.organization.getInvitation({
-			query: { id: invitationId },
-		});
-		if (res.error) {
-			return {
-				error:
-					res.error.message || "Invitation could not be found or has expired.",
-			};
-		}
-		return {
-			data: res.data ? (res.data as unknown as InvitationSummary) : undefined,
-		};
-	} catch (error) {
-		return {
-			error:
-				error instanceof Error
-					? error.message
-					: "Failed to load invitation details",
-		};
+): Promise<InvitationSummary> {
+	const res = await authClient.organization.getInvitation({
+		query: { id: invitationId },
+	});
+	if (res.error || !res.data) {
+		throw new Error(
+			res.error?.message || "Invitation could not be found or has expired."
+		);
 	}
+	return res.data as unknown as InvitationSummary;
 }
 
 function AcceptInvitationContent() {
@@ -77,52 +65,21 @@ function AcceptInvitationContent() {
 	const invitationId =
 		searchParams.get("invitationId") || searchParams.get("id") || "";
 
-	const [invitation, setInvitation] = useState<InvitationSummary | null>(null);
-	const [loadError, setLoadError] = useState<string | null>(null);
-	const [isLoadingInvite, setIsLoadingInvite] = useState(false);
-	const [isProcessing, setIsProcessing] = useState(false);
+	const invitationQuery = useQuery<InvitationSummary, Error>({
+		enabled: Boolean(invitationId && session?.user),
+		queryFn: () => fetchInvitationDetails(invitationId),
+		queryKey: ["invitation", invitationId],
+		retry: false,
+	});
 
-	useEffect(() => {
-		if (!(invitationId && session?.user)) {
-			return;
-		}
-
-		let cancelled = false;
-		async function loadInvitation() {
-			setIsLoadingInvite(true);
-			setLoadError(null);
-			const result = await fetchInvitationDetails(invitationId);
-			if (cancelled) {
-				return;
-			}
-			if (result.error) {
-				setLoadError(result.error);
-			} else if (result.data) {
-				setInvitation(result.data);
-			}
-			setIsLoadingInvite(false);
-		}
-
-		void loadInvitation();
-		return () => {
-			cancelled = true;
-		};
-	}, [invitationId, session?.user]);
-
-	const handleAccept = async () => {
-		if (!invitationId) {
-			return;
-		}
-		setIsProcessing(true);
-		try {
+	const acceptMutation = useMutation<void, Error>({
+		mutationFn: async () => {
 			const res = await authClient.organization.acceptInvitation({
 				invitationId,
 			});
 			if (res.error) {
-				toast.error(res.error.message || "Failed to accept invitation");
-				return;
+				throw new Error(res.error.message || "Failed to accept invitation");
 			}
-
 			const acceptedOrgId = (
 				res.data as { invitation?: { organizationId?: string } } | null
 			)?.invitation?.organizationId;
@@ -131,42 +88,53 @@ function AcceptInvitationContent() {
 					organizationId: acceptedOrgId,
 				});
 			}
-
 			await syncOrganizationClientState(queryClient, acceptedOrgId);
+		},
+		onError: (error) => {
+			toast.error(error.message || "Failed to accept invitation");
+		},
+		onSuccess: () => {
 			toast.success("Invitation accepted! Welcome to the workspace.");
 			router.push("/dashboard");
 			router.refresh();
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to accept invitation"
-			);
-		} finally {
-			setIsProcessing(false);
-		}
-	};
+		},
+	});
 
-	const handleDecline = async () => {
-		if (!invitationId) {
-			return;
-		}
-		setIsProcessing(true);
-		try {
+	const declineMutation = useMutation<void, Error>({
+		mutationFn: async () => {
 			const res = await authClient.organization.rejectInvitation({
 				invitationId,
 			});
 			if (res.error) {
-				toast.error(res.error.message || "Failed to decline invitation");
-				return;
+				throw new Error(res.error.message || "Failed to decline invitation");
 			}
+		},
+		onError: (error) => {
+			toast.error(error.message || "Failed to decline invitation");
+		},
+		onSuccess: () => {
 			toast.info("Invitation declined.");
 			router.push("/");
-		} catch (error) {
-			toast.error(
-				error instanceof Error ? error.message : "Failed to decline invitation"
-			);
-		} finally {
-			setIsProcessing(false);
+		},
+	});
+
+	const invitation = invitationQuery.data ?? null;
+	const loadError = invitationQuery.error?.message ?? null;
+	const isLoadingInvite = Boolean(session?.user) && invitationQuery.isPending;
+	const isProcessing = acceptMutation.isPending || declineMutation.isPending;
+
+	const handleAccept = () => {
+		if (!invitationId || isProcessing) {
+			return;
 		}
+		acceptMutation.mutate();
+	};
+
+	const handleDecline = () => {
+		if (!invitationId || isProcessing) {
+			return;
+		}
+		declineMutation.mutate();
 	};
 
 	if (!invitationId) {

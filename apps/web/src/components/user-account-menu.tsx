@@ -14,7 +14,13 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@workspace/ui/components/dropdown-menu";
-import { LayoutDashboard, LogOut, Settings, User } from "lucide-react";
+import {
+	LayoutDashboard,
+	LogOut,
+	Settings,
+	Sparkles,
+	User,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -108,6 +114,15 @@ export function UserAccountMenu({
 					>
 						<LayoutDashboard className="text-muted-foreground h-4 w-4" />
 						Dashboard
+					</Link>
+				</DropdownMenuItem>
+				<DropdownMenuItem asChild>
+					<Link
+						className="flex cursor-pointer items-center gap-2.5 rounded-lg p-2 text-sm"
+						href="/dashboard/ai"
+					>
+						<Sparkles className="text-muted-foreground h-4 w-4" />
+						AI Assistant
 					</Link>
 				</DropdownMenuItem>
 				<DropdownMenuItem asChild>

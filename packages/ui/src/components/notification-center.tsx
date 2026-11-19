@@ -16,6 +16,7 @@ import { Button } from "./button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuItem,
 	DropdownMenuLabel,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
@@ -302,14 +303,14 @@ export function NotificationCenter({
 
 			return (
 				<div
-					className={`hover:bg-muted/50 flex items-start gap-2 p-3 transition-colors ${
+					className={`hover:bg-muted/50 flex items-start gap-2 p-1.5 transition-colors ${
 						n.isRead ? "" : "bg-muted/20"
 					}`}
 					key={n.id}
 				>
-					<button
-						className="focus-visible:ring-ring flex min-w-0 flex-1 cursor-pointer flex-col items-start gap-1 rounded-sm text-left focus-visible:ring-2 focus-visible:outline-hidden"
-						onClick={() => {
+					<DropdownMenuItem
+						className="flex min-w-0 flex-1 cursor-pointer flex-col items-start gap-1 rounded-md p-2 text-left"
+						onSelect={() => {
 							if (!n.isRead) {
 								void handleMarkAsRead(n.id);
 							}
@@ -317,7 +318,6 @@ export function NotificationCenter({
 								navigateTo(safeLink);
 							}
 						}}
-						type="button"
 					>
 						<div className="flex w-full items-center gap-1.5">
 							<Badge
@@ -346,12 +346,12 @@ export function NotificationCenter({
 								View details <ExternalLink className="ml-1 h-2.5 w-2.5" />
 							</span>
 						) : null}
-					</button>
+					</DropdownMenuItem>
 
 					{!n.isRead && (
 						<Button
 							aria-label="Mark as read"
-							className="text-muted-foreground hover:text-foreground size-8 shrink-0 p-0"
+							className="text-muted-foreground hover:text-foreground mt-1 size-8 shrink-0 p-0"
 							onClick={() => void handleMarkAsRead(n.id)}
 							size="sm"
 							type="button"
@@ -421,15 +421,12 @@ export function NotificationCenter({
 
 				<DropdownMenuSeparator className="m-0" />
 				<div className="p-2 text-center">
-					<Button
-						className="w-full text-xs"
-						onClick={() => navigateTo("/dashboard/settings/notifications")}
-						size="sm"
-						type="button"
-						variant="ghost"
+					<DropdownMenuItem
+						className="w-full cursor-pointer justify-center text-xs font-medium"
+						onSelect={() => navigateTo("/dashboard/settings/notifications")}
 					>
 						View notification settings
-					</Button>
+					</DropdownMenuItem>
 				</div>
 			</DropdownMenuContent>
 		</DropdownMenu>

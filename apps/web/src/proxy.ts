@@ -136,6 +136,13 @@ export function proxy(request: NextRequest) {
 
 export const config = {
 	matcher: [
-		"/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+		{
+			missing: [
+				{ key: "next-router-prefetch", type: "header" },
+				{ key: "purpose", type: "header", value: "prefetch" },
+			],
+			source:
+				"/((?!api|_next/static|_next/image|favicon.ico|sw.js|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml)$).*)",
+		},
 	],
 };

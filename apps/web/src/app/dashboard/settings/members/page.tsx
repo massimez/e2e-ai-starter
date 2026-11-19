@@ -97,6 +97,11 @@ export default function MembersSettingsPage() {
 			m.user.email?.toLowerCase().includes(query) ||
 			m.role?.toLowerCase().includes(query)
 	);
+	const filteredInvitations = invitations.filter(
+		(inv) =>
+			inv.email.toLowerCase().includes(query) ||
+			inv.role.toLowerCase().includes(query)
+	);
 
 	const handleInvite = async (input: { email: string; role: string }) => {
 		if (!activeOrgId) {
@@ -255,7 +260,7 @@ export default function MembersSettingsPage() {
 
 							<InvitationsTable
 								canManageMembers={canManageMembers}
-								invitations={invitations}
+								invitations={filteredInvitations}
 								onRevoke={setInvitationToCancel}
 								roleNameBySlug={roleNameBySlug}
 							/>

@@ -18,8 +18,8 @@ export default function GlobalError({
 			<body
 				style={{
 					alignItems: "center",
-					backgroundColor: "#ffffff",
-					color: "#09090b",
+					backgroundColor: "var(--ge-bg)",
+					color: "var(--ge-fg)",
 					colorScheme: "light dark",
 					display: "flex",
 					flexDirection: "column",
@@ -32,10 +32,32 @@ export default function GlobalError({
 					textAlign: "center",
 				}}
 			>
+				<style>{`
+					:root {
+						--ge-bg: #ffffff;
+						--ge-fg: #09090b;
+						--ge-card: #fafafa;
+						--ge-border: #e4e4e7;
+						--ge-muted: #52525b;
+						--ge-btn-bg: #18181b;
+						--ge-btn-fg: #fafafa;
+					}
+					@media (prefers-color-scheme: dark) {
+						:root {
+							--ge-bg: #09090b;
+							--ge-fg: #fafafa;
+							--ge-card: #18181b;
+							--ge-border: #27272a;
+							--ge-muted: #a1a1aa;
+							--ge-btn-bg: #fafafa;
+							--ge-btn-fg: #09090b;
+						}
+					}
+				`}</style>
 				<main
 					style={{
-						backgroundColor: "#fafafa",
-						border: "1px solid #e4e4e7",
+						backgroundColor: "var(--ge-card)",
+						border: "1px solid var(--ge-border)",
 						borderRadius: "16px",
 						boxShadow: "0 1px 3px rgba(0, 0, 0, 0.08)",
 						maxWidth: "420px",
@@ -55,7 +77,7 @@ export default function GlobalError({
 					</h1>
 					<p
 						style={{
-							color: "#52525b",
+							color: "var(--ge-muted)",
 							fontSize: "14px",
 							lineHeight: 1.5,
 							margin: "0 0 24px",
@@ -66,10 +88,10 @@ export default function GlobalError({
 					<button
 						onClick={() => reset()}
 						style={{
-							backgroundColor: "#18181b",
+							backgroundColor: "var(--ge-btn-bg)",
 							border: "none",
 							borderRadius: "8px",
-							color: "#fafafa",
+							color: "var(--ge-btn-fg)",
 							cursor: "pointer",
 							fontSize: "14px",
 							fontWeight: 500,

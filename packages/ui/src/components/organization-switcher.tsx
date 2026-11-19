@@ -11,6 +11,7 @@ import {
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { sanitizeSlug } from "../lib/utils";
+import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { Button } from "./button";
 import {
 	Dialog,
@@ -135,13 +136,24 @@ export function OrganizationSwitcher({
 						className="group border-border/60 bg-muted/30 hover:border-primary/40 hover:bg-muted/60 focus-visible:ring-ring flex h-9 cursor-pointer items-center gap-2 rounded-lg border px-2.5 text-xs font-medium shadow-2xs transition-all duration-200 focus-visible:ring-2 focus-visible:outline-hidden sm:gap-2.5 sm:px-3 sm:text-sm"
 						type="button"
 					>
-						<div className="from-primary/20 via-primary/10 to-primary/5 text-primary flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-linear-to-br text-[10px] font-bold transition-transform group-hover:scale-105">
-							{activeOrg ? (
-								activeOrg.name.charAt(0).toUpperCase()
-							) : (
+						{activeOrg ? (
+							<Avatar className="h-5 w-5 shrink-0 rounded-md transition-transform group-hover:scale-105">
+								{activeOrg.logo ? (
+									<AvatarImage
+										alt={activeOrg.name}
+										className="object-cover"
+										src={activeOrg.logo}
+									/>
+								) : null}
+								<AvatarFallback className="from-primary/20 via-primary/10 to-primary/5 text-primary rounded-md bg-linear-to-br text-[10px] font-bold">
+									{activeOrg.name.charAt(0).toUpperCase()}
+								</AvatarFallback>
+							</Avatar>
+						) : (
+							<div className="from-primary/20 via-primary/10 to-primary/5 text-primary flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-linear-to-br text-[10px] font-bold transition-transform group-hover:scale-105">
 								<Building2 className="h-3 w-3" />
-							)}
-						</div>
+							</div>
+						)}
 						<span className="text-foreground max-w-24 truncate sm:max-w-[150px]">
 							{activeOrg ? activeOrg.name : "Select Workspace"}
 						</span>
@@ -175,9 +187,18 @@ export function OrganizationSwitcher({
 										onClick={() => handleSelect(org.id)}
 									>
 										<div className="flex items-center gap-2.5 truncate">
-											<div className="bg-primary/10 text-primary flex h-5 w-5 items-center justify-center rounded-md text-[10px] font-bold">
-												{org.name.charAt(0).toUpperCase()}
-											</div>
+											<Avatar className="h-5 w-5 shrink-0 rounded-md">
+												{org.logo ? (
+													<AvatarImage
+														alt={org.name}
+														className="object-cover"
+														src={org.logo}
+													/>
+												) : null}
+												<AvatarFallback className="bg-primary/10 text-primary rounded-md text-[10px] font-bold">
+													{org.name.charAt(0).toUpperCase()}
+												</AvatarFallback>
+											</Avatar>
 											<span className="truncate">{org.name}</span>
 										</div>
 										{isSelected && (
