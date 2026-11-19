@@ -16,14 +16,12 @@ import {
 	type WorkspaceBriefResponse,
 	workspaceBriefResponseSchema,
 } from "@workspace/ai-core";
-import { db } from "@workspace/db";
-import { member } from "@workspace/db/schema";
 import { logError, logWarning } from "@workspace/shared/logger";
 import { isOrgAdminRole } from "@workspace/shared/permissions";
 import { createUIMessageStreamResponse } from "ai";
-import { and, eq } from "drizzle-orm";
 import { auth } from "../../lib/auth/index";
 import { AppError, ForbiddenError, NotFoundError } from "../../lib/errors";
+import { type AiRepository, drizzleAiRepository } from "./repository";
 import {
 	assertModelProviderConfigured,
 	cleanupTenantAiMemory,
@@ -70,20 +68,14 @@ function assertOwnedThreadResource(params: {
 
 async function resolveMemberRole(
 	organizationId: string,
-	userId: string
+	userId: string,
+	repository: AiRepository
 ): Promise<string> {
-	const [membership] = await db
-		.select({ role: member.role })
-		.from(member)
-		.where(
-			and(eq(member.organizationId, organizationId), eq(member.userId, userId))
-		)
-		.limit(1);
-
-	if (!membership) {
+	const role = await repository.findMemberRole(organizationId, userId);
+	if (!role) {
 		throw new ForbiddenError("Active workspace membership is required");
 	}
-	return membership.role;
+	return role;
 }
 
 function serializeThread(thread: StorageThreadType): AiThreadSummary {
@@ -143,16 +135,20 @@ async function checkAiOrgPermission(params: {
 	}
 }
 
-async function resolveTenantAiContext(params: {
-	headers?: Headers;
-	modelId?: string;
-	organizationId: string;
-	requestId?: string;
-	userId: string;
-}) {
+async function resolveTenantAiContext(
+	params: {
+		headers?: Headers;
+		modelId?: string;
+		organizationId: string;
+		requestId?: string;
+		userId: string;
+	},
+	repository: AiRepository
+) {
 	const userRole = await resolveMemberRole(
 		params.organizationId,
-		params.userId
+		params.userId,
+		repository
 	);
 	const headers = params.headers ?? new Headers();
 	const [canReadStorage, canUpdateOrganization] = await Promise.all([
@@ -231,7 +227,8 @@ export interface CreateAiChatParams {
 }
 
 export async function createAiChatResponse(
-	params: CreateAiChatParams
+	params: CreateAiChatParams,
+	repository: AiRepository = drizzleAiRepository
 ): Promise<Response> {
 	const selectedModel = assertModelProviderConfigured(params.input.modelId);
 
@@ -241,13 +238,16 @@ export async function createAiChatResponse(
 		throw new NotFoundError(`AI agent '${agentId}' was not found`);
 	}
 
-	const requestContext = await resolveTenantAiContext({
-		headers: params.headers,
-		modelId: selectedModel,
-		organizationId: params.organizationId,
-		requestId: params.requestId,
-		userId: params.userId,
-	});
+	const requestContext = await resolveTenantAiContext(
+		{
+			headers: params.headers,
+			modelId: selectedModel,
+			organizationId: params.organizationId,
+			requestId: params.requestId,
+			userId: params.userId,
+		},
+		repository
+	);
 	await ensureStorageInitialized(runtime);
 
 	const resourceId = formatTenantMemoryResourceId(
@@ -423,18 +423,22 @@ export interface RunWorkspaceBriefParams {
 }
 
 export async function runWorkspaceBrief(
-	params: RunWorkspaceBriefParams
+	params: RunWorkspaceBriefParams,
+	repository: AiRepository = drizzleAiRepository
 ): Promise<WorkspaceBriefResponse> {
 	const selectedModel = assertModelProviderConfigured(params.input.modelId);
 
 	const runtime = getAiRuntime();
-	const requestContext = await resolveTenantAiContext({
-		headers: params.headers,
-		modelId: selectedModel,
-		organizationId: params.organizationId,
-		requestId: params.requestId,
-		userId: params.userId,
-	});
+	const requestContext = await resolveTenantAiContext(
+		{
+			headers: params.headers,
+			modelId: selectedModel,
+			organizationId: params.organizationId,
+			requestId: params.requestId,
+			userId: params.userId,
+		},
+		repository
+	);
 	await ensureStorageInitialized(runtime);
 
 	const workflow = runtime.mastra.getWorkflowById("workspace-brief");
@@ -469,13 +473,21 @@ export async function runWorkspaceBrief(
 	return workspaceBriefResponseSchema.parse(result.result);
 }
 
-export const aiService = {
-	cleanupTenantAiMemory,
-	closeAiRuntime,
-	createAiChatResponse,
-	deleteAiThread,
-	getAiThread,
-	listAiAgents,
-	listAiThreads,
-	runWorkspaceBrief,
-};
+export function createAiService(
+	repository: AiRepository = drizzleAiRepository
+) {
+	return {
+		cleanupTenantAiMemory,
+		closeAiRuntime,
+		createAiChatResponse: (params: CreateAiChatParams) =>
+			createAiChatResponse(params, repository),
+		deleteAiThread,
+		getAiThread,
+		listAiAgents,
+		listAiThreads,
+		runWorkspaceBrief: (params: RunWorkspaceBriefParams) =>
+			runWorkspaceBrief(params, repository),
+	};
+}
+
+export const aiService = createAiService();
