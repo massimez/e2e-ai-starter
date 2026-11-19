@@ -154,7 +154,7 @@ export function OrganizationSwitcher({
 								<Building2 className="h-3 w-3" />
 							</div>
 						)}
-						<span className="text-foreground max-w-24 truncate sm:max-w-[150px]">
+						<span className="text-foreground max-w-24 truncate sm:max-w-37.5">
 							{activeOrg ? activeOrg.name : "Select Workspace"}
 						</span>
 						<ChevronsUpDown className="text-muted-foreground group-hover:text-foreground ml-0.5 h-3.5 w-3.5 opacity-60 transition-colors" />
