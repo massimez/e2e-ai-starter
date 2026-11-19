@@ -4,14 +4,14 @@ import {
 	sanitizeRequestPath,
 } from "@workspace/shared/logger";
 import { APIError } from "better-auth/api";
-import { type Context, Hono } from "hono";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { validator } from "hono/validator";
-import { type ZodError, type ZodSchema, z } from "zod";
+import { z } from "zod";
 import { env } from "../env";
 import { httpLoggerMiddleware } from "../middleware/http-logger";
 import { requestIdMiddleware } from "../middleware/request-id";
@@ -81,7 +81,7 @@ export function createErrorResponse(
 	};
 }
 
-export function zodErrorToResponse(zodError: ZodError): ErrorResponse {
+export function zodErrorToResponse(zodError: z.ZodError): ErrorResponse {
 	return createErrorResponse(
 		"ValidationError",
 		"Validation failed",
@@ -93,26 +93,48 @@ export function zodErrorToResponse(zodError: ZodError): ErrorResponse {
 	);
 }
 
+type RpcValidatorInput<
+	Target extends "json" | "query" | "param",
+	Input,
+> = Target extends "json" ? Input : { [K in keyof Input]: string | string[] };
+
 function zodValidator<
 	Target extends "json" | "query" | "param",
-	T extends ZodSchema,
->(target: Target, schema: T) {
+	T extends z.ZodType,
+>(
+	target: Target,
+	schema: T
+): MiddlewareHandler<
+	AppEnv,
+	string,
+	{
+		in: { [K in Target]: RpcValidatorInput<Target, z.input<T>> };
+		out: { [K in Target]: z.output<T> };
+	}
+> {
 	return validator(target, (value, c) => {
 		const parsed = schema.safeParse(value);
 		if (!parsed.success) {
 			return c.json(zodErrorToResponse(parsed.error), 400);
 		}
-		return parsed.data as z.infer<T>;
-	});
+		return parsed.data as z.output<T>;
+	}) as unknown as MiddlewareHandler<
+		AppEnv,
+		string,
+		{
+			in: { [K in Target]: RpcValidatorInput<Target, z.input<T>> };
+			out: { [K in Target]: z.output<T> };
+		}
+	>;
 }
 
-export const jsonValidator = <T extends ZodSchema>(schema: T) =>
+export const jsonValidator = <T extends z.ZodType>(schema: T) =>
 	zodValidator("json", schema);
 
-export const queryValidator = <T extends ZodSchema>(schema: T) =>
+export const queryValidator = <T extends z.ZodType>(schema: T) =>
 	zodValidator("query", schema);
 
-export const paramValidator = <T extends ZodSchema>(schema: T) =>
+export const paramValidator = <T extends z.ZodType>(schema: T) =>
 	zodValidator("param", schema);
 
 export function requireUser(c: Context<AppEnv>): User {
@@ -189,7 +211,7 @@ function resolveApiErrorPayload(err: Error): {
 
 	if (err instanceof z.ZodError || err.name === "ZodError") {
 		return {
-			body: zodErrorToResponse(err as unknown as ZodError),
+			body: zodErrorToResponse(err as unknown as z.ZodError),
 			status: 400,
 		};
 	}
@@ -235,20 +257,6 @@ export function createApp() {
 	app.use(httpLoggerMiddleware());
 	app.use(
 		"/api/*",
-		bodyLimit({
-			maxSize: DEFAULT_API_BODY_LIMIT_BYTES,
-			onError: (ctx) =>
-				ctx.json(
-					createErrorResponse(
-						"PayloadTooLarge",
-						"Request body exceeds 2MB limit"
-					),
-					413
-				),
-		})
-	);
-	app.use(
-		"/api/*",
 		cors({
 			allowHeaders: [
 				"Content-Type",
@@ -275,6 +283,20 @@ export function createApp() {
 				}
 				return null;
 			},
+		})
+	);
+	app.use(
+		"/api/*",
+		bodyLimit({
+			maxSize: DEFAULT_API_BODY_LIMIT_BYTES,
+			onError: (ctx) =>
+				ctx.json(
+					createErrorResponse(
+						"PayloadTooLarge",
+						"Request body exceeds 2MB limit"
+					),
+					413
+				),
 		})
 	);
 

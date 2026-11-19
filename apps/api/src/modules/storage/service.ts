@@ -15,6 +15,8 @@ import {
 	eq,
 	gt,
 	inArray,
+	isNull,
+	or,
 	type SQL,
 	sql,
 } from "drizzle-orm";
@@ -96,7 +98,7 @@ async function assertWithinStorageQuota(
 				and(
 					eq(uploads.organizationId, organizationId),
 					eq(uploads.status, "pending"),
-					gt(uploads.expiresAt, now)
+					or(isNull(uploads.expiresAt), gt(uploads.expiresAt, now))
 				)
 			),
 	]);
@@ -355,7 +357,7 @@ export async function commitUploads(params: {
 					organizationId,
 					inArray(uploads.fileKey, uniqueKeys),
 					eq(uploads.status, "pending"),
-					gt(uploads.expiresAt, now)
+					or(isNull(uploads.expiresAt), gt(uploads.expiresAt, now))
 				)
 			)
 			.orderBy(asc(uploads.id))
@@ -524,6 +526,14 @@ export async function getUploadSignedDownloadUrl(params: {
 	id: string;
 	organizationId: string;
 }) {
+	if (!hasConfiguredS3Credentials()) {
+		throw new AppError(
+			"Object storage credentials are not configured",
+			503,
+			"STORAGE_UNAVAILABLE"
+		);
+	}
+
 	const record = await requireCommittedUpload(params.organizationId, params.id);
 
 	const { contentType, disposition } = resolveFilePresentation(
@@ -531,13 +541,26 @@ export async function getUploadSignedDownloadUrl(params: {
 		record.contentType
 	);
 
-	const url = await presignGetObject({
-		bucket: record.bucket,
-		contentDisposition: disposition,
-		contentType,
-		expiresIn: STORAGE_CONFIG.DOWNLOAD_URL_EXPIRY_SECONDS,
-		fileKey: record.fileKey,
-	});
+	let url: string;
+	try {
+		url = await presignGetObject({
+			bucket: record.bucket,
+			contentDisposition: disposition,
+			contentType,
+			expiresIn: STORAGE_CONFIG.DOWNLOAD_URL_EXPIRY_SECONDS,
+			fileKey: record.fileKey,
+		});
+	} catch (error) {
+		logError("getUploadSignedDownloadUrl:S3Signer", error, {
+			fileKey: record.fileKey,
+			organizationId: params.organizationId,
+		});
+		throw new AppError("Failed to generate storage download URL", {
+			cause: error,
+			code: "STORAGE_UNAVAILABLE",
+			statusCode: 503,
+		});
+	}
 
 	return {
 		expiresIn: STORAGE_CONFIG.DOWNLOAD_URL_EXPIRY_SECONDS,
@@ -570,6 +593,9 @@ export async function getUploadFileStream(params: {
 			stream,
 		};
 	} catch (error) {
+		if (error instanceof AppError) {
+			throw error;
+		}
 		if (isS3NotFoundError(error)) {
 			throw new NotFoundError("File", { cause: error });
 		}

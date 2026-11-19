@@ -105,6 +105,8 @@ export class ForbiddenError extends AppError {
 	}
 }
 
+const NOT_FOUND_SUFFIX_REGEX = /\bnot found\b/iu;
+
 export class NotFoundError extends AppError {
 	constructor(
 		resource = "Resource",
@@ -112,8 +114,11 @@ export class NotFoundError extends AppError {
 		options?: ErrorOptions
 	) {
 		const resolved = resolveDomainErrorArgs(fieldOrOptions, options);
+		const message = NOT_FOUND_SUFFIX_REGEX.test(resource)
+			? resource
+			: `${resource} not found`;
 		super(
-			`${resource} not found`,
+			message,
 			404,
 			resolved.code ?? "NOT_FOUND",
 			resolved.field ? [resolved.field] : undefined,

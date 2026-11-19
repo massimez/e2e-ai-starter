@@ -24,7 +24,9 @@ export const s3Client = new S3Client({
 });
 
 export function hasConfiguredS3Credentials(): boolean {
-	return Boolean(env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY);
+	return Boolean(
+		env.S3_USE_IAM_ROLE || (env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY)
+	);
 }
 
 let devBucketChecked = false;

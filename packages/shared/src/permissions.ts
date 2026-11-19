@@ -139,7 +139,7 @@ export const PERMISSION_MATRIX: readonly PermissionMatrixEntry[] = [
 		"Remove Members",
 		"Remove members from the organization",
 		"member",
-		"delete"
+		"remove"
 	),
 	matrixEntry(
 		"Team & Access",
