@@ -7,6 +7,7 @@ export const STORAGE_CONFIG = {
 		"image/gif",
 		"application/pdf",
 		"text/plain",
+		"text/markdown",
 		"text/csv",
 		"application/json",
 	] as const,
@@ -16,6 +17,13 @@ export const STORAGE_CONFIG = {
 	DOWNLOAD_URL_EXPIRY_SECONDS: 300,
 	MAX_FILE_SIZE: 10 * 1024 * 1024, // 10 MB
 	PRESIGN_EXPIRY_SECONDS: 900,
+	RAG_INDEXABLE_CONTENT_TYPES: [
+		"application/pdf",
+		"text/plain",
+		"text/markdown",
+		"text/csv",
+		"application/json",
+	] as const,
 } as const;
 
 export type StorageConfig = typeof STORAGE_CONFIG;
@@ -41,6 +49,18 @@ export function isAllowedContentType(contentType: string): boolean {
 	return (STORAGE_CONFIG.ALLOWED_CONTENT_TYPES as readonly string[]).includes(
 		normalized
 	);
+}
+
+export function isRagIndexableContentType(
+	contentType: string | null | undefined
+): boolean {
+	if (!contentType) {
+		return false;
+	}
+	const normalized = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+	return (
+		STORAGE_CONFIG.RAG_INDEXABLE_CONTENT_TYPES as readonly string[]
+	).includes(normalized);
 }
 
 export function isValidFileSize(size: number): boolean {

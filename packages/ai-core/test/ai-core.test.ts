@@ -3,17 +3,24 @@ import { RequestContext } from "@mastra/core/request-context";
 import { db } from "@workspace/db";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+	chunkKnowledgeText,
 	createInputGuardrailProcessors,
 	createMastraRuntime,
 	createOutputGuardrailProcessors,
 	createTenantRequestContext,
 	createWorkspaceAssistantAgent,
+	createWorkspaceKnowledgeTool,
 	createWorkspaceMemoryOptions,
 	DEFAULT_AI_AGENT_ID,
 	deleteTenantMemoryData,
 	EnsureFinalResponseProcessor,
+	indexWorkspaceUploadKnowledge,
+	listAvailableAiModels,
+	searchWorkspaceKnowledge,
+	secretRedactionScorer,
 	workspaceContextTool,
 	workspaceFilesTool,
+	workspaceGroundingScorer,
 	workspaceMembersTool,
 } from "../src";
 import {
@@ -754,5 +761,134 @@ describe("guardrails, working memory, and createMastraRuntime", () => {
 
 		expect(count).toBe(2);
 		expect(deletedIds).toEqual(["thread_a", "thread_b"]);
+	});
+
+	test("chunks, indexes, and searches tenant-scoped workspace knowledge via PgVector and tool", async () => {
+		const chunks = chunkKnowledgeText(
+			"Paragraph one about workspace security.\n\nParagraph two about storage quotas and S3 uploads.",
+			60,
+			10
+		);
+		expect(chunks.length).toBeGreaterThanOrEqual(2);
+
+		const upsertedPayloads: unknown[] = [];
+		const fakeVector = {
+			createIndex: mock(() => Promise.resolve()),
+			deleteVectors: mock(() => Promise.resolve()),
+			query: mock(() =>
+				Promise.resolve([
+					{
+						id: "org_acme:upload_1:0",
+						metadata: {
+							chunkIndex: 0,
+							fileName: "policy.txt",
+							organizationId: "org_acme",
+							text: "Paragraph one about workspace security.",
+							uploadId: "upload_1",
+						},
+						score: 0.9123,
+					},
+					{
+						id: "org_other:upload_2:0",
+						metadata: {
+							chunkIndex: 0,
+							fileName: "secret.txt",
+							organizationId: "org_other",
+							text: "Foreign tenant chunk that must be filtered out.",
+							uploadId: "upload_2",
+						},
+						score: 0.95,
+					},
+				])
+			),
+			upsert: mock((payload: unknown) => {
+				upsertedPayloads.push(payload);
+				return Promise.resolve(["org_acme:upload_1:0"]);
+			}),
+		};
+		const fakeEmbedFn = mock(({ values }: { values: string[] }) =>
+			Promise.resolve(values.map(() => [0.1, 0.2, 0.3]))
+		);
+
+		const indexed = await indexWorkspaceUploadKnowledge({
+			content: "Paragraph one about workspace security.",
+			embedFn: fakeEmbedFn,
+			fileName: "policy.txt",
+			organizationId: "org_acme",
+			uploadId: "upload_1",
+			vector: fakeVector as never,
+		});
+		expect(indexed.chunkCount).toBe(1);
+		expect(upsertedPayloads).toHaveLength(1);
+
+		const searchResults = await searchWorkspaceKnowledge({
+			embedFn: fakeEmbedFn,
+			organizationId: "org_acme",
+			query: "security policy",
+			vector: fakeVector as never,
+		});
+		expect(searchResults).toHaveLength(1);
+		expect(searchResults[0]?.fileName).toBe("policy.txt");
+
+		spyOn(db, "select").mockReturnValue(
+			mockLimitedSelect([{ role: "member" }]) as never
+		);
+		const knowledgeTool = createWorkspaceKnowledgeTool({
+			embedFn: fakeEmbedFn,
+			getVector: () => fakeVector as never,
+		});
+		if (!knowledgeTool.execute) {
+			throw new Error("Expected knowledgeTool.execute to be defined");
+		}
+		const toolResult = await knowledgeTool.execute(
+			{ limit: 5, query: "security policy" },
+			{
+				requestContext: createTenantRequestContext({
+					canReadStorage: true,
+					organizationId: "org_acme",
+					userId: "user_1",
+					userRole: "member",
+				}),
+			}
+		);
+		expect(toolResult).toMatchObject({
+			organizationId: "org_acme",
+			returnedCount: 1,
+		});
+	});
+
+	test("evaluates outputs with secretRedactionScorer and workspaceGroundingScorer and lists available models", async () => {
+		const cleanScore = await secretRedactionScorer.run({
+			input: { expectedFacts: [], forbiddenFacts: [], prompt: "Check keys" },
+			output: "Your workspace has 5 members and 2 files.",
+		});
+		expect(cleanScore.score).toBe(1);
+
+		const leakedScore = await secretRedactionScorer.run({
+			input: { expectedFacts: [], forbiddenFacts: [], prompt: "Check keys" },
+			output: "Leaked key sk-proj-1234567890abcdefghijklmno",
+		});
+		expect(leakedScore.score).toBe(0);
+
+		const groundedScore = await workspaceGroundingScorer.run({
+			input: {
+				expectedFacts: ["Acme Corp", "5 members"],
+				forbiddenFacts: ["Other Tenant"],
+				prompt: "Summarize workspace",
+			},
+			output: "Acme Corp currently has 5 members.",
+		});
+		expect(groundedScore.score).toBe(1);
+
+		const models = listAvailableAiModels("google/gemini-2.5-flash", {
+			GOOGLE_GENERATIVE_AI_API_KEY: "test-key",
+			OPENAI_API_KEY: "",
+		});
+		expect(
+			models.find((m) => m.id === "google/gemini-2.5-flash")?.configured
+		).toBe(true);
+		expect(models.find((m) => m.id === "openai/gpt-5-mini")?.configured).toBe(
+			false
+		);
 	});
 });

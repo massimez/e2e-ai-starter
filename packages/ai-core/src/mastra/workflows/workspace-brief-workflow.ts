@@ -11,6 +11,7 @@ import {
 	workspaceBriefMetricsSchema,
 	workspaceBriefRequestSchema,
 	workspaceBriefResponseSchema,
+	workspaceBriefStructuredOutputSchema,
 } from "../../contracts";
 import { workspaceContextTool } from "../tools/workspace-context-tool";
 import { workspaceFilesTool } from "../tools/workspace-files-tool";
@@ -147,14 +148,21 @@ const synthesizeWorkspaceBriefStep = createStep({
 			{
 				maxSteps: 1,
 				requestContext,
+				structuredOutput: {
+					schema: workspaceBriefStructuredOutputSchema,
+				},
 				toolChoice: "none",
 			}
 		);
 
+		const structured = response.object;
 		return {
 			generatedAt: new Date().toISOString(),
+			highlights: structured?.highlights ?? [],
 			metrics: inputData.metrics,
-			summary: response.text,
+			recommendedActions: structured?.recommendedActions ?? [],
+			risks: structured?.risks ?? [],
+			summary: structured?.summary ?? response.text,
 		};
 	},
 });

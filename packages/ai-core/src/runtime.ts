@@ -21,6 +21,7 @@ import { createWorkspaceAssistantAgent } from "./mastra/agents/assistant-agent";
 import { createWorkspaceMemoryOptions } from "./mastra/memory/working-memory";
 import { workspaceContextTool } from "./mastra/tools/workspace-context-tool";
 import { workspaceFilesTool } from "./mastra/tools/workspace-files-tool";
+import { createWorkspaceKnowledgeTool } from "./mastra/tools/workspace-knowledge-tool";
 import { workspaceMembersTool } from "./mastra/tools/workspace-members-tool";
 import { workspaceBriefWorkflow } from "./mastra/workflows/workspace-brief-workflow";
 
@@ -42,6 +43,8 @@ export interface MastraRuntimeConfig {
 export interface MastraRuntime {
 	agents: Record<string, Agent>;
 	close: () => Promise<void>;
+	embeddingDimension: number;
+	embeddingModel: string;
 	mastra: Mastra;
 	memory: Memory | undefined;
 	model: string;
@@ -97,6 +100,9 @@ export function createTenantRequestContext(
 	}
 	if (parsed.requestId) {
 		requestContext.set(AI_CONTEXT_KEYS.requestId, parsed.requestId);
+	}
+	if (parsed.modelId) {
+		requestContext.set(AI_CONTEXT_KEYS.modelId, parsed.modelId);
 	}
 	return requestContext;
 }
@@ -207,7 +213,14 @@ export function createMastraRuntime(
 		});
 	}
 
+	const knowledgeTool = createWorkspaceKnowledgeTool({
+		embeddingDimension,
+		embeddingModel,
+		getVector: () => vector,
+	});
+
 	const workspaceAssistant = createWorkspaceAssistantAgent({
+		knowledgeTool,
 		memory,
 		model,
 	});
@@ -248,6 +261,7 @@ export function createMastraRuntime(
 		tools: {
 			workspaceContextTool,
 			workspaceFilesTool,
+			workspaceKnowledgeTool: knowledgeTool,
 			workspaceMembersTool,
 		},
 		...(vector ? { vectors: { pgVector: vector } } : {}),
@@ -272,6 +286,8 @@ export function createMastraRuntime(
 	return {
 		agents,
 		close,
+		embeddingDimension,
+		embeddingModel,
 		mastra,
 		memory,
 		model,

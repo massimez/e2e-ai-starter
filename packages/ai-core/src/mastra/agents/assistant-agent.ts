@@ -12,9 +12,14 @@ import {
 } from "../processors/guardrails";
 import { workspaceContextTool } from "../tools/workspace-context-tool";
 import { workspaceFilesTool } from "../tools/workspace-files-tool";
+import {
+	type createWorkspaceKnowledgeTool,
+	workspaceKnowledgeTool,
+} from "../tools/workspace-knowledge-tool";
 import { workspaceMembersTool } from "../tools/workspace-members-tool";
 
 export interface WorkspaceAssistantOptions {
+	knowledgeTool?: ReturnType<typeof createWorkspaceKnowledgeTool>;
 	memory?: MastraMemory;
 	model?: string;
 }
@@ -31,12 +36,15 @@ const BASE_INSTRUCTIONS = [
 export function createWorkspaceAssistantAgent(
 	options: WorkspaceAssistantOptions = {}
 ): Agent {
+	const defaultModel = options.model ?? DEFAULT_CHAT_MODEL;
+	const resolvedKnowledgeTool = options.knowledgeTool ?? workspaceKnowledgeTool;
+
 	return new Agent({
 		defaultOptions: {
 			maxSteps: 5,
 		},
 		description:
-			"Tenant-scoped assistant for workspace questions, member directory, file search, storage summary, and multi-turn memory.",
+			"Tenant-scoped assistant for workspace questions, member directory, file search, knowledge retrieval, storage summary, and multi-turn memory.",
 		id: DEFAULT_AI_AGENT_ID,
 		inputProcessors: createInputGuardrailProcessors(),
 		instructions: ({ requestContext }) => {
@@ -45,9 +53,9 @@ export function createWorkspaceAssistantAgent(
 			const canReadStorage =
 				requestContext.get(AI_CONTEXT_KEYS.canReadStorage) === true;
 			const allowedTools = canReadStorage
-				? "workspaceContextTool, workspaceMembersTool, or workspaceFilesTool"
+				? "workspaceContextTool, workspaceMembersTool, workspaceFilesTool, or workspaceKnowledgeTool"
 				: "workspaceContextTool or workspaceMembersTool";
-			const groundingLine = `When tools are available, ground answers about the user's current workspace, membership role, team roster, or committed files by calling ${allowedTools} instead of guessing.`;
+			const groundingLine = `When tools are available, ground answers about the user's current workspace, membership role, team roster, committed files, or indexed documents by calling ${allowedTools} instead of guessing.`;
 
 			if (organizationId && userRole) {
 				return `${BASE_INSTRUCTIONS} ${groundingLine} Active context: organizationId=${organizationId}, callerRole=${userRole}.`;
@@ -55,7 +63,8 @@ export function createWorkspaceAssistantAgent(
 			return `${BASE_INSTRUCTIONS} ${groundingLine}`;
 		},
 		memory: options.memory,
-		model: options.model ?? DEFAULT_CHAT_MODEL,
+		model: ({ requestContext }) =>
+			requestContext.get(AI_CONTEXT_KEYS.modelId) || defaultModel,
 		name: "Workspace Assistant",
 		outputProcessors: createOutputGuardrailProcessors(),
 		requestContextSchema: tenantAiContextSchema,
@@ -68,6 +77,7 @@ export function createWorkspaceAssistantAgent(
 			};
 			if (canReadStorage) {
 				tools.workspaceFilesTool = workspaceFilesTool;
+				tools.workspaceKnowledgeTool = resolvedKnowledgeTool;
 			}
 			return tools;
 		},

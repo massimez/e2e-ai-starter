@@ -122,6 +122,7 @@ export function buildEmbeddingProviderOptions(
 export const AI_CONTEXT_KEYS = {
 	canReadMemberEmails: "canReadMemberEmails",
 	canReadStorage: "canReadStorage",
+	modelId: "modelId",
 	organizationId: "organizationId",
 	requestId: "requestId",
 	userId: "userId",
@@ -131,6 +132,7 @@ export const AI_CONTEXT_KEYS = {
 export const tenantAiContextSchema = z.object({
 	canReadMemberEmails: z.boolean().optional(),
 	canReadStorage: z.boolean().optional(),
+	modelId: z.string().trim().min(1).max(128).optional(),
 	organizationId: z.string().min(1),
 	requestId: z.string().min(1).optional(),
 	userId: z.string().min(1),
@@ -168,8 +170,47 @@ export const aiAgentSummarySchema = z.object({
 
 export type AiAgentSummary = z.infer<typeof aiAgentSummarySchema>;
 
+export const aiModelOptionSchema = z.object({
+	configured: z.boolean(),
+	id: z.string(),
+	label: z.string(),
+	providerId: z.string(),
+});
+
+export type AiModelOption = z.infer<typeof aiModelOptionSchema>;
+
+export function listAvailableAiModels(
+	defaultModel: string,
+	envValues: Record<string, string | undefined>
+): AiModelOption[] {
+	const seen = new Set<string>();
+	const options: AiModelOption[] = [];
+
+	const addOption = (modelId: string, providerLabel?: string) => {
+		const trimmed = modelId.trim();
+		if (!trimmed || seen.has(trimmed)) {
+			return;
+		}
+		seen.add(trimmed);
+		const info = getAiProviderInfo(trimmed);
+		options.push({
+			configured: hasAiProviderApiKey(trimmed, envValues),
+			id: trimmed,
+			label: `${providerLabel ?? info.label} (${trimmed})`,
+			providerId: info.id,
+		});
+	};
+
+	addOption(defaultModel);
+	for (const provider of Object.values(AI_PROVIDERS)) {
+		addOption(provider.exampleChatModel, provider.label);
+	}
+	return options;
+}
+
 export const aiAgentsResponseSchema = z.object({
 	agents: z.array(aiAgentSummarySchema),
+	availableModels: z.array(aiModelOptionSchema).optional(),
 	configured: z.boolean(),
 	defaultAgentId: z.string(),
 	model: z.string(),
@@ -206,6 +247,7 @@ export const aiChatRequestSchema = z.object({
 	agentId: z.string().trim().min(1).max(128).optional(),
 	id: z.string().trim().min(1).max(128).optional(),
 	messages: z.array(aiChatUserMessageSchema).min(1).max(1),
+	modelId: z.string().trim().min(1).max(128).optional(),
 	trigger: z.literal("submit-message").optional(),
 });
 
@@ -258,6 +300,7 @@ export type WorkspaceWorkingMemory = z.infer<
 
 export const workspaceBriefRequestSchema = z.object({
 	focus: z.string().trim().min(1).max(300).optional(),
+	modelId: z.string().trim().min(1).max(128).optional(),
 });
 
 export type WorkspaceBriefRequest = z.infer<typeof workspaceBriefRequestSchema>;
@@ -277,12 +320,54 @@ export const workspaceBriefMetricsSchema = z.object({
 
 export type WorkspaceBriefMetrics = z.infer<typeof workspaceBriefMetricsSchema>;
 
+export const workspaceBriefStructuredOutputSchema = z.object({
+	highlights: z
+		.array(z.string().trim().min(1))
+		.max(5)
+		.default([])
+		.describe("2 to 4 concise positive workspace or team highlights."),
+	recommendedActions: z
+		.array(z.string().trim().min(1))
+		.max(5)
+		.default([])
+		.describe("1 to 3 concrete recommended next steps for the workspace."),
+	risks: z
+		.array(z.string().trim().min(1))
+		.max(5)
+		.default([])
+		.describe("0 to 3 quota, access, or operational risks noticed."),
+	summary: z
+		.string()
+		.trim()
+		.min(1)
+		.describe("Executive summary paragraph grounded in workspace metrics."),
+});
+
+export type WorkspaceBriefStructuredOutput = z.infer<
+	typeof workspaceBriefStructuredOutputSchema
+>;
+
 export const workspaceBriefResponseSchema = z.object({
 	generatedAt: z.string(),
+	highlights: z.array(z.string()).optional(),
 	metrics: workspaceBriefMetricsSchema,
+	recommendedActions: z.array(z.string()).optional(),
+	risks: z.array(z.string()).optional(),
 	summary: z.string(),
 });
 
 export type WorkspaceBriefResponse = z.infer<
 	typeof workspaceBriefResponseSchema
+>;
+
+export const workspaceKnowledgeChunkSchema = z.object({
+	chunkIndex: z.number().int().nonnegative(),
+	fileName: z.string(),
+	score: z.number(),
+	text: z.string(),
+	uploadId: z.string(),
+});
+
+export type WorkspaceKnowledgeChunk = z.infer<
+	typeof workspaceKnowledgeChunkSchema
 >;
