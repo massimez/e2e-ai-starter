@@ -15,6 +15,7 @@ import {
 	SettingsSectionContent,
 	SettingsSectionHeader,
 } from "@workspace/ui/components/settings-shell";
+import { sanitizeSlug } from "@workspace/ui/lib/utils";
 import {
 	Building2,
 	Camera,
@@ -37,6 +38,249 @@ import {
 	validateImageUploadFile,
 } from "@/lib/storage-upload";
 
+function getOrgFormValues(
+	source: {
+		logo?: string | null;
+		metadata?: unknown;
+		name?: string | null;
+		slug?: string | null;
+	},
+	includeMetadata: boolean
+) {
+	const metadata = includeMetadata
+		? (source.metadata as { email?: string; website?: string } | null)
+		: null;
+	return {
+		...(includeMetadata
+			? {
+					email: metadata?.email ?? "",
+					website: metadata?.website ?? "",
+				}
+			: {}),
+		logoUrl: source.logo ?? null,
+		name: source.name || "",
+		slug: source.slug || "",
+	};
+}
+
+function useOrgProfileForm(params: {
+	activeOrg:
+		| { id: string; logo?: string | null; name: string; slug: string }
+		| null
+		| undefined;
+	activeOrgId: string | undefined;
+	fullOrg:
+		| {
+				id: string;
+				logo?: string | null;
+				metadata?: unknown;
+				name: string;
+				slug: string;
+		  }
+		| null
+		| undefined;
+}) {
+	const { activeOrg, activeOrgId, fullOrg } = params;
+	const [name, setName] = useState("");
+	const [slug, setSlug] = useState("");
+	const [email, setEmail] = useState("");
+	const [website, setWebsite] = useState("");
+	const [logoUrl, setLogoUrl] = useState<string | null>(null);
+	const [isDirty, setIsDirty] = useState(false);
+	const lastSyncedOrgIdRef = useRef<string | undefined>(undefined);
+	const hasFullOrgSyncedRef = useRef(false);
+
+	useEffect(() => {
+		const orgChanged = lastSyncedOrgIdRef.current !== activeOrgId;
+		if (orgChanged) {
+			lastSyncedOrgIdRef.current = activeOrgId;
+			hasFullOrgSyncedRef.current = false;
+			setIsDirty(false);
+			const initial = getOrgFormValues(activeOrg ?? {}, true);
+			setName(initial.name);
+			setSlug(initial.slug);
+			setLogoUrl(initial.logoUrl);
+			setEmail("");
+			setWebsite("");
+		}
+
+		if (fullOrg && fullOrg.id === activeOrgId) {
+			const shouldSyncFull =
+				!(isDirty && hasFullOrgSyncedRef.current) || orgChanged;
+			if (shouldSyncFull) {
+				hasFullOrgSyncedRef.current = true;
+				const next = getOrgFormValues(fullOrg, true);
+				setName(next.name);
+				setSlug(next.slug);
+				setLogoUrl(next.logoUrl);
+				setEmail(next.email ?? "");
+				setWebsite(next.website ?? "");
+			}
+			return;
+		}
+
+		if (activeOrg && activeOrg.id === activeOrgId && !isDirty) {
+			const next = getOrgFormValues(activeOrg, false);
+			setName(next.name);
+			setSlug(next.slug);
+			setLogoUrl(next.logoUrl);
+		}
+	}, [activeOrgId, activeOrg, fullOrg, isDirty]);
+
+	return {
+		email,
+		logoUrl,
+		name,
+		onEmailChange: (value: string) => {
+			setIsDirty(true);
+			setEmail(value);
+		},
+		onNameChange: (value: string) => {
+			setIsDirty(true);
+			setName(value);
+		},
+		onSlugChange: (value: string) => {
+			setIsDirty(true);
+			setSlug(value);
+		},
+		onWebsiteChange: (value: string) => {
+			setIsDirty(true);
+			setWebsite(value);
+		},
+		resetDirty: () => setIsDirty(false),
+		setLogoUrl,
+		setSlug,
+		slug,
+		website,
+	};
+}
+
+function validateProfileInput(name: string, slug: string) {
+	const trimmedName = name.trim();
+	if (!trimmedName) {
+		toast.error("Organization name is required");
+		return null;
+	}
+
+	const formattedSlug = sanitizeSlug(slug);
+	if (!formattedSlug) {
+		toast.error(
+			"A valid vanity URL slug (letters, numbers, hyphens) is required"
+		);
+		return null;
+	}
+
+	return { formattedSlug, trimmedName };
+}
+
+function WorkspaceLogoSection({
+	canManageSettings,
+	fallbackInitials,
+	fileInputRef,
+	isSubmitting,
+	isUploadingLogo,
+	logoUrl,
+	name,
+	onLogoUpload,
+	onRemoveLogo,
+}: {
+	canManageSettings: boolean;
+	fallbackInitials: string;
+	fileInputRef: React.RefObject<HTMLInputElement | null>;
+	isSubmitting: boolean;
+	isUploadingLogo: boolean;
+	logoUrl: string | null;
+	name: string;
+	onLogoUpload: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
+	onRemoveLogo: () => Promise<void>;
+}) {
+	return (
+		<SettingsSection>
+			<SettingsSectionHeader
+				description="Your organization icon appears across invites, notifications, and navigation dropdowns."
+				title="Workspace Brand Identity"
+			/>
+			<SettingsSectionContent>
+				<div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center">
+					<button
+						aria-label="Upload workspace logo"
+						className="group border-border/70 focus-visible:ring-ring relative h-24 w-24 cursor-pointer overflow-hidden rounded-2xl border-2 p-0 shadow-xs transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:outline-hidden"
+						disabled={!canManageSettings || isUploadingLogo}
+						onClick={() => fileInputRef.current?.click()}
+						type="button"
+					>
+						<Avatar className="h-full w-full rounded-2xl">
+							{logoUrl ? <AvatarImage alt={name} src={logoUrl} /> : null}
+							<AvatarFallback className="from-primary/20 via-primary/10 to-primary/5 text-primary rounded-2xl bg-linear-to-br text-3xl font-bold">
+								{fallbackInitials}
+							</AvatarFallback>
+						</Avatar>
+
+						{canManageSettings ? (
+							<div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100">
+								<Camera className="h-5 w-5" />
+								<span className="mt-1 text-[10px] font-medium">Change</span>
+							</div>
+						) : null}
+					</button>
+
+					<div className="space-y-3 text-center sm:text-left">
+						<div className="flex flex-wrap items-center justify-center gap-2.5 sm:justify-start">
+							<input
+								accept="image/png,image/jpeg,image/webp,image/gif"
+								aria-label="Workspace logo file"
+								className="hidden"
+								disabled={!canManageSettings || isUploadingLogo || isSubmitting}
+								onChange={onLogoUpload}
+								ref={fileInputRef}
+								type="file"
+							/>
+							<Button
+								disabled={!canManageSettings || isUploadingLogo || isSubmitting}
+								onClick={() => fileInputRef.current?.click()}
+								size="sm"
+								type="button"
+								variant="outline"
+							>
+								{isUploadingLogo ? (
+									<>
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										Uploading...
+									</>
+								) : (
+									<>
+										<ImagePlus className="mr-2 h-4 w-4" />
+										Upload New Logo
+									</>
+								)}
+							</Button>
+
+							{logoUrl ? (
+								<Button
+									disabled={
+										!canManageSettings || isSubmitting || isUploadingLogo
+									}
+									onClick={onRemoveLogo}
+									size="sm"
+									type="button"
+									variant="ghost"
+								>
+									<Trash2 className="text-destructive mr-2 h-4 w-4" />
+									Remove
+								</Button>
+							) : null}
+						</div>
+						<p className="text-muted-foreground text-xs">
+							Recommended format: PNG, JPG, WebP, or GIF. Transparent background
+							looks best. Max 5MB.
+						</p>
+					</div>
+				</div>
+			</SettingsSectionContent>
+		</SettingsSection>
+	);
+}
+
 export default function GeneralSettingsPage() {
 	const { fullOrg, activeOrg, activeOrgId, canManageSettings, isLoading } =
 		useCurrentOrganization();
@@ -49,54 +293,31 @@ export default function GeneralSettingsPage() {
 	const orgEmailId = useId();
 	const orgWebsiteId = useId();
 
-	const [name, setName] = useState("");
-	const [slug, setSlug] = useState("");
-	const [email, setEmail] = useState("");
-	const [website, setWebsite] = useState("");
-	const [logoUrl, setLogoUrl] = useState<string | null>(null);
+	const {
+		email,
+		logoUrl,
+		name,
+		onEmailChange,
+		onNameChange,
+		onSlugChange,
+		onWebsiteChange,
+		resetDirty,
+		setLogoUrl,
+		setSlug,
+		slug,
+		website,
+	} = useOrgProfileForm({ activeOrg, activeOrgId, fullOrg });
 	const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
-	useEffect(() => {
-		if (fullOrg) {
-			setName(fullOrg.name || "");
-			setSlug(fullOrg.slug || "");
-			setLogoUrl(fullOrg.logo ?? null);
-			const metadata = fullOrg.metadata as {
-				email?: string;
-				website?: string;
-			} | null;
-			setEmail(metadata?.email ?? "");
-			setWebsite(metadata?.website ?? "");
-		} else if (activeOrg) {
-			setName(activeOrg.name || "");
-			setSlug(activeOrg.slug || "");
-			setLogoUrl(activeOrg.logo ?? null);
-		}
-	}, [fullOrg, activeOrg]);
-
 	const handleSaveProfile = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!activeOrgId) {
+		if (!activeOrgId || isUploadingLogo) {
 			return;
 		}
 
-		const trimmedName = name.trim();
-		if (!trimmedName) {
-			toast.error("Organization name is required");
-			return;
-		}
-
-		const formattedSlug = slug
-			.trim()
-			.toLowerCase()
-			.replace(/[^a-z0-9-]+/gu, "-")
-			.replace(/^-+|-+$/gu, "");
-
-		if (!formattedSlug) {
-			toast.error(
-				"A valid vanity URL slug (letters, numbers, hyphens) is required"
-			);
+		const validated = validateProfileInput(name, slug);
+		if (!validated) {
 			return;
 		}
 
@@ -107,11 +328,12 @@ export default function GeneralSettingsPage() {
 					email: email.trim(),
 					website: website.trim(),
 				},
-				name: trimmedName,
+				name: validated.trimmedName,
 				organizationId: activeOrgId,
-				slug: formattedSlug,
+				slug: validated.formattedSlug,
 			});
-			setSlug(formattedSlug);
+			resetDirty();
+			setSlug(validated.formattedSlug);
 			toast.success("Organization profile updated");
 		} catch (error) {
 			toast.error(
@@ -161,7 +383,7 @@ export default function GeneralSettingsPage() {
 	};
 
 	const handleRemoveLogo = async () => {
-		if (!activeOrgId) {
+		if (!activeOrgId || isUploadingLogo) {
 			return;
 		}
 		const previousLogo = logoUrl;
@@ -213,91 +435,17 @@ export default function GeneralSettingsPage() {
 			}
 		>
 			{/* Logo & Visual Identity */}
-			<SettingsSection>
-				<SettingsSectionHeader
-					description="Your organization icon appears across invites, notifications, and navigation dropdowns."
-					title="Workspace Brand Identity"
-				/>
-				<SettingsSectionContent>
-					<div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center">
-						<button
-							aria-label="Upload workspace logo"
-							className="group border-border/70 focus-visible:ring-ring relative h-24 w-24 cursor-pointer overflow-hidden rounded-2xl border-2 p-0 shadow-xs transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:outline-hidden"
-							disabled={!canManageSettings || isUploadingLogo}
-							onClick={() => fileInputRef.current?.click()}
-							type="button"
-						>
-							<Avatar className="h-full w-full rounded-2xl">
-								{logoUrl ? <AvatarImage alt={name} src={logoUrl} /> : null}
-								<AvatarFallback className="from-primary/20 via-primary/10 to-primary/5 text-primary rounded-2xl bg-linear-to-br text-3xl font-bold">
-									{fallbackInitials}
-								</AvatarFallback>
-							</Avatar>
-
-							{canManageSettings ? (
-								<div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100">
-									<Camera className="h-5 w-5" />
-									<span className="mt-1 text-[10px] font-medium">Change</span>
-								</div>
-							) : null}
-						</button>
-
-						<div className="space-y-3 text-center sm:text-left">
-							<div className="flex flex-wrap items-center justify-center gap-2.5 sm:justify-start">
-								<input
-									accept="image/png,image/jpeg,image/webp,image/gif"
-									aria-label="Workspace logo file"
-									className="hidden"
-									disabled={
-										!canManageSettings || isUploadingLogo || isSubmitting
-									}
-									onChange={handleLogoUpload}
-									ref={fileInputRef}
-									type="file"
-								/>
-								<Button
-									disabled={
-										!canManageSettings || isUploadingLogo || isSubmitting
-									}
-									onClick={() => fileInputRef.current?.click()}
-									size="sm"
-									type="button"
-									variant="outline"
-								>
-									{isUploadingLogo ? (
-										<>
-											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-											Uploading...
-										</>
-									) : (
-										<>
-											<ImagePlus className="mr-2 h-4 w-4" />
-											Upload New Logo
-										</>
-									)}
-								</Button>
-
-								{logoUrl ? (
-									<Button
-										disabled={!canManageSettings || isSubmitting}
-										onClick={handleRemoveLogo}
-										size="sm"
-										type="button"
-										variant="ghost"
-									>
-										<Trash2 className="text-destructive mr-2 h-4 w-4" />
-										Remove
-									</Button>
-								) : null}
-							</div>
-							<p className="text-muted-foreground text-xs">
-								Recommended format: PNG, JPG, WebP, or GIF. Transparent
-								background looks best. Max 5MB.
-							</p>
-						</div>
-					</div>
-				</SettingsSectionContent>
-			</SettingsSection>
+			<WorkspaceLogoSection
+				canManageSettings={canManageSettings}
+				fallbackInitials={fallbackInitials}
+				fileInputRef={fileInputRef}
+				isSubmitting={isSubmitting}
+				isUploadingLogo={isUploadingLogo}
+				logoUrl={logoUrl}
+				name={name}
+				onLogoUpload={handleLogoUpload}
+				onRemoveLogo={handleRemoveLogo}
+			/>
 
 			{/* Core Organization Details */}
 			<SettingsSection>
@@ -319,7 +467,7 @@ export default function GeneralSettingsPage() {
 								<Input
 									disabled={!canManageSettings || isSubmitting}
 									id={orgNameId}
-									onChange={(e) => setName(e.target.value)}
+									onChange={(e) => onNameChange(e.target.value)}
 									placeholder="e.g. Acme Corporation"
 									required
 									value={name}
@@ -337,7 +485,7 @@ export default function GeneralSettingsPage() {
 									<Input
 										disabled={!canManageSettings || isSubmitting}
 										id={orgSlugId}
-										onChange={(e) => setSlug(e.target.value)}
+										onChange={(e) => onSlugChange(e.target.value)}
 										placeholder="acme-corp"
 										required
 										value={slug}
@@ -360,7 +508,7 @@ export default function GeneralSettingsPage() {
 								<Input
 									disabled={!canManageSettings || isSubmitting}
 									id={orgEmailId}
-									onChange={(e) => setEmail(e.target.value)}
+									onChange={(e) => onEmailChange(e.target.value)}
 									placeholder="team@acme.com"
 									type="email"
 									value={email}
@@ -378,7 +526,7 @@ export default function GeneralSettingsPage() {
 								<Input
 									disabled={!canManageSettings || isSubmitting}
 									id={orgWebsiteId}
-									onChange={(e) => setWebsite(e.target.value)}
+									onChange={(e) => onWebsiteChange(e.target.value)}
 									placeholder="https://acme.com"
 									type="url"
 									value={website}
@@ -389,7 +537,7 @@ export default function GeneralSettingsPage() {
 						{canManageSettings ? (
 							<div className="border-border/50 flex items-center justify-end border-t pt-5">
 								<Button
-									disabled={isSubmitting}
+									disabled={isSubmitting || isUploadingLogo}
 									size="sm"
 									type="submit"
 									variant="primary"

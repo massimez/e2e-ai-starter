@@ -77,7 +77,7 @@ export function PreferenceMatrixContent({
 	isError,
 	isLoading,
 	onToggle,
-	pendingKey,
+	pendingKeys,
 	preferences,
 }: {
 	error: unknown;
@@ -88,7 +88,7 @@ export function PreferenceMatrixContent({
 		channel: NotificationChannel,
 		nextEnabled: boolean
 	) => void;
-	pendingKey: string | null;
+	pendingKeys: ReadonlySet<string>;
 	preferences: NotificationPreferenceRecord[];
 }) {
 	if (isLoading) {
@@ -157,7 +157,7 @@ export function PreferenceMatrixContent({
 										channel
 									);
 									const cellKey = `${category}:${channel}`;
-									const isCellPending = pendingKey === cellKey;
+									const isCellPending = pendingKeys.has(cellKey);
 									return (
 										<td className="px-4 py-4 text-center" key={channel}>
 											<div className="flex justify-center">

@@ -105,7 +105,9 @@ async function unsubscribeBrowserPush(
 
 export function useNotificationPreferences() {
 	const queryClient = useQueryClient();
-	const [pendingKey, setPendingKey] = useState<string | null>(null);
+	const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(
+		() => new Set()
+	);
 
 	const query = useQuery({
 		queryFn: async () => {
@@ -133,8 +135,16 @@ export function useNotificationPreferences() {
 					: "Failed to update notification preference"
 			);
 		},
-		onSettled: () => {
-			setPendingKey(null);
+		onSettled: (_data, _error, variables) => {
+			const key = `${variables.category}:${variables.channel}`;
+			setPendingKeys((current) => {
+				if (!current.has(key)) {
+					return current;
+				}
+				const next = new Set(current);
+				next.delete(key);
+				return next;
+			});
 		},
 		onSuccess: (updatedPref) => {
 			queryClient.setQueryData<NotificationPreferenceRecord[]>(
@@ -164,7 +174,12 @@ export function useNotificationPreferences() {
 		channel: NotificationChannel,
 		nextEnabled: boolean
 	) => {
-		setPendingKey(`${category}:${channel}`);
+		const key = `${category}:${channel}`;
+		setPendingKeys((current) => {
+			const next = new Set(current);
+			next.add(key);
+			return next;
+		});
 		updateMutation.mutate({
 			category,
 			channel,
@@ -176,7 +191,7 @@ export function useNotificationPreferences() {
 		error: query.error,
 		isError: query.isError,
 		isLoading: query.isLoading,
-		pendingKey,
+		pendingKeys,
 		preferences: query.data ?? [],
 		togglePreference,
 	};
@@ -225,14 +240,30 @@ export function usePushNotifications() {
 		void refreshPushStatus();
 	}, [refreshPushStatus]);
 
+	const runPushAction = async (
+		action: () => Promise<void>,
+		fallbackError: string
+	) => {
+		try {
+			setIsPushBusy(true);
+			await action();
+		} catch (pushError) {
+			toast.error(
+				pushError instanceof Error ? pushError.message : fallbackError
+			);
+		} finally {
+			setIsPushBusy(false);
+		}
+	};
+
 	const enablePush = async () => {
-		if (!publicWebEnv.vapidPublicKey) {
+		const { vapidPublicKey } = publicWebEnv;
+		if (!vapidPublicKey) {
 			toast.error("VAPID public key is not configured for this environment");
 			return;
 		}
 
-		try {
-			setIsPushBusy(true);
+		await runPushAction(async () => {
 			let currentPermission = Notification.permission;
 			if (currentPermission === "default") {
 				currentPermission = await Notification.requestPermission();
@@ -246,35 +277,18 @@ export function usePushNotifications() {
 				return;
 			}
 
-			const endpoint = await subscribeBrowserPush(publicWebEnv.vapidPublicKey);
+			const endpoint = await subscribeBrowserPush(vapidPublicKey);
 			setActiveEndpoint(endpoint);
 			toast.success("Browser push notifications enabled for this device");
-		} catch (pushError) {
-			toast.error(
-				pushError instanceof Error
-					? pushError.message
-					: "Failed to enable browser push notifications"
-			);
-		} finally {
-			setIsPushBusy(false);
-		}
+		}, "Failed to enable browser push notifications");
 	};
 
 	const disablePush = async () => {
-		try {
-			setIsPushBusy(true);
+		await runPushAction(async () => {
 			await unsubscribeBrowserPush(activeEndpoint);
 			setActiveEndpoint(null);
 			toast.success("Browser push notifications disabled for this device");
-		} catch (pushError) {
-			toast.error(
-				pushError instanceof Error
-					? pushError.message
-					: "Failed to disable browser push notifications"
-			);
-		} finally {
-			setIsPushBusy(false);
-		}
+		}, "Failed to disable browser push notifications");
 	};
 
 	return {

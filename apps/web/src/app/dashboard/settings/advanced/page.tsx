@@ -50,7 +50,7 @@ export default function AdvancedSettingsPage() {
 	const [selectedTransferUserId, setSelectedTransferUserId] = useState("");
 
 	const orgName = fullOrg?.name || "Workspace";
-	const orgSlug = fullOrg?.slug || "workspace";
+	const orgSlug = fullOrg?.slug ?? "";
 	const members = fullOrg?.members ?? [];
 
 	// Eligible members for transfer: active administrators other than the current owner
@@ -146,13 +146,13 @@ export default function AdvancedSettingsPage() {
 						<DeleteConfirmationDialog
 							confirmationKeyword={orgSlug}
 							description={`This action will permanently delete "${orgName}" (${orgSlug}) and disconnect all team members. To confirm, please type the workspace slug below.`}
-							disabled={!canDeleteWorkspace || isSubmitting}
+							disabled={!(canDeleteWorkspace && orgSlug) || isSubmitting}
 							onConfirm={handleDeleteConfirm}
 							title="Delete Organization Workspace"
 						>
 							<Button
 								className="bg-destructive text-destructive-foreground hover:bg-destructive/90 shrink-0 gap-2 shadow-xs"
-								disabled={!canDeleteWorkspace || isSubmitting}
+								disabled={!(canDeleteWorkspace && orgSlug) || isSubmitting}
 								variant="destructive"
 							>
 								<Trash2 className="h-4 w-4" />

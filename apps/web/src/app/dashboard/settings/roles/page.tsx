@@ -37,7 +37,7 @@ import {
 import { Skeleton } from "@workspace/ui/components/skeleton";
 import { Switch } from "@workspace/ui/components/switch";
 import { Textarea } from "@workspace/ui/components/textarea";
-import { cn } from "@workspace/ui/lib/utils";
+import { cn, sanitizeSlug } from "@workspace/ui/lib/utils";
 import {
 	Copy,
 	KeyRound,
@@ -50,7 +50,7 @@ import {
 	Trash2,
 	Users,
 } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { RoleBadge } from "@/components/role-badge";
 import {
 	useCloneOrganizationRole,
@@ -62,19 +62,12 @@ import {
 	useUpdateOrganizationRole,
 } from "@/lib/organization-hooks";
 
-const NON_ALNUM_REGEX = /[^a-z0-9]+/gu;
-const EDGE_HYPHENS_REGEX = /^-+|-+$/gu;
 const CAMEL_CASE_BOUNDARY_REGEX = /(?<upper>[A-Z])/gu;
 const RESOURCE_SEPARATOR_REGEX = /[-_]+/gu;
 const LEADING_WORD_CHAR_REGEX = /^\w/u;
 
 function slugifyRoleInput(value: string): string {
-	return value
-		.trim()
-		.toLowerCase()
-		.replace(NON_ALNUM_REGEX, "-")
-		.replace(EDGE_HYPHENS_REGEX, "")
-		.slice(0, 80);
+	return sanitizeSlug(value).slice(0, 80);
 }
 
 function formatResourceLabel(resource: string): string {
@@ -436,12 +429,16 @@ function CloneRoleDialog({
 		if (!name.trim()) {
 			return;
 		}
-		await onClone({
-			description: description.trim() || undefined,
-			name: name.trim(),
-			slug: slug.trim() || undefined,
-		});
-		onOpenChange(false);
+		try {
+			await onClone({
+				description: description.trim() || undefined,
+				name: name.trim(),
+				slug: slug.trim() || undefined,
+			});
+			onOpenChange(false);
+		} catch {
+			// Error toast is handled by useCloneOrganizationRole
+		}
 	};
 
 	return (
@@ -670,6 +667,7 @@ function RoleEditorPanel({
 	builtInSystemGrants,
 	canReadCatalog,
 	catalogPending,
+	catalogReady,
 	filteredCatalog,
 	formState,
 	isCreating,
@@ -692,6 +690,7 @@ function RoleEditorPanel({
 	builtInSystemGrants: string[];
 	canReadCatalog: boolean;
 	catalogPending: boolean;
+	catalogReady: boolean;
 	filteredCatalog: OrganizationPermissionGroup[];
 	formState: RoleFormState;
 	isCreating: boolean;
@@ -793,6 +792,7 @@ function RoleEditorPanel({
 					<Button
 						disabled={
 							isSaving ||
+							!catalogReady ||
 							formState.name.trim().length < 2 ||
 							!(isCreating || isDirty)
 						}
@@ -848,6 +848,23 @@ export default function RolesSettingsPage() {
 		| null
 	>(null);
 
+	const lastSyncedRoleIdRef = useRef<string | null>(null);
+	const previousOrgIdRef = useRef<string | undefined>(activeOrgId);
+
+	useEffect(() => {
+		if (previousOrgIdRef.current !== activeOrgId) {
+			previousOrgIdRef.current = activeOrgId;
+			lastSyncedRoleIdRef.current = null;
+			setMode("view");
+			setSelectedRoleId(null);
+			setFormState(createEmptyRoleForm());
+			setSlugManuallyEdited(false);
+			setPermissionFilter("");
+			setCloneDialogOpen(false);
+			setPendingSwitchTarget(null);
+		}
+	}, [activeOrgId]);
+
 	const selectedRole = useMemo(
 		() => roles.find((role) => role.id === selectedRoleId) ?? roles[0] ?? null,
 		[roles, selectedRoleId]
@@ -855,9 +872,14 @@ export default function RolesSettingsPage() {
 
 	useEffect(() => {
 		if (mode === "view" && selectedRole) {
-			setSelectedRoleId(selectedRole.id);
-			setFormState(roleToFormState(selectedRole));
-			setSlugManuallyEdited(true);
+			if (lastSyncedRoleIdRef.current !== selectedRole.id) {
+				lastSyncedRoleIdRef.current = selectedRole.id;
+				setSelectedRoleId(selectedRole.id);
+				setFormState(roleToFormState(selectedRole));
+				setSlugManuallyEdited(true);
+			}
+		} else {
+			lastSyncedRoleIdRef.current = null;
 		}
 	}, [mode, selectedRole]);
 
@@ -927,6 +949,7 @@ export default function RolesSettingsPage() {
 	}, [formState, isCreating, selectedRole]);
 
 	const applySelectRole = (role: OrganizationRoleSummary) => {
+		lastSyncedRoleIdRef.current = role.id;
 		setMode("view");
 		setSelectedRoleId(role.id);
 		setFormState(roleToFormState(role));
@@ -934,6 +957,7 @@ export default function RolesSettingsPage() {
 	};
 
 	const applyStartCreate = () => {
+		lastSyncedRoleIdRef.current = null;
 		setMode("create");
 		setFormState(createEmptyRoleForm());
 		setSlugManuallyEdited(false);
@@ -990,7 +1014,7 @@ export default function RolesSettingsPage() {
 
 	const handleSubmitForm = async (event: React.FormEvent) => {
 		event.preventDefault();
-		if (!isEditable) {
+		if (!(isEditable && catalogQuery.isSuccess)) {
 			return;
 		}
 
@@ -998,39 +1022,48 @@ export default function RolesSettingsPage() {
 			catalogKeySet.has(key)
 		);
 
-		if (isCreating) {
-			const created = await createRoleMutation.mutateAsync({
-				description: formState.description.trim() || undefined,
+		try {
+			if (isCreating) {
+				const created = await createRoleMutation.mutateAsync({
+					description: formState.description.trim() || undefined,
+					isDefault: formState.isDefault,
+					name: formState.name.trim(),
+					permissions: delegablePermissions,
+					slug: formState.slug.trim() || undefined,
+				});
+				applySelectRole(created);
+				return;
+			}
+
+			if (!selectedRole) {
+				return;
+			}
+
+			const updated = await updateRoleMutation.mutateAsync({
+				description: formState.description.trim() || null,
+				id: selectedRole.id,
 				isDefault: formState.isDefault,
 				name: formState.name.trim(),
 				permissions: delegablePermissions,
-				slug: formState.slug.trim() || undefined,
+				slug: selectedRole.isSystem ? undefined : formState.slug.trim(),
 			});
-			setMode("view");
-			setSelectedRoleId(created.id);
-			return;
+			applySelectRole(updated);
+		} catch {
+			// Error toast is handled by useOrganizationRoleMutation
 		}
-
-		if (!selectedRole) {
-			return;
-		}
-
-		await updateRoleMutation.mutateAsync({
-			description: formState.description.trim() || null,
-			id: selectedRole.id,
-			isDefault: formState.isDefault,
-			name: formState.name.trim(),
-			permissions: delegablePermissions,
-			slug: selectedRole.isSystem ? undefined : formState.slug.trim(),
-		});
 	};
 
 	const handleDeleteSelected = async () => {
 		if (!selectedRole) {
 			return;
 		}
-		await deleteRoleMutation.mutateAsync({ id: selectedRole.id });
-		setSelectedRoleId(null);
+		try {
+			await deleteRoleMutation.mutateAsync({ id: selectedRole.id });
+			lastSyncedRoleIdRef.current = null;
+			setSelectedRoleId(null);
+		} catch {
+			// Error toast is handled by useOrganizationRoleMutation
+		}
 	};
 
 	const handleCloneRole = async (input: {
@@ -1045,8 +1078,7 @@ export default function RolesSettingsPage() {
 			...input,
 			id: selectedRole.id,
 		});
-		setMode("view");
-		setSelectedRoleId(cloned.id);
+		applySelectRole(cloned);
 	};
 
 	const canDeleteSelected =
@@ -1118,6 +1150,7 @@ export default function RolesSettingsPage() {
 							builtInSystemGrants={builtInSystemGrants}
 							canReadCatalog={canReadCatalog}
 							catalogPending={catalogQuery.isPending}
+							catalogReady={catalogQuery.isSuccess}
 							filteredCatalog={filteredCatalog}
 							formState={formState}
 							isCreating={isCreating}

@@ -39,16 +39,22 @@ export function DashboardHeader({
 }: DashboardHeaderProps) {
 	const router = useRouter();
 	const pathname = usePathname();
-	const { activeOrgId, currentUserRole, organizations, session } =
-		useCurrentOrganization();
+	const {
+		activeOrgId,
+		currentUserRole,
+		isListPending,
+		organizations,
+		session,
+	} = useCurrentOrganization();
 	const { createOrganization, setActiveOrganization } =
 		useOrganizationMutations({
 			showToasts: false,
 		});
 
 	const resolvedUser = session?.user ?? initialUser;
-	const resolvedOrganizations =
-		organizations.length > 0 ? organizations : initialOrganizations;
+	const resolvedOrganizations = isListPending
+		? initialOrganizations
+		: organizations;
 	const resolvedActiveOrgId = activeOrgId ?? initialActiveOrgId;
 
 	const orgItems: OrganizationItem[] = resolvedOrganizations.map((org) => ({

@@ -15,7 +15,7 @@ export default function NotificationSettingsPage() {
 		error,
 		isError,
 		isLoading,
-		pendingKey,
+		pendingKeys,
 		preferences,
 		togglePreference,
 	} = useNotificationPreferences();
@@ -38,7 +38,7 @@ export default function NotificationSettingsPage() {
 						isError={isError}
 						isLoading={isLoading}
 						onToggle={togglePreference}
-						pendingKey={pendingKey}
+						pendingKeys={pendingKeys}
 						preferences={preferences}
 					/>
 				</SettingsSectionContent>
