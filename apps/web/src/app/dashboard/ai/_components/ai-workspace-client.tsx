@@ -40,14 +40,15 @@ import {
 	type FormEvent,
 	Fragment,
 	type KeyboardEvent,
-	type ReactNode,
 	useEffect,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
 import { client, parseApiResponse } from "@/lib/api-client";
+import { formatUtcDate } from "@/lib/format";
 import { useCurrentOrganization } from "@/lib/organization-hooks";
+import { renderSafeMarkdown } from "./markdown-renderer";
 
 const STARTER_PROMPTS = [
 	"Summarize my active workspace, role, and storage quota usage.",
@@ -55,17 +56,13 @@ const STARTER_PROMPTS = [
 	"Search committed files in our workspace storage.",
 ] as const;
 
-const THREAD_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-	day: "numeric",
-	month: "short",
-	timeZone: "UTC",
-	year: "numeric",
-});
-
 const TOOL_LABELS: Record<string, string> = {
-	"organization-members": "Team members",
+	"get-workspace-context": "Workspace context",
+	"list-workspace-members": "Team members",
 	"search-workspace-files": "Workspace files",
-	"workspace-summary": "Workspace summary",
+	workspaceContextTool: "Workspace context",
+	workspaceFilesTool: "Workspace files",
+	workspaceMembersTool: "Team members",
 };
 
 const TOOL_STATE_LABELS: Record<string, string> = {
@@ -79,20 +76,9 @@ const TOOL_STATE_LABELS: Record<string, string> = {
 };
 
 const TOOL_SPLIT_PATTERN = /[-_]+/u;
-const ORDERED_LIST_PATTERN = /^\d+\.\s+(?<item>.*)$/u;
-const INLINE_TOKEN_PATTERN =
-	/(?<token>`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)\s]+\))/gu;
 
 function createThreadId(): string {
 	return crypto.randomUUID();
-}
-
-function formatThreadDate(value: string | Date): string {
-	const parsed = new Date(value);
-	if (Number.isNaN(parsed.getTime())) {
-		return "Unknown date";
-	}
-	return THREAD_DATE_FORMATTER.format(parsed);
 }
 
 function formatToolLabel(rawName: string): string {
@@ -108,318 +94,6 @@ function formatToolLabel(rawName: string): string {
 
 function formatToolState(state: string): string {
 	return TOOL_STATE_LABELS[state] ?? state;
-}
-
-function sanitizeHref(rawHref: string): string | null {
-	try {
-		const url = new URL(rawHref);
-		if (url.protocol === "http:" || url.protocol === "https:") {
-			return url.toString();
-		}
-		return null;
-	} catch {
-		return null;
-	}
-}
-
-function renderLinkToken(token: string, tokenKey: string): ReactNode {
-	const separatorIndex = token.indexOf("](");
-	if (separatorIndex <= 1 || !token.endsWith(")")) {
-		return token;
-	}
-	const label = token.slice(1, separatorIndex);
-	const href = sanitizeHref(token.slice(separatorIndex + 2, -1));
-	if (!href) {
-		return token;
-	}
-	return (
-		<a
-			className="text-primary underline underline-offset-2 hover:opacity-80"
-			href={href}
-			key={tokenKey}
-			rel="noopener noreferrer"
-			target="_blank"
-		>
-			{label}
-		</a>
-	);
-}
-
-function renderMarkdownToken(token: string, tokenKey: string): ReactNode {
-	if (token.startsWith("`") && token.endsWith("`")) {
-		return (
-			<code
-				className="bg-background/80 rounded px-1 py-0.5 font-mono text-[12px]"
-				key={tokenKey}
-			>
-				{token.slice(1, -1)}
-			</code>
-		);
-	}
-	if (token.startsWith("**") && token.endsWith("**")) {
-		return (
-			<strong className="font-semibold" key={tokenKey}>
-				{token.slice(2, -2)}
-			</strong>
-		);
-	}
-	if (token.startsWith("*") && token.endsWith("*")) {
-		return <em key={tokenKey}>{token.slice(1, -1)}</em>;
-	}
-	if (token.startsWith("[")) {
-		return renderLinkToken(token, tokenKey);
-	}
-	return token;
-}
-
-function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
-	const nodes: ReactNode[] = [];
-	let lastIndex = 0;
-	let tokenIndex = 0;
-
-	for (const match of text.matchAll(INLINE_TOKEN_PATTERN)) {
-		const [token = ""] = match;
-		const matchIndex = match.index ?? 0;
-		if (matchIndex > lastIndex) {
-			nodes.push(text.slice(lastIndex, matchIndex));
-		}
-		nodes.push(renderMarkdownToken(token, `${keyPrefix}-${tokenIndex}`));
-		tokenIndex += 1;
-		lastIndex = matchIndex + token.length;
-	}
-
-	if (lastIndex < text.length) {
-		nodes.push(text.slice(lastIndex));
-	}
-
-	return nodes;
-}
-
-function parseCodeBlock(
-	lines: string[],
-	startIndex: number,
-	keyPrefix: string
-): { nextIndex: number; node: ReactNode } {
-	const codeLines: string[] = [];
-	let index = startIndex + 1;
-	while (index < lines.length) {
-		const codeLine = lines[index] ?? "";
-		index += 1;
-		if (codeLine.trim().startsWith("```")) {
-			break;
-		}
-		codeLines.push(codeLine);
-	}
-	return {
-		nextIndex: index,
-		node: (
-			<pre
-				className="bg-background/80 border-border/60 overflow-x-auto rounded-lg border p-3 font-mono text-xs leading-relaxed"
-				key={`${keyPrefix}-code-${startIndex}`}
-			>
-				<code>{codeLines.join("\n")}</code>
-			</pre>
-		),
-	};
-}
-
-function parseUnorderedListBlock(
-	lines: string[],
-	startIndex: number,
-	keyPrefix: string
-): { nextIndex: number; node: ReactNode } {
-	const items: Array<{ lineNumber: number; text: string }> = [];
-	let index = startIndex;
-	while (index < lines.length) {
-		const itemLine = (lines[index] ?? "").trim();
-		if (!(itemLine.startsWith("- ") || itemLine.startsWith("* "))) {
-			break;
-		}
-		items.push({ lineNumber: index, text: itemLine.slice(2) });
-		index += 1;
-	}
-	const listKey = `${keyPrefix}-ul-${startIndex}`;
-	return {
-		nextIndex: index,
-		node: (
-			<ul className="list-disc space-y-1 pl-5" key={listKey}>
-				{items.map((item) => (
-					<li key={`${listKey}-line-${item.lineNumber}`}>
-						{renderInlineMarkdown(
-							item.text,
-							`${listKey}-line-${item.lineNumber}`
-						)}
-					</li>
-				))}
-			</ul>
-		),
-	};
-}
-
-function parseOrderedListBlock(
-	lines: string[],
-	startIndex: number,
-	keyPrefix: string
-): { nextIndex: number; node: ReactNode } {
-	const items: Array<{ lineNumber: number; text: string }> = [];
-	let index = startIndex;
-	while (index < lines.length) {
-		const itemLine = (lines[index] ?? "").trim();
-		const match = ORDERED_LIST_PATTERN.exec(itemLine);
-		const itemText = match?.groups?.item;
-		if (itemText === undefined) {
-			break;
-		}
-		items.push({ lineNumber: index, text: itemText });
-		index += 1;
-	}
-	const listKey = `${keyPrefix}-ol-${startIndex}`;
-	return {
-		nextIndex: index,
-		node: (
-			<ol className="list-decimal space-y-1 pl-5" key={listKey}>
-				{items.map((item) => (
-					<li key={`${listKey}-line-${item.lineNumber}`}>
-						{renderInlineMarkdown(
-							item.text,
-							`${listKey}-line-${item.lineNumber}`
-						)}
-					</li>
-				))}
-			</ol>
-		),
-	};
-}
-
-function isBlockStarter(trimmedLine: string): boolean {
-	return (
-		trimmedLine.length === 0 ||
-		trimmedLine.startsWith("```") ||
-		trimmedLine.startsWith("#") ||
-		trimmedLine.startsWith("- ") ||
-		trimmedLine.startsWith("* ") ||
-		ORDERED_LIST_PATTERN.test(trimmedLine)
-	);
-}
-
-function parseParagraphBlock(
-	lines: string[],
-	startIndex: number,
-	keyPrefix: string
-): { nextIndex: number; node: ReactNode } {
-	const paragraphLines: Array<{ lineNumber: number; text: string }> = [];
-	let index = startIndex;
-	while (index < lines.length) {
-		const nextLine = lines[index] ?? "";
-		if (isBlockStarter(nextLine.trim())) {
-			break;
-		}
-		paragraphLines.push({ lineNumber: index, text: nextLine });
-		index += 1;
-	}
-	const paragraphKey = `${keyPrefix}-p-${startIndex}`;
-	return {
-		nextIndex: index,
-		node: (
-			<p className="wrap-break-word" key={paragraphKey}>
-				{paragraphLines.map((line, offset) => (
-					<Fragment key={`${paragraphKey}-line-${line.lineNumber}`}>
-						{offset > 0 ? <br /> : null}
-						{renderInlineMarkdown(
-							line.text,
-							`${paragraphKey}-line-${line.lineNumber}`
-						)}
-					</Fragment>
-				))}
-			</p>
-		),
-	};
-}
-
-function parseHeadingBlock(
-	trimmed: string,
-	lineNumber: number,
-	keyPrefix: string
-): ReactNode | null {
-	if (trimmed.startsWith("### ")) {
-		return (
-			<h3
-				className="text-sm font-semibold"
-				key={`${keyPrefix}-h3-${lineNumber}`}
-			>
-				{renderInlineMarkdown(
-					trimmed.slice(4),
-					`${keyPrefix}-h3-${lineNumber}`
-				)}
-			</h3>
-		);
-	}
-	if (trimmed.startsWith("## ") || trimmed.startsWith("# ")) {
-		const offset = trimmed.startsWith("## ") ? 3 : 2;
-		return (
-			<h2
-				className="text-sm font-semibold"
-				key={`${keyPrefix}-h2-${lineNumber}`}
-			>
-				{renderInlineMarkdown(
-					trimmed.slice(offset),
-					`${keyPrefix}-h2-${lineNumber}`
-				)}
-			</h2>
-		);
-	}
-	return null;
-}
-
-function renderSafeMarkdown(text: string, keyPrefix: string): ReactNode {
-	const lines = text.replaceAll("\r\n", "\n").split("\n");
-	const blocks: ReactNode[] = [];
-	let index = 0;
-
-	while (index < lines.length) {
-		const trimmed = (lines[index] ?? "").trim();
-		if (trimmed.length === 0) {
-			index += 1;
-			continue;
-		}
-		if (trimmed.startsWith("```")) {
-			const parsed = parseCodeBlock(lines, index, keyPrefix);
-			blocks.push(parsed.node);
-			index = parsed.nextIndex;
-			continue;
-		}
-		const heading = parseHeadingBlock(trimmed, index, keyPrefix);
-		if (heading) {
-			blocks.push(heading);
-			index += 1;
-			continue;
-		}
-		if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-			const parsed = parseUnorderedListBlock(lines, index, keyPrefix);
-			blocks.push(parsed.node);
-			index = parsed.nextIndex;
-			continue;
-		}
-		if (ORDERED_LIST_PATTERN.test(trimmed)) {
-			const parsed = parseOrderedListBlock(lines, index, keyPrefix);
-			blocks.push(parsed.node);
-			index = parsed.nextIndex;
-			continue;
-		}
-		const parsed = parseParagraphBlock(lines, index, keyPrefix);
-		blocks.push(parsed.node);
-		index = parsed.nextIndex;
-	}
-
-	if (blocks.length === 0) {
-		return (
-			<p className="wrap-break-word whitespace-pre-wrap" key={keyPrefix}>
-				{text}
-			</p>
-		);
-	}
-
-	return <div className="space-y-2">{blocks}</div>;
 }
 
 function sanitizeLatestUserMessage(messages: UIMessage[]) {
@@ -587,7 +261,16 @@ function AiChatSessionPane({
 		onFinish: ({ isAbort, isError }) => {
 			const submittedPrompt = pendingPromptRef.current;
 			pendingPromptRef.current = null;
-			if (!(isAbort || isError) && submittedPrompt !== null) {
+			if (isAbort) {
+				setLiveAnnouncement("Assistant response stopped.");
+				onConversationFinished();
+				return;
+			}
+			if (isError) {
+				onConversationFinished();
+				return;
+			}
+			if (submittedPrompt !== null) {
 				setInput((current) =>
 					current.trim() === submittedPrompt ? "" : current
 				);
@@ -938,7 +621,7 @@ function ThreadHistorySidebar({
 						>
 							<div className="truncate">{title}</div>
 							<div className="text-muted-foreground mt-0.5 text-[10px]">
-								{formatThreadDate(thread.updatedAt)}
+								{formatUtcDate(thread.updatedAt)}
 							</div>
 						</button>
 						<Button
@@ -1280,13 +963,9 @@ function useAiWorkspaceData({
 		string
 	>({
 		mutationFn: async (threadIdToDelete) => {
-			const response = await fetch(
-				`/api/ai/threads/${encodeURIComponent(threadIdToDelete)}`,
-				{
-					credentials: "include",
-					method: "DELETE",
-				}
-			);
+			const response = await client.api.ai.threads[":id"].$delete({
+				param: { id: threadIdToDelete },
+			});
 			return parseApiResponse<{ deleted: boolean; id: string }>(response);
 		},
 		onSuccess: (_data, deletedId) => {
@@ -1323,70 +1002,6 @@ function useAiWorkspaceData({
 		threadDetailQuery,
 		threadsQuery,
 	};
-}
-
-function AiWorkspaceChatArea({
-	activeOrgName,
-	activeThreadId,
-	agentStatus,
-	canExecuteAi,
-	isRoleResolved,
-	isStatusPending,
-	loadedMessages,
-	onConversationFinished,
-	onNewConversation,
-	onRetryThread,
-	selectedExistingThreadId,
-	sessionKey,
-	statusError,
-	threadError,
-	threadPending,
-}: {
-	activeOrgName: string | null;
-	activeThreadId: string | null;
-	agentStatus: ReturnType<typeof resolveAgentStatus>;
-	canExecuteAi: boolean;
-	isRoleResolved: boolean;
-	isStatusPending: boolean;
-	loadedMessages: UIMessage[];
-	onConversationFinished: () => void;
-	onNewConversation: () => void;
-	onRetryThread: () => void;
-	selectedExistingThreadId: string | null;
-	sessionKey: string;
-	statusError: string | null;
-	threadError: Error | null;
-	threadPending: boolean;
-}) {
-	if (selectedExistingThreadId && threadPending) {
-		return <ThreadLoadingCard />;
-	}
-	if (selectedExistingThreadId && threadError) {
-		return (
-			<ThreadErrorCard
-				errorMessage={threadError.message}
-				onNewConversation={onNewConversation}
-				onRetry={onRetryThread}
-			/>
-		);
-	}
-	return (
-		<AiChatSessionPane
-			activeOrgName={activeOrgName}
-			agentId={agentStatus.defaultAgentId}
-			apiKeyEnvVars={agentStatus.apiKeyEnvVars}
-			canExecuteAi={canExecuteAi}
-			initialMessages={loadedMessages}
-			isConfigured={agentStatus.isConfigured}
-			isRoleResolved={isRoleResolved}
-			isStatusPending={isStatusPending}
-			key={sessionKey}
-			onConversationFinished={onConversationFinished}
-			providerLabel={agentStatus.providerLabel}
-			statusError={statusError}
-			threadId={activeThreadId}
-		/>
-	);
 }
 
 export function AiWorkspaceClient() {
@@ -1453,6 +1068,44 @@ export function AiWorkspaceClient() {
 		selectedExistingThreadId && threadDetailQuery.data ? "loaded" : "fresh"
 	}`;
 
+	const renderMainChatPane = () => {
+		if (selectedExistingThreadId && threadDetailQuery.isPending) {
+			return <ThreadLoadingCard />;
+		}
+		if (
+			selectedExistingThreadId &&
+			threadDetailQuery.isError &&
+			!threadDetailQuery.data
+		) {
+			return (
+				<ThreadErrorCard
+					errorMessage={threadDetailQuery.error.message}
+					onNewConversation={handleNewConversation}
+					onRetry={() => {
+						void threadDetailQuery.refetch();
+					}}
+				/>
+			);
+		}
+		return (
+			<AiChatSessionPane
+				activeOrgName={activeOrg?.name ?? null}
+				agentId={agentStatus.defaultAgentId}
+				apiKeyEnvVars={agentStatus.apiKeyEnvVars}
+				canExecuteAi={canExecuteAi}
+				initialMessages={loadedMessages}
+				isConfigured={agentStatus.isConfigured}
+				isRoleResolved={isRoleResolved}
+				isStatusPending={agentsQuery.isPending}
+				key={sessionKey}
+				onConversationFinished={invalidateConversation}
+				providerLabel={agentStatus.providerLabel}
+				statusError={agentsQuery.isError ? agentsQuery.error.message : null}
+				threadId={activeThreadId}
+			/>
+		);
+	};
+
 	return (
 		<div className="flex flex-col gap-6">
 			<AiWorkspaceBanner
@@ -1490,29 +1143,7 @@ export function AiWorkspaceClient() {
 					/>
 				</div>
 
-				<div className="order-1 min-w-0 lg:order-2">
-					<AiWorkspaceChatArea
-						activeOrgName={activeOrg?.name ?? null}
-						activeThreadId={activeThreadId}
-						agentStatus={agentStatus}
-						canExecuteAi={canExecuteAi}
-						isRoleResolved={isRoleResolved}
-						isStatusPending={agentsQuery.isPending}
-						loadedMessages={loadedMessages}
-						onConversationFinished={invalidateConversation}
-						onNewConversation={handleNewConversation}
-						onRetryThread={() => {
-							void threadDetailQuery.refetch();
-						}}
-						selectedExistingThreadId={selectedExistingThreadId}
-						sessionKey={sessionKey}
-						statusError={agentsQuery.isError ? agentsQuery.error.message : null}
-						threadError={
-							threadDetailQuery.isError ? threadDetailQuery.error : null
-						}
-						threadPending={threadDetailQuery.isPending}
-					/>
-				</div>
+				<div className="order-1 min-w-0 lg:order-2">{renderMainChatPane()}</div>
 			</div>
 		</div>
 	);
