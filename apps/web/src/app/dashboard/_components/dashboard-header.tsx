@@ -6,8 +6,6 @@ import {
 	type OrganizationItem,
 	OrganizationSwitcher,
 } from "@workspace/ui/components/organization-switcher";
-import { cn } from "@workspace/ui/lib/utils";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -19,7 +17,7 @@ import { authClient } from "@/lib/auth-client";
 import type { ServerOrganization } from "@/lib/auth-server";
 import { useOrganizationMutations } from "@/lib/organization-hooks";
 
-const DASHBOARD_NAV_ITEMS = [
+const _DASHBOARD_NAV_ITEMS = [
 	{ href: "/dashboard", label: "Overview", exact: true },
 	{ href: "/dashboard/files", label: "Files & RAG", exact: false },
 	{ href: "/dashboard/ai", label: "AI Assistant", exact: false },
@@ -38,7 +36,7 @@ export function DashboardHeader({
 	initialUser = null,
 }: DashboardHeaderProps) {
 	const router = useRouter();
-	const pathname = usePathname();
+	const _pathname = usePathname();
 	const session = authClient.useSession();
 	const activeOrg = authClient.useActiveOrganization();
 	const listOrgs = authClient.useListOrganizations();
@@ -112,33 +110,6 @@ export function DashboardHeader({
 				</>
 			}
 			brandHref="/dashboard"
-			nav={
-				<nav
-					aria-label="Workspace navigation"
-					className="hidden items-center gap-1 md:flex"
-				>
-					{DASHBOARD_NAV_ITEMS.map((item) => {
-						const isActive = item.exact
-							? pathname === item.href
-							: pathname.startsWith(item.href);
-						return (
-							<Link
-								aria-current={isActive ? "page" : undefined}
-								className={cn(
-									"focus-visible:ring-ring rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none",
-									isActive
-										? "bg-muted text-foreground"
-										: "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-								)}
-								href={item.href}
-								key={item.href}
-							>
-								{item.label}
-							</Link>
-						);
-					})}
-				</nav>
-			}
 		/>
 	);
 }
