@@ -95,7 +95,9 @@ export function ChatMessagePart({
 		if (isUser) {
 			return <p className="wrap-break-word whitespace-pre-wrap">{part.text}</p>;
 		}
-		return <>{renderSafeMarkdown(part.text, partKey)}</>;
+		return renderSafeMarkdown(part.text, partKey, {
+			isAnimating: part.state === "streaming",
+		});
 	}
 	if (part.type === "reasoning") {
 		if (!part.text.trim()) {

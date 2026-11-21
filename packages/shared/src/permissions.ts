@@ -263,6 +263,16 @@ export const PERMISSION_CATALOG_ENTRIES = Object.entries(
 	resource,
 }));
 
+export const ORGANIZATION_PERMISSION_GROUPS: OrganizationPermissionGroup[] =
+	PERMISSION_CATALOG_ENTRIES.map((entry) => ({
+		permissions: entry.actions.map((action) => ({
+			action,
+			key: `${entry.resource}:${action}`,
+			resource: entry.resource,
+		})),
+		resource: entry.resource,
+	}));
+
 export interface OrganizationPermissionItem {
 	action: string;
 	key: string;

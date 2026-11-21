@@ -6,8 +6,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@workspace/ui/components/dialog";
-import { Input } from "@workspace/ui/components/input";
-import OTPInput, { type InputProps } from "@workspace/ui/components/inputs/otp";
+import OTPInput from "@workspace/ui/components/inputs/otp";
 import {
 	type ReactNode,
 	useCallback,
@@ -195,16 +194,6 @@ export const OtpVerification = ({
 		requestAnimationFrame(() => focusFirstOtpInput());
 	};
 
-	const renderInput = (inputProps: InputProps, index: number) => (
-		<Input
-			{...inputProps}
-			aria-describedby={errorMessage ? errorId : undefined}
-			aria-invalid={errorMessage ? true : undefined}
-			className="h-14 w-10 text-center text-xl font-semibold md:w-12 md:text-3xl"
-			key={index}
-		/>
-	);
-
 	// Determine if resend button should be disabled
 	const isResendDisabled =
 		isResending || isTimeoutActive || resendAttempts >= maxResendAttempts;
@@ -261,11 +250,12 @@ export const OtpVerification = ({
 			<form className="space-y-6" onSubmit={handleSubmit}>
 				<div className="flex justify-center" ref={otpContainerRef}>
 					<OTPInput
-						allowedCharacterSet="numeric"
-						containerStyle={"gap-1"}
+						aria-describedby={errorMessage ? errorId : undefined}
+						aria-invalid={errorMessage ? true : undefined}
+						className="gap-1"
+						inputClassName="h-14 w-10 text-xl font-semibold md:w-12 md:text-3xl"
 						numInputs={length}
 						onChange={handleOtpChange}
-						renderInput={renderInput}
 						renderMiddleSeparator
 						shouldAutoFocus
 						value={otp}

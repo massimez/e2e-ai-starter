@@ -6,7 +6,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@workspace/ui/components/dialog";
-import { Input } from "@workspace/ui/components/input";
 import OtpInput from "@workspace/ui/components/inputs/otp";
 import { type FormEvent, type ReactNode, useId, useRef, useState } from "react";
 import {
@@ -105,19 +104,14 @@ export const ResetPasswordOtp = ({
 					</span>
 					<div ref={otpContainerRef}>
 						<OtpInput
+							aria-describedby={errorField === "otp" ? errorId : undefined}
+							aria-invalid={errorField === "otp" ? true : undefined}
+							inputClassName="h-12"
 							numInputs={6}
 							onChange={(nextOtp) => {
 								setOtp(nextOtp);
 								clearError();
 							}}
-							renderInput={(props) => (
-								<Input
-									{...props}
-									aria-describedby={errorField === "otp" ? errorId : undefined}
-									aria-invalid={errorField === "otp" ? true : undefined}
-									className="h-12 text-center"
-								/>
-							)}
 							value={otp}
 						/>
 					</div>

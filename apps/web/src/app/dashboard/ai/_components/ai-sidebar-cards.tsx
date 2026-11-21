@@ -264,7 +264,10 @@ export function WorkspaceBriefCard({
 							members, {data.metrics.committedUploadCount} files)
 						</div>
 						<div className="text-muted-foreground space-y-1.5 text-xs leading-relaxed">
-							{renderSafeMarkdown(data.summary, "workspace-brief")}
+							{renderSafeMarkdown(data.summary, "workspace-brief", {
+								className: "space-y-1.5 text-xs leading-relaxed",
+								mode: "static",
+							})}
 						</div>
 						{data.highlights && data.highlights.length > 0 ? (
 							<div className="space-y-1 pt-1">

@@ -1,8 +1,9 @@
 "use client";
 
-import type {
-	OrganizationPermissionGroup,
-	OrganizationRoleSummary,
+import {
+	ORGANIZATION_PERMISSION_GROUPS,
+	type OrganizationPermissionGroup,
+	type OrganizationRoleSummary,
 } from "@workspace/shared/permissions";
 import { Badge } from "@workspace/ui/components/badge";
 import { Button } from "@workspace/ui/components/button";
@@ -33,7 +34,6 @@ import {
 	useCreateOrganizationRole,
 	useCurrentOrganization,
 	useDeleteOrganizationRole,
-	useOrganizationPermissionsCatalog,
 	useOrganizationRoles,
 	useUpdateOrganizationRole,
 } from "@/lib/organization-hooks";
@@ -396,14 +396,12 @@ export default function RolesSettingsPage() {
 	} = useCurrentOrganization();
 
 	const rolesQuery = useOrganizationRoles(activeOrgId);
-	const catalogQuery = useOrganizationPermissionsCatalog(activeOrgId, true);
 
 	const createRoleMutation = useCreateOrganizationRole(activeOrgId);
 	const updateRoleMutation = useUpdateOrganizationRole(activeOrgId);
 	const deleteRoleMutation = useDeleteOrganizationRole(activeOrgId);
 
 	const roles = rolesQuery.data ?? [];
-	const catalog = catalogQuery.data;
 
 	const [isCreating, setIsCreating] = useState(false);
 	const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
@@ -428,14 +426,14 @@ export default function RolesSettingsPage() {
 	const filteredCatalog = useMemo(() => {
 		const term = filter.trim().toLowerCase();
 		if (!term) {
-			return catalog;
+			return ORGANIZATION_PERMISSION_GROUPS;
 		}
-		return catalog.filter(
+		return ORGANIZATION_PERMISSION_GROUPS.filter(
 			(group) =>
 				group.resource.toLowerCase().includes(term) ||
 				group.permissions.some((item) => item.key.toLowerCase().includes(term))
 		);
-	}, [catalog, filter]);
+	}, [filter]);
 
 	const selectedSet = useMemo(() => new Set(permissions), [permissions]);
 	const isEditable =

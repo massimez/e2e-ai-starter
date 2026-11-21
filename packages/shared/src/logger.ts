@@ -55,49 +55,8 @@ const JWT_REGEX = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/gu;
 const URL_USERINFO_REGEX =
 	/\b(?<scheme>[a-z][a-z0-9+.-]*:\/\/)(?<credentials>[^/\s@:]+(?::[^/\s@]*)?)@/giu;
 const BEARER_HEADER_REGEX = /\b(?<scheme>Bearer\s+)[A-Za-z0-9._~+/-]+=*/giu;
-const CAMEL_TO_SNAKE_REGEX = /(?<lower>[a-z0-9])(?<upper>[A-Z])/gu;
-const KEY_SEPARATOR_REGEX = /[_-]/gu;
-
-const SENSITIVE_KEYS = new Set([
-	"accesstoken",
-	"apikey",
-	"auth",
-	"authorization",
-	"code",
-	"cookie",
-	"credential",
-	"credentials",
-	"idtoken",
-	"jwt",
-	"otp",
-	"otpcode",
-	"passwd",
-	"password",
-	"privatekey",
-	"refreshtoken",
-	"secret",
-	"secretkey",
-	"sessiontoken",
-	"setcookie",
-	"sig",
-	"signature",
-	"state",
-	"token",
-	"verificationcode",
-]);
-
-const SENSITIVE_SUFFIXES = [
-	"_password",
-	"_passwd",
-	"_secret",
-	"_token",
-	"_api_key",
-	"_private_key",
-	"_signature",
-	"_cookie",
-	"_credential",
-	"_credentials",
-];
+const SENSITIVE_KEY_PATTERN =
+	/^(?:access_?token|api_?key|auth|authorization|code|cookie|credentials?|id_?token|jwt|otp(?:_?code)?|passw(?:d|ord)|private_?key|refresh_?token|secret(?:_?key)?|session_?token|set_?cookie|sig(?:nature)?|state|token|verification_?code)$|_(?:password|passwd|secret|token|api_key|private_key|signature|cookie|credentials?)$/iu;
 
 const RESERVED_ROOT_KEYS = new Set([
 	"context",
@@ -108,18 +67,11 @@ const RESERVED_ROOT_KEYS = new Set([
 	"timestamp",
 ]);
 
-function normalizeKey(key: string): string {
-	return key.toLowerCase().replace(KEY_SEPARATOR_REGEX, "");
-}
-
 function isSensitiveKey(key: string): boolean {
-	if (SENSITIVE_KEYS.has(normalizeKey(key))) {
-		return true;
-	}
 	const snake = key
-		.replace(CAMEL_TO_SNAKE_REGEX, "$<lower>_$<upper>")
-		.toLowerCase();
-	return SENSITIVE_SUFFIXES.some((suffix) => snake.endsWith(suffix));
+		.replace(/(?<lower>[a-z0-9])(?<upper>[A-Z])/gu, "$<lower>_$<upper>")
+		.replace(/-/gu, "_");
+	return SENSITIVE_KEY_PATTERN.test(snake);
 }
 
 function scrubString(value: string): string {
@@ -151,7 +103,7 @@ function redactQuery(rawQuery: string): string {
 			// Keep raw key
 		}
 		parts.push(
-			SENSITIVE_KEYS.has(normalizeKey(decodedKey))
+			isSensitiveKey(decodedKey)
 				? `${key}=[REDACTED]`
 				: `${key}=${scrubString(part.slice(eq + 1))}`
 		);
@@ -161,18 +113,16 @@ function redactQuery(rawQuery: string): string {
 
 /** Redacts token-bearing path segments, JWTs, URL userinfo, and secret query parameters. */
 export function sanitizeRequestPath(path: string): string {
-	const hashIndex = path.indexOf("#");
-	const withoutHash = hashIndex === -1 ? path : path.slice(0, hashIndex);
-	const queryIndex = withoutHash.indexOf("?");
-	const pathname =
-		queryIndex === -1 ? withoutHash : withoutHash.slice(0, queryIndex);
+	const withoutHash = path.split("#", 1)[0] ?? path;
+	const qIndex = withoutHash.indexOf("?");
+	const pathname = qIndex === -1 ? withoutHash : withoutHash.slice(0, qIndex);
 	const safePath = scrubString(
 		pathname.replace(SENSITIVE_PATH_TOKEN_REGEX, "$<prefix>[REDACTED]")
 	);
-	if (queryIndex === -1) {
+	if (qIndex === -1) {
 		return safePath;
 	}
-	const safeQuery = redactQuery(withoutHash.slice(queryIndex + 1));
+	const safeQuery = redactQuery(withoutHash.slice(qIndex + 1));
 	return safeQuery ? `${safePath}?${safeQuery}` : safePath;
 }
 
@@ -195,23 +145,33 @@ interface SerializedError {
 	stack?: string;
 }
 
+function getAggregateMessages(error: Error): string[] {
+	if (!("errors" in error && Array.isArray(error.errors))) {
+		return [];
+	}
+	const messages: string[] = [];
+	for (const item of error.errors) {
+		const msg = getErrorHeadline(item);
+		if (msg && !messages.includes(msg)) {
+			messages.push(msg);
+		}
+		if (messages.length >= 5) {
+			break;
+		}
+	}
+	return messages;
+}
+
 function getErrorHeadline(error: unknown): string {
 	if (!(error instanceof Error)) {
 		return scrubString(String(error));
 	}
 	const trimmed = error.message.trim();
-	if (trimmed.length > 0) {
+	if (trimmed) {
 		return scrubString(trimmed);
 	}
-	if ("errors" in error && Array.isArray(error.errors)) {
-		const nested = Array.from(
-			new Set(error.errors.map(getErrorHeadline).filter(Boolean))
-		);
-		if (nested.length > 0) {
-			return nested.join("; ");
-		}
-	}
-	return error.name || "Error";
+	const nested = getAggregateMessages(error);
+	return nested.length > 0 ? nested.join("; ") : error.name || "Error";
 }
 
 function formatCauseChain(cause: unknown, depth = 0): string | undefined {
@@ -219,11 +179,11 @@ function formatCauseChain(cause: unknown, depth = 0): string | undefined {
 		return undefined;
 	}
 	const headline = getErrorHeadline(cause);
-	if (cause instanceof Error && cause.cause !== undefined) {
-		const nested = formatCauseChain(cause.cause, depth + 1);
-		return nested ? `${headline} <- ${nested}` : headline;
-	}
-	return headline;
+	const nested =
+		cause instanceof Error && cause.cause !== undefined
+			? formatCauseChain(cause.cause, depth + 1)
+			: undefined;
+	return nested ? `${headline} <- ${nested}` : headline;
 }
 
 function serializeError(
@@ -238,14 +198,7 @@ function serializeError(
 		typeof rawCode === "string" || typeof rawCode === "number"
 			? rawCode
 			: undefined;
-	const aggregate =
-		"errors" in error && Array.isArray(error.errors)
-			? Array.from(
-					new Set(
-						error.errors.map(getErrorHeadline).filter(Boolean).slice(0, 5)
-					)
-				)
-			: [];
+	const aggregate = getAggregateMessages(error);
 	const cause =
 		error.cause === undefined ? undefined : formatCauseChain(error.cause);
 	const stack =
@@ -261,15 +214,40 @@ function serializeError(
 	};
 }
 
+function sanitizeObjectEntries(
+	value: Record<string, unknown>,
+	depth: number,
+	seen: WeakSet<object>,
+	skipReservedRoot: boolean
+): Record<string, unknown> {
+	const result: Record<string, unknown> = {};
+	for (const [key, entryValue] of Object.entries(value)) {
+		if (
+			entryValue === undefined ||
+			(skipReservedRoot && RESERVED_ROOT_KEYS.has(key))
+		) {
+			continue;
+		}
+		if (isSensitiveKey(key)) {
+			result[key] = "[REDACTED]";
+			continue;
+		}
+		const sanitized = sanitizeValue(entryValue, depth + 1, seen);
+		if (sanitized !== undefined) {
+			result[key] = sanitized;
+		}
+	}
+	return result;
+}
+
 function sanitizeValue(
 	value: unknown,
 	depth: number,
-	seen: WeakSet<object>
+	seen: WeakSet<object>,
+	skipReservedRoot = false
 ): unknown {
-	if (value === undefined) {
-		return undefined;
-	}
 	if (
+		value === undefined ||
 		value === null ||
 		typeof value === "boolean" ||
 		typeof value === "number"
@@ -298,53 +276,18 @@ function sanitizeValue(
 		return "[Circular]";
 	}
 	seen.add(value);
-
-	if (Array.isArray(value)) {
-		const mapped = value
-			.map((item) => sanitizeValue(item, depth + 1, seen))
-			.filter((item) => item !== undefined);
-		seen.delete(value);
-		return mapped;
-	}
-
-	const result: Record<string, unknown> = {};
-	for (const [key, entryValue] of Object.entries(value)) {
-		if (entryValue === undefined) {
-			continue;
-		}
-		if (isSensitiveKey(key)) {
-			result[key] = "[REDACTED]";
-			continue;
-		}
-		const sanitized = sanitizeValue(entryValue, depth + 1, seen);
-		if (sanitized !== undefined) {
-			result[key] = sanitized;
-		}
-	}
+	const sanitized = Array.isArray(value)
+		? value
+				.map((item) => sanitizeValue(item, depth + 1, seen))
+				.filter((item) => item !== undefined)
+		: sanitizeObjectEntries(
+				value as Record<string, unknown>,
+				depth,
+				seen,
+				skipReservedRoot
+			);
 	seen.delete(value);
-	return result;
-}
-
-function sanitizeMetadata(metadata?: LogMetadata): Record<string, unknown> {
-	if (!metadata) {
-		return {};
-	}
-	const seen = new WeakSet<object>();
-	const clean: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(metadata)) {
-		if (value === undefined || RESERVED_ROOT_KEYS.has(key)) {
-			continue;
-		}
-		if (isSensitiveKey(key)) {
-			clean[key] = "[REDACTED]";
-			continue;
-		}
-		const sanitized = sanitizeValue(value, 0, seen);
-		if (sanitized !== undefined) {
-			clean[key] = sanitized;
-		}
-	}
-	return clean;
+	return sanitized;
 }
 
 /** Normalizes an optional env value to lowercase or `undefined` when empty. */
@@ -367,19 +310,6 @@ function resolveOption<const T extends readonly string[]>(
 		: fallback;
 }
 
-function resolveColors(explicit?: boolean): boolean {
-	if (explicit !== undefined) {
-		return explicit;
-	}
-	if (process.env.NO_COLOR || process.env.FORCE_COLOR === "0") {
-		return false;
-	}
-	if (process.env.FORCE_COLOR) {
-		return true;
-	}
-	return Boolean(process.stdout?.isTTY);
-}
-
 function formatDuration(durationMs: number): string {
 	if (durationMs < 1) {
 		return `${durationMs.toFixed(1)}ms`;
@@ -387,28 +317,6 @@ function formatDuration(durationMs: number): string {
 	return durationMs < 1000
 		? `${Math.round(durationMs)}ms`
 		: `${(durationMs / 1000).toFixed(2)}s`;
-}
-
-function resolveHttpLevel(entry: HttpRequestLog): ActiveLogLevel {
-	if (entry.status >= 500) {
-		return "error";
-	}
-	if (entry.status >= 400) {
-		return "warn";
-	}
-	return entry.method === "OPTIONS" ? "debug" : "info";
-}
-
-function writeToSink(
-	sink: LoggerSink,
-	level: ActiveLogLevel,
-	line: string
-): void {
-	if (level === "debug") {
-		(sink.debug ?? sink.info)(line);
-		return;
-	}
-	sink[level](line);
 }
 
 const DEFAULT_SINK: LoggerSink = {
@@ -429,26 +337,25 @@ function loadPrettyFactory(
 				opts: Record<string, unknown>
 			) => (input: string | Record<string, unknown>) => string;
 		};
-		if (typeof mod.prettyFactory !== "function") {
-			return null;
-		}
-		return mod.prettyFactory({
-			colorize: colors,
-			errorLikeObjectKeys: ["error", "err"],
-			hideObject: false,
-			ignore: "service,context",
-			levelKey: "level",
-			messageFormat: (log: Record<string, unknown>, messageKey: string) => {
-				const msg = String(log[messageKey] ?? "");
-				return typeof log.context === "string"
-					? `[${log.context}] ${msg}`
-					: msg;
-			},
-			messageKey: "message",
-			singleLine: true,
-			timestampKey: "timestamp",
-			translateTime: "SYS:HH:MM:ss.l",
-		});
+		return typeof mod.prettyFactory === "function"
+			? mod.prettyFactory({
+					colorize: colors,
+					errorLikeObjectKeys: ["error", "err"],
+					hideObject: false,
+					ignore: "service,context",
+					levelKey: "level",
+					messageFormat: (log: Record<string, unknown>, messageKey: string) => {
+						const msg = String(log[messageKey] ?? "");
+						return typeof log.context === "string"
+							? `[${log.context}] ${msg}`
+							: msg;
+					},
+					messageKey: "message",
+					singleLine: true,
+					timestampKey: "timestamp",
+					translateTime: "SYS:HH:MM:ss.l",
+				})
+			: null;
 	} catch {
 		return null;
 	}
@@ -473,20 +380,25 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 	const includeStack =
 		options.includeStack ??
 		(process.env.NODE_ENV !== "production" || level === "debug");
+	const colors =
+		options.colors ??
+		(process.env.NO_COLOR || process.env.FORCE_COLOR === "0"
+			? false
+			: Boolean(process.env.FORCE_COLOR || process.stdout?.isTTY));
 
 	const sink = options.sink ?? DEFAULT_SINK;
-	const formatPretty =
-		format === "pretty"
-			? loadPrettyFactory(resolveColors(options.colors))
-			: null;
+	const formatPretty = format === "pretty" ? loadPrettyFactory(colors) : null;
 
-	// Track active level synchronously across Pino's synchronous `write` call to avoid JSON.parse in JSON mode
 	let activeEmitLevel: ActiveLogLevel = "info";
 	const destination: DestinationStream = {
 		write(chunk: string): void {
 			const trimmed = chunk.trimEnd();
 			const output = formatPretty ? formatPretty(trimmed).trimEnd() : trimmed;
-			writeToSink(sink, activeEmitLevel, output);
+			if (activeEmitLevel === "debug") {
+				(sink.debug ?? sink.info)(output);
+				return;
+			}
+			sink[activeEmitLevel](output);
 		},
 	};
 
@@ -513,12 +425,15 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 		metadata?: LogMetadata,
 		error?: SerializedError
 	): void {
+		const cleanMetadata = metadata
+			? (sanitizeValue(metadata, 0, new WeakSet<object>(), true) as LogMetadata)
+			: {};
 		activeEmitLevel = emitLevel;
 		pinoInstance[emitLevel](
 			{
 				context,
 				...(error ? { error } : {}),
-				...sanitizeMetadata(metadata),
+				...cleanMetadata,
 				...(error?.code === undefined ? {} : { code: error.code }),
 			},
 			scrubString(message)
@@ -556,7 +471,14 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 							requestId: entry.requestId,
 							userId: entry.userId,
 						};
-			emit(resolveHttpLevel(entry), "HTTP", summary, metadata);
+			let httpLevel: ActiveLogLevel =
+				entry.method === "OPTIONS" ? "debug" : "info";
+			if (entry.status >= 500) {
+				httpLevel = "error";
+			} else if (entry.status >= 400) {
+				httpLevel = "warn";
+			}
+			emit(httpLevel, "HTTP", summary, metadata);
 		},
 	};
 }

@@ -33,6 +33,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "sonner": "catalog:",
+    "streamdown": "^2.8.0",
     "zod": "catalog:"
   },
   "devDependencies": {
