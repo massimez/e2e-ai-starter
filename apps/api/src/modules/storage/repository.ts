@@ -18,7 +18,7 @@ import {
 	sql,
 } from "drizzle-orm";
 import { AppError, ConflictError, isPgErrorCode } from "../../lib/errors";
-import { withOrg } from "../../lib/tenant";
+import { withActiveOrg } from "../../lib/tenant";
 import type { ListUploadsQuery } from "./schema";
 
 export type UploadRow = typeof uploads.$inferSelect;
@@ -47,8 +47,9 @@ async function getPendingReservedBytesFromExecutor(
 		})
 		.from(uploads)
 		.where(
-			and(
-				eq(uploads.organizationId, organizationId),
+			withActiveOrg(
+				uploads,
+				organizationId,
 				eq(uploads.status, "pending"),
 				or(isNull(uploads.expiresAt), gt(uploads.expiresAt, now))
 			)
@@ -62,15 +63,17 @@ function createDrizzleStorageTxRepository(tx: typeof db) {
 			fileKeys: string[];
 			now: Date;
 			organizationId: string;
+			updatedBy?: string;
 		}) {
 			return await tx
 				.update(uploads)
 				.set({
 					status: "committed",
 					updatedAt: params.now,
+					updatedBy: params.updatedBy ?? null,
 				})
 				.where(
-					withOrg(
+					withActiveOrg(
 						uploads,
 						params.organizationId,
 						inArray(uploads.fileKey, params.fileKeys),
@@ -92,36 +95,6 @@ function createDrizzleStorageTxRepository(tx: typeof db) {
 					updatedAt: now,
 				})
 				.where(eq(organizationStorageLimits.organizationId, organizationId));
-		},
-
-		async deleteFolderById(organizationId: string, id: string) {
-			const [deleted] = await tx
-				.delete(storageFolders)
-				.where(
-					withOrg(storageFolders, organizationId, eq(storageFolders.id, id))
-				)
-				.returning();
-			return deleted ?? null;
-		},
-
-		async deleteUploadById(organizationId: string, id: string) {
-			const [deleted] = await tx
-				.delete(uploads)
-				.where(withOrg(uploads, organizationId, eq(uploads.id, id)))
-				.returning();
-			return deleted ?? null;
-		},
-
-		async deleteUploadsByIds(
-			organizationId: string,
-			ids: string[]
-		): Promise<void> {
-			if (ids.length === 0) {
-				return;
-			}
-			await tx
-				.delete(uploads)
-				.where(withOrg(uploads, organizationId, inArray(uploads.id, ids)));
 		},
 
 		async ensureAndLockStorageLimit(organizationId: string) {
@@ -150,7 +123,7 @@ function createDrizzleStorageTxRepository(tx: typeof db) {
 					parentId: storageFolders.parentId,
 				})
 				.from(storageFolders)
-				.where(eq(storageFolders.organizationId, organizationId));
+				.where(withActiveOrg(storageFolders, organizationId));
 		},
 
 		async findLockedPendingUploads(params: {
@@ -162,7 +135,7 @@ function createDrizzleStorageTxRepository(tx: typeof db) {
 				.select()
 				.from(uploads)
 				.where(
-					withOrg(
+					withActiveOrg(
 						uploads,
 						params.organizationId,
 						inArray(uploads.fileKey, params.fileKeys),
@@ -181,13 +154,13 @@ function createDrizzleStorageTxRepository(tx: typeof db) {
 		}) {
 			let filter: SQL | null = null;
 			if (params.id) {
-				filter = withOrg(
+				filter = withActiveOrg(
 					uploads,
 					params.organizationId,
 					eq(uploads.id, params.id)
 				);
 			} else if (params.fileKey) {
-				filter = withOrg(
+				filter = withActiveOrg(
 					uploads,
 					params.organizationId,
 					eq(uploads.fileKey, params.fileKey)
@@ -216,7 +189,11 @@ function createDrizzleStorageTxRepository(tx: typeof db) {
 				.select()
 				.from(uploads)
 				.where(
-					withOrg(uploads, organizationId, inArray(uploads.folderId, folderIds))
+					withActiveOrg(
+						uploads,
+						organizationId,
+						inArray(uploads.folderId, folderIds)
+					)
 				)
 				.for("update");
 		},
@@ -249,6 +226,71 @@ function createDrizzleStorageTxRepository(tx: typeof db) {
 			}
 			return inserted;
 		},
+
+		async softDeleteFoldersByIds(
+			organizationId: string,
+			ids: string[],
+			now: Date,
+			updatedBy?: string
+		) {
+			if (ids.length === 0) {
+				return [];
+			}
+			return await tx
+				.update(storageFolders)
+				.set({
+					deletedAt: now,
+					updatedAt: now,
+					updatedBy: updatedBy ?? null,
+				})
+				.where(
+					withActiveOrg(
+						storageFolders,
+						organizationId,
+						inArray(storageFolders.id, ids)
+					)
+				)
+				.returning();
+		},
+
+		async softDeleteUploadById(
+			organizationId: string,
+			id: string,
+			now: Date,
+			updatedBy?: string
+		) {
+			const [deleted] = await tx
+				.update(uploads)
+				.set({
+					deletedAt: now,
+					updatedAt: now,
+					updatedBy: updatedBy ?? null,
+				})
+				.where(withActiveOrg(uploads, organizationId, eq(uploads.id, id)))
+				.returning();
+			return deleted ?? null;
+		},
+
+		async softDeleteUploadsByIds(
+			organizationId: string,
+			ids: string[],
+			now: Date,
+			updatedBy?: string
+		): Promise<void> {
+			if (ids.length === 0) {
+				return;
+			}
+			await tx
+				.update(uploads)
+				.set({
+					deletedAt: now,
+					updatedAt: now,
+					updatedBy: updatedBy ?? null,
+				})
+				.where(
+					withActiveOrg(uploads, organizationId, inArray(uploads.id, ids))
+				);
+		},
 	};
 }
 
@@ -262,6 +304,7 @@ export type StorageTxRepository = ReturnType<
 export function createDrizzleStorageRepository(database = db) {
 	return {
 		async createFolder(params: {
+			createdBy?: string;
 			name: string;
 			organizationId: string;
 			parentId: string | null;
@@ -270,9 +313,11 @@ export function createDrizzleStorageRepository(database = db) {
 				const [created] = await database
 					.insert(storageFolders)
 					.values({
+						createdBy: params.createdBy ?? null,
 						name: params.name,
 						organizationId: params.organizationId,
 						parentId: params.parentId,
+						updatedBy: params.createdBy ?? null,
 					})
 					.returning();
 				if (!created) {
@@ -295,7 +340,7 @@ export function createDrizzleStorageRepository(database = db) {
 				.select()
 				.from(uploads)
 				.where(
-					withOrg(
+					withActiveOrg(
 						uploads,
 						organizationId,
 						eq(uploads.id, id),
@@ -314,7 +359,11 @@ export function createDrizzleStorageRepository(database = db) {
 				.select({ id: storageFolders.id })
 				.from(storageFolders)
 				.where(
-					withOrg(storageFolders, organizationId, eq(storageFolders.id, id))
+					withActiveOrg(
+						storageFolders,
+						organizationId,
+						eq(storageFolders.id, id)
+					)
 				)
 				.limit(1);
 			return folder?.id ?? null;
@@ -328,7 +377,7 @@ export function createDrizzleStorageRepository(database = db) {
 				.select()
 				.from(uploads)
 				.where(
-					withOrg(
+					withActiveOrg(
 						uploads,
 						organizationId,
 						inArray(uploads.fileKey, fileKeys),
@@ -358,7 +407,7 @@ export function createDrizzleStorageRepository(database = db) {
 				database
 					.select()
 					.from(storageFolders)
-					.where(eq(storageFolders.organizationId, organizationId))
+					.where(withActiveOrg(storageFolders, organizationId))
 					.orderBy(asc(storageFolders.name)),
 				database
 					.select({
@@ -368,8 +417,11 @@ export function createDrizzleStorageRepository(database = db) {
 					.from(uploads)
 					.where(
 						and(
-							eq(uploads.organizationId, organizationId),
-							eq(uploads.status, "committed"),
+							withActiveOrg(
+								uploads,
+								organizationId,
+								eq(uploads.status, "committed")
+							),
 							sql`${uploads.folderId} IS NOT NULL`
 						)
 					)
@@ -411,7 +463,11 @@ export function createDrizzleStorageRepository(database = db) {
 				);
 			}
 
-			const whereClause = withOrg(uploads, organizationId, ...extraConditions);
+			const whereClause = withActiveOrg(
+				uploads,
+				organizationId,
+				...extraConditions
+			);
 
 			const [items, totalRows] = await Promise.all([
 				database
@@ -444,6 +500,7 @@ export function createDrizzleStorageRepository(database = db) {
 			name: string;
 			now: Date;
 			organizationId: string;
+			updatedBy?: string;
 		}) {
 			try {
 				const [updated] = await database
@@ -451,9 +508,10 @@ export function createDrizzleStorageRepository(database = db) {
 					.set({
 						name: params.name,
 						updatedAt: params.now,
+						updatedBy: params.updatedBy ?? null,
 					})
 					.where(
-						withOrg(
+						withActiveOrg(
 							storageFolders,
 							params.organizationId,
 							eq(storageFolders.id, params.id)
@@ -481,7 +539,11 @@ export function createDrizzleStorageRepository(database = db) {
 				.update(uploads)
 				.set(params.updates)
 				.where(
-					withOrg(uploads, params.organizationId, eq(uploads.id, params.id))
+					withActiveOrg(
+						uploads,
+						params.organizationId,
+						eq(uploads.id, params.id)
+					)
 				)
 				.returning();
 			return updated ?? null;

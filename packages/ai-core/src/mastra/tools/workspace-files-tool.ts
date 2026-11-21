@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { db } from "@workspace/db";
 import { uploads } from "@workspace/db/schema";
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { tenantAiContextSchema } from "../../contracts";
 import {
@@ -71,6 +71,7 @@ export const workspaceFilesTool = createTool({
 			? and(
 					eq(uploads.organizationId, organizationId),
 					eq(uploads.status, "committed"),
+					isNull(uploads.deletedAt),
 					or(
 						sql`${uploads.fileKey} ILIKE ${escapedPattern} ESCAPE '\\'`,
 						sql`coalesce(${uploads.metadata}->>'originalName', '') ILIKE ${escapedPattern} ESCAPE '\\'`
@@ -78,7 +79,8 @@ export const workspaceFilesTool = createTool({
 				)
 			: and(
 					eq(uploads.organizationId, organizationId),
-					eq(uploads.status, "committed")
+					eq(uploads.status, "committed"),
+					isNull(uploads.deletedAt)
 				);
 
 		const rows = await db

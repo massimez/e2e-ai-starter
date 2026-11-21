@@ -6,7 +6,7 @@ import {
 	organizationStorageLimits,
 	uploads,
 } from "@workspace/db/schema";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { tenantAiContextSchema } from "../../contracts";
 import { requireTenantMembership } from "./tenant-auth";
@@ -91,7 +91,8 @@ export const workspaceContextTool = createTool({
 					.where(
 						and(
 							eq(uploads.organizationId, organizationId),
-							eq(uploads.status, "committed")
+							eq(uploads.status, "committed"),
+							isNull(uploads.deletedAt)
 						)
 					),
 			]);

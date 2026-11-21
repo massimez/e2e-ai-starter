@@ -232,16 +232,23 @@ describe("storage service controls and route guards", () => {
 		);
 		let decrementedQuota = false;
 
+		const updatedSets: Record<string, unknown>[] = [];
+
 		spyOn(db, "transaction").mockImplementation((async (
 			callback: (tx: unknown) => Promise<unknown>
 		) => {
 			const txMock = {
-				delete: () => createQueryChain([committedRow]),
 				select: () => createQueryChain([committedRow]),
-				update: () => {
-					decrementedQuota = true;
-					return createQueryChain(undefined);
-				},
+				update: () => ({
+					set: (vals: Record<string, unknown>) => {
+						updatedSets.push(vals);
+						if ("deletedAt" in vals) {
+							return createQueryChain([committedRow]);
+						}
+						decrementedQuota = true;
+						return createQueryChain(undefined);
+					},
+				}),
 			};
 			return await callback(txMock);
 		}) as never);
@@ -249,10 +256,13 @@ describe("storage service controls and route guards", () => {
 		const res = await deleteUpload({
 			id: committedRow.id,
 			organizationId: "org_1",
+			userId: "user_deleter",
 		});
 
 		expect(s3Spy).toHaveBeenCalledTimes(1);
 		expect(decrementedQuota).toBe(true);
+		expect(updatedSets[0]?.deletedAt).toBeInstanceOf(Date);
+		expect(updatedSets[0]?.updatedBy).toBe("user_deleter");
 		expect(res).toEqual({
 			fileKey: committedRow.fileKey,
 			id: committedRow.id,
@@ -385,17 +395,13 @@ describe("storage service controls and route guards", () => {
 			{} as never
 		);
 		let decrementedQuota = false;
-		let deleteCalls = 0;
+		let softDeleteUpdates = 0;
 
 		spyOn(db, "transaction").mockImplementation((async (
 			callback: (tx: unknown) => Promise<unknown>
 		) => {
 			let selectCalls = 0;
 			const txMock = {
-				delete: () => {
-					deleteCalls += 1;
-					return createQueryChain([{ id: folderId }]);
-				},
 				select: () => {
 					selectCalls += 1;
 					if (selectCalls === 1) {
@@ -403,10 +409,16 @@ describe("storage service controls and route guards", () => {
 					}
 					return createQueryChain([uploadA, uploadB]);
 				},
-				update: () => {
-					decrementedQuota = true;
-					return createQueryChain(undefined);
-				},
+				update: () => ({
+					set: (vals: Record<string, unknown>) => {
+						if ("deletedAt" in vals) {
+							softDeleteUpdates += 1;
+							return createQueryChain([{ id: folderId }]);
+						}
+						decrementedQuota = true;
+						return createQueryChain(undefined);
+					},
+				}),
 			};
 			return await callback(txMock);
 		}) as never);
@@ -414,9 +426,10 @@ describe("storage service controls and route guards", () => {
 		const result = await deleteStorageFolder({
 			id: folderId,
 			organizationId: "org_1",
+			userId: "user_deleter",
 		});
 
-		expect(deleteCalls).toBe(2);
+		expect(softDeleteUpdates).toBe(2);
 		expect(decrementedQuota).toBe(true);
 		expect(s3Spy).toHaveBeenCalledTimes(2);
 		expect(result).toEqual({

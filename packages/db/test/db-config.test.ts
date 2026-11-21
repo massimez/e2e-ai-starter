@@ -35,6 +35,8 @@ describe("database connection builder and schema exports", () => {
 	});
 
 	test("exports core domain and auth Drizzle tables", () => {
+		expect(schema.softAudit).toBeDefined();
+		expect(schema.storageFolders).toBeDefined();
 		expect(schema.user).toBeDefined();
 		expect(schema.session).toBeDefined();
 		expect(schema.organization).toBeDefined();

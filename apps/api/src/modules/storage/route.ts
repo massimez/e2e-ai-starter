@@ -69,11 +69,12 @@ export const storageRoutes = createRouter()
 		hasOrgPermission("storage:create"),
 		jsonValidator(commitUploadsSchema),
 		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
+			const { organizationId, userId } = getActiveOrgContext(c);
 			const input = c.req.valid("json");
 			const result = await commitUploads({
 				input,
 				organizationId,
+				userId,
 			});
 			return c.json(createSuccessResponse(result));
 		}
@@ -113,9 +114,13 @@ export const storageRoutes = createRouter()
 		hasOrgPermission("storage:create"),
 		jsonValidator(createStorageFolderSchema),
 		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
+			const { organizationId, userId } = getActiveOrgContext(c);
 			const input = c.req.valid("json");
-			const folder = await createStorageFolder({ input, organizationId });
+			const folder = await createStorageFolder({
+				input,
+				organizationId,
+				userId,
+			});
 			return c.json(createSuccessResponse(folder), 201);
 		}
 	)
@@ -125,10 +130,15 @@ export const storageRoutes = createRouter()
 		paramValidator(folderIdParamSchema),
 		jsonValidator(updateStorageFolderSchema),
 		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
+			const { organizationId, userId } = getActiveOrgContext(c);
 			const { id } = c.req.valid("param");
 			const input = c.req.valid("json");
-			const folder = await updateStorageFolder({ id, input, organizationId });
+			const folder = await updateStorageFolder({
+				id,
+				input,
+				organizationId,
+				userId,
+			});
 			return c.json(createSuccessResponse(folder));
 		}
 	)
@@ -137,9 +147,9 @@ export const storageRoutes = createRouter()
 		hasOrgPermission("storage:delete"),
 		paramValidator(folderIdParamSchema),
 		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
+			const { organizationId, userId } = getActiveOrgContext(c);
 			const { id } = c.req.valid("param");
-			const result = await deleteStorageFolder({ id, organizationId });
+			const result = await deleteStorageFolder({ id, organizationId, userId });
 			return c.json(createSuccessResponse(result));
 		}
 	)
@@ -151,10 +161,10 @@ export const storageRoutes = createRouter()
 		paramValidator(uploadIdParamSchema),
 		jsonValidator(updateUploadSchema),
 		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
+			const { organizationId, userId } = getActiveOrgContext(c);
 			const { id } = c.req.valid("param");
 			const input = c.req.valid("json");
-			const result = await updateUpload({ id, input, organizationId });
+			const result = await updateUpload({ id, input, organizationId, userId });
 			return c.json(createSuccessResponse(result));
 		}
 	)
@@ -169,9 +179,13 @@ export const storageRoutes = createRouter()
 		}),
 		paramValidator(uploadIdParamSchema),
 		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
+			const { organizationId, userId } = getActiveOrgContext(c);
 			const { id } = c.req.valid("param");
-			const result = await indexUploadKnowledge({ id, organizationId });
+			const result = await indexUploadKnowledge({
+				id,
+				organizationId,
+				userId,
+			});
 			return c.json(createSuccessResponse(result));
 		}
 	)
@@ -213,9 +227,9 @@ export const storageRoutes = createRouter()
 		hasOrgPermission("storage:delete"),
 		paramValidator(uploadIdParamSchema),
 		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
+			const { organizationId, userId } = getActiveOrgContext(c);
 			const { id } = c.req.valid("param");
-			const result = await deleteUpload({ id, organizationId });
+			const result = await deleteUpload({ id, organizationId, userId });
 			return c.json(createSuccessResponse(result));
 		}
 	)
@@ -226,12 +240,13 @@ export const storageRoutes = createRouter()
 		hasOrgPermission("storage:delete"),
 		jsonValidator(deleteUploadBodySchema),
 		async (c) => {
-			const { organizationId } = getActiveOrgContext(c);
+			const { organizationId, userId } = getActiveOrgContext(c);
 			const input = c.req.valid("json");
 			const result = await deleteUpload({
 				fileKey: input.fileKey,
 				id: input.id,
 				organizationId,
+				userId,
 			});
 			return c.json(createSuccessResponse(result));
 		}

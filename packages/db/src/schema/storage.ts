@@ -12,6 +12,7 @@ import {
 	uuid,
 	varchar,
 } from "drizzle-orm/pg-core";
+import { softAudit } from "./helpers/common";
 import { organization } from "./organization";
 import { user } from "./user";
 
@@ -46,9 +47,7 @@ export const organizationStorageLimits = pgTable(
 export const storageFolders = pgTable(
 	"storage_folders",
 	{
-		createdAt: timestamp("created_at", { withTimezone: true })
-			.defaultNow()
-			.notNull(),
+		...softAudit,
 		id: uuid("id").default(sql`gen_random_uuid()`).primaryKey(),
 		name: varchar("name", { length: 255 }).notNull(),
 		organizationId: text("organization_id")
@@ -57,10 +56,6 @@ export const storageFolders = pgTable(
 				onDelete: "cascade",
 			}),
 		parentId: uuid("parent_id"),
-		updatedAt: timestamp("updated_at", { withTimezone: true })
-			.defaultNow()
-			.$onUpdateFn(() => new Date())
-			.notNull(),
 	},
 	(table) => [
 		foreignKey({
@@ -72,25 +67,25 @@ export const storageFolders = pgTable(
 			table.parentId
 		),
 		index("storage_folders_parent_idx").on(table.parentId),
-		uniqueIndex("storage_folders_org_parent_name_unique").on(
+		index("storage_folders_org_deleted_idx").on(
 			table.organizationId,
-			table.parentId,
-			table.name
+			table.deletedAt
 		),
+		uniqueIndex("storage_folders_org_parent_name_unique")
+			.on(table.organizationId, table.parentId, table.name)
+			.where(sql`${table.deletedAt} IS NULL`),
 		uniqueIndex("storage_folders_org_root_name_unique")
 			.on(table.organizationId, table.name)
-			.where(sql`${table.parentId} IS NULL`),
+			.where(sql`${table.parentId} IS NULL AND ${table.deletedAt} IS NULL`),
 	]
 );
 
 export const uploads = pgTable(
 	"uploads",
 	{
+		...softAudit,
 		bucket: varchar("bucket", { length: 100 }).notNull(),
 		contentType: varchar("content_type", { length: 100 }),
-		createdAt: timestamp("created_at", { withTimezone: true })
-			.defaultNow()
-			.notNull(),
 		expiresAt: timestamp("expires_at", { withTimezone: true }),
 		fileKey: text("file_key").notNull(),
 		folderId: uuid("folder_id").references(() => storageFolders.id, {
@@ -108,10 +103,6 @@ export const uploads = pgTable(
 			.$type<UploadStatus>()
 			.default("pending")
 			.notNull(),
-		updatedAt: timestamp("updated_at", { withTimezone: true })
-			.defaultNow()
-			.$onUpdateFn(() => new Date())
-			.notNull(),
 		userId: text("user_id").references(() => user.id, {
 			onDelete: "set null",
 		}),
@@ -121,6 +112,7 @@ export const uploads = pgTable(
 		index("uploads_folder_idx").on(table.folderId),
 		index("uploads_user_idx").on(table.userId),
 		index("uploads_expires_at_idx").on(table.expiresAt),
+		index("uploads_org_deleted_idx").on(table.organizationId, table.deletedAt),
 		index("uploads_org_status_created_idx").on(
 			table.organizationId,
 			table.status,
@@ -128,7 +120,7 @@ export const uploads = pgTable(
 		),
 		index("uploads_org_pending_expires_idx")
 			.on(table.organizationId, table.expiresAt)
-			.where(sql`${table.status} = 'pending'`),
+			.where(sql`${table.status} = 'pending' AND ${table.deletedAt} IS NULL`),
 		uniqueIndex("uploads_file_key_unique").on(table.fileKey),
 		check(
 			"uploads_size_non_negative_check",

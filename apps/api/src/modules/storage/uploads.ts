@@ -209,8 +209,9 @@ export function createUploadService(repository: StorageRepository) {
 		async commitUploads(params: {
 			input: CommitUploadsInput;
 			organizationId: string;
+			userId?: string;
 		}) {
-			const { input, organizationId } = params;
+			const { input, organizationId, userId } = params;
 			const uniqueKeys = Array.from(new Set(input.fileKeys));
 			const now = new Date();
 
@@ -269,6 +270,7 @@ export function createUploadService(repository: StorageRepository) {
 					fileKeys: uniqueKeys,
 					now,
 					organizationId,
+					updatedBy: userId,
 				});
 
 				if (updatedRows.length !== uniqueKeys.length) {
@@ -298,11 +300,13 @@ export function createUploadService(repository: StorageRepository) {
 			fileKey?: string;
 			id?: string;
 			organizationId: string;
+			userId?: string;
 		}) {
-			const { fileKey, id, organizationId } = params;
+			const { fileKey, id, organizationId, userId } = params;
 			if (!(id || fileKey)) {
 				throw new ValidationError("Upload identifier is required");
 			}
+			const now = new Date();
 
 			const { deletedBucket, deletedFileKey, deletedId } =
 				await repository.transaction(async (tx) => {
@@ -316,17 +320,15 @@ export function createUploadService(repository: StorageRepository) {
 						throw new NotFoundError("File not found or unauthorized");
 					}
 
-					const deleted = await tx.deleteUploadById(
+					const deleted = await tx.softDeleteUploadById(
 						organizationId,
-						existing.id
+						existing.id,
+						now,
+						userId
 					);
 
 					if (deleted?.size && deleted.status === "committed") {
-						await tx.decrementStorageUsage(
-							organizationId,
-							deleted.size,
-							new Date()
-						);
+						await tx.decrementStorageUsage(organizationId, deleted.size, now);
 					}
 
 					return {
@@ -427,7 +429,11 @@ export function createUploadService(repository: StorageRepository) {
 			};
 		},
 
-		async indexUploadKnowledge(params: { id: string; organizationId: string }) {
+		async indexUploadKnowledge(params: {
+			id: string;
+			organizationId: string;
+			userId?: string;
+		}) {
 			const record = await requireCommittedUpload(
 				repository,
 				params.organizationId,
@@ -477,6 +483,7 @@ export function createUploadService(repository: StorageRepository) {
 				updates: {
 					metadata: nextMetadata,
 					updatedAt: new Date(),
+					updatedBy: params.userId ?? null,
 				},
 			});
 
@@ -618,6 +625,7 @@ export function createUploadService(repository: StorageRepository) {
 				return await tx.insertPendingUpload({
 					bucket: env.S3_BUCKET,
 					contentType: input.contentType,
+					createdBy: userId,
 					expiresAt,
 					fileKey,
 					folderId: input.folderId ?? null,
@@ -628,6 +636,7 @@ export function createUploadService(repository: StorageRepository) {
 					organizationId,
 					size: input.size,
 					status: "pending",
+					updatedBy: userId,
 					userId,
 				});
 			});
@@ -648,8 +657,9 @@ export function createUploadService(repository: StorageRepository) {
 			id: string;
 			input: UpdateUploadInput;
 			organizationId: string;
+			userId?: string;
 		}) {
-			const { id, input, organizationId } = params;
+			const { id, input, organizationId, userId } = params;
 			const existing = await requireCommittedUpload(
 				repository,
 				organizationId,
@@ -683,6 +693,7 @@ export function createUploadService(repository: StorageRepository) {
 					folderId: nextFolderId,
 					metadata: nextMetadata,
 					updatedAt: new Date(),
+					updatedBy: userId ?? null,
 				},
 			});
 

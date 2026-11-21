@@ -38,8 +38,9 @@ export function createFolderService(repository: StorageRepository) {
 		async createStorageFolder(params: {
 			input: CreateStorageFolderInput;
 			organizationId: string;
+			userId?: string;
 		}) {
-			const { input, organizationId } = params;
+			const { input, organizationId, userId } = params;
 			if (input.parentId) {
 				const parentId = await repository.findFolderId(
 					organizationId,
@@ -51,6 +52,7 @@ export function createFolderService(repository: StorageRepository) {
 			}
 
 			const created = await repository.createFolder({
+				createdBy: userId,
 				name: input.name,
 				organizationId,
 				parentId: input.parentId ?? null,
@@ -62,8 +64,13 @@ export function createFolderService(repository: StorageRepository) {
 			};
 		},
 
-		async deleteStorageFolder(params: { id: string; organizationId: string }) {
-			const { id, organizationId } = params;
+		async deleteStorageFolder(params: {
+			id: string;
+			organizationId: string;
+			userId?: string;
+		}) {
+			const { id, organizationId, userId } = params;
+			const now = new Date();
 
 			const { deletedUploads, reclaimedBytes } = await repository.transaction(
 				async (tx) => {
@@ -78,9 +85,11 @@ export function createFolderService(repository: StorageRepository) {
 						folderIdsToRemove
 					);
 
-					await tx.deleteUploadsByIds(
+					await tx.softDeleteUploadsByIds(
 						organizationId,
-						folderUploads.map((item) => item.id)
+						folderUploads.map((item) => item.id),
+						now,
+						userId
 					);
 
 					const totalCommittedBytes = folderUploads.reduce(
@@ -95,12 +104,17 @@ export function createFolderService(repository: StorageRepository) {
 						await tx.decrementStorageUsage(
 							organizationId,
 							totalCommittedBytes,
-							new Date()
+							now
 						);
 					}
 
-					const deletedFolder = await tx.deleteFolderById(organizationId, id);
-					if (!deletedFolder) {
+					const deletedFolders = await tx.softDeleteFoldersByIds(
+						organizationId,
+						folderIdsToRemove,
+						now,
+						userId
+					);
+					if (!deletedFolders.some((folder) => folder.id === id)) {
 						throw new NotFoundError("Folder");
 					}
 
@@ -156,12 +170,14 @@ export function createFolderService(repository: StorageRepository) {
 			id: string;
 			input: UpdateStorageFolderInput;
 			organizationId: string;
+			userId?: string;
 		}) {
 			const updated = await repository.updateFolderName({
 				id: params.id,
 				name: params.input.name,
 				now: new Date(),
 				organizationId: params.organizationId,
+				updatedBy: params.userId,
 			});
 
 			if (!updated) {
