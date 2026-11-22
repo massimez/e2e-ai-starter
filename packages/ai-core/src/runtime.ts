@@ -265,12 +265,9 @@ export function createMastraRuntime(
 	});
 
 	const close = async (): Promise<void> => {
-		await memory?.settled();
-		await Promise.allSettled([
-			observability?.shutdown(),
-			storage?.close(),
-			vector?.disconnect(),
-		]);
+		await Promise.allSettled([memory?.settled()]);
+		await Promise.allSettled([observability?.shutdown()]);
+		await Promise.allSettled([storage?.close(), vector?.disconnect()]);
 	};
 
 	return {

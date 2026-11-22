@@ -1,7 +1,7 @@
 "use client";
 
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
-import { ChevronRight, Wrench } from "lucide-react";
+import { ChevronRight, Loader2, Wrench } from "lucide-react";
 import { renderSafeMarkdown } from "./markdown-renderer";
 
 const TOOL_LABELS: Record<string, string> = {
@@ -82,6 +82,127 @@ function resolveToolOutputPreview(
 	return null;
 }
 
+export function isToolPartRunning(part: UIMessage["parts"][number]): boolean {
+	return (
+		isToolUIPart(part) &&
+		(part.state === "input-streaming" || part.state === "input-available")
+	);
+}
+
+function isVisibleMessagePart(part: UIMessage["parts"][number]): boolean {
+	if (part.type === "text" || part.type === "reasoning") {
+		return part.text.trim().length > 0;
+	}
+	return isToolUIPart(part);
+}
+
+function isPartActivelyStreaming(part: UIMessage["parts"][number]): boolean {
+	if (isToolPartRunning(part)) {
+		return true;
+	}
+	return (
+		(part.type === "text" || part.type === "reasoning") &&
+		part.state === "streaming" &&
+		part.text.trim().length > 0
+	);
+}
+
+export function hasVisibleMessageContent(message: UIMessage): boolean {
+	return message.parts.some(isVisibleMessagePart);
+}
+
+export function getStreamingAssistantStatus(
+	message: UIMessage
+): "thinking" | "generating" | null {
+	if (message.parts.some(isPartActivelyStreaming)) {
+		return null;
+	}
+	return hasVisibleMessageContent(message) ? "generating" : "thinking";
+}
+
+function ToolStateBadge({
+	isRunning,
+	state,
+}: {
+	isRunning: boolean;
+	state: string;
+}) {
+	return (
+		<span className="text-muted-foreground inline-flex items-center gap-1">
+			{isRunning ? (
+				<Loader2
+					aria-hidden="true"
+					className="text-primary h-3 w-3 shrink-0 animate-spin"
+				/>
+			) : null}
+			<span>{formatToolState(state)}</span>
+		</span>
+	);
+}
+
+function ToolMessagePart({
+	part,
+}: {
+	part: Extract<UIMessage["parts"][number], { toolCallId: string }>;
+}) {
+	const toolName = getToolName(part);
+	const inputPreview = "input" in part ? formatJsonPreview(part.input) : null;
+	const outputPreview = resolveToolOutputPreview(part);
+	const hasDetails = Boolean(inputPreview || outputPreview);
+	const isRunning = isToolPartRunning(part);
+
+	if (!hasDetails) {
+		return (
+			<div className="bg-background/70 border-border/60 my-1.5 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]">
+				<Wrench aria-hidden="true" className="text-primary h-3 w-3 shrink-0" />
+				<span className="font-medium">{formatToolLabel(toolName)}</span>
+				<ToolStateBadge isRunning={isRunning} state={part.state} />
+			</div>
+		);
+	}
+
+	return (
+		<details className="bg-background/70 border-border/60 group my-1.5 rounded-lg border px-2.5 py-1.5 text-[11px]">
+			<summary className="flex cursor-pointer list-none items-center justify-between gap-2 select-none">
+				<span className="inline-flex items-center gap-1.5">
+					<ChevronRight
+						aria-hidden="true"
+						className="text-muted-foreground h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+					/>
+					<Wrench
+						aria-hidden="true"
+						className="text-primary h-3 w-3 shrink-0"
+					/>
+					<span className="font-medium">{formatToolLabel(toolName)}</span>
+				</span>
+				<ToolStateBadge isRunning={isRunning} state={part.state} />
+			</summary>
+			<div className="border-border/50 mt-2 space-y-1.5 border-t pt-2">
+				{inputPreview ? (
+					<div>
+						<div className="text-muted-foreground text-[10px] font-medium">
+							Input
+						</div>
+						<pre className="bg-muted/50 mt-0.5 max-h-32 overflow-auto rounded p-1.5 font-mono text-[10px]">
+							{inputPreview}
+						</pre>
+					</div>
+				) : null}
+				{outputPreview ? (
+					<div>
+						<div className="text-muted-foreground text-[10px] font-medium">
+							Output
+						</div>
+						<pre className="bg-muted/50 mt-0.5 max-h-40 overflow-auto rounded p-1.5 font-mono text-[10px]">
+							{outputPreview}
+						</pre>
+					</div>
+				) : null}
+			</div>
+		</details>
+	);
+}
+
 export function ChatMessagePart({
 	isUser,
 	part,
@@ -95,6 +216,9 @@ export function ChatMessagePart({
 		if (isUser) {
 			return <p className="wrap-break-word whitespace-pre-wrap">{part.text}</p>;
 		}
+		if (!part.text.trim() && part.state === "streaming") {
+			return null;
+		}
 		return renderSafeMarkdown(part.text, partKey, {
 			isAnimating: part.state === "streaming",
 		});
@@ -103,10 +227,17 @@ export function ChatMessagePart({
 		if (!part.text.trim()) {
 			return null;
 		}
+		const isReasoningStreaming = part.state === "streaming";
 		return (
 			<details className="border-border/60 bg-background/50 my-1.5 rounded-md border px-2.5 py-1.5 text-xs">
-				<summary className="text-muted-foreground cursor-pointer font-medium select-none">
-					Reasoning
+				<summary className="text-muted-foreground inline-flex cursor-pointer items-center gap-1.5 font-medium select-none">
+					{isReasoningStreaming ? (
+						<Loader2
+							aria-hidden="true"
+							className="text-primary h-3 w-3 shrink-0 animate-spin"
+						/>
+					) : null}
+					<span>{isReasoningStreaming ? "Reasoning..." : "Reasoning"}</span>
 				</summary>
 				<p className="text-muted-foreground mt-1.5 leading-relaxed whitespace-pre-wrap">
 					{part.text}
@@ -115,68 +246,7 @@ export function ChatMessagePart({
 		);
 	}
 	if (isToolUIPart(part)) {
-		const toolName = getToolName(part);
-		const inputPreview = "input" in part ? formatJsonPreview(part.input) : null;
-		const outputPreview = resolveToolOutputPreview(part);
-		const hasDetails = Boolean(inputPreview || outputPreview);
-
-		if (!hasDetails) {
-			return (
-				<div className="bg-background/70 border-border/60 my-1.5 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]">
-					<Wrench
-						aria-hidden="true"
-						className="text-primary h-3 w-3 shrink-0"
-					/>
-					<span className="font-medium">{formatToolLabel(toolName)}</span>
-					<span className="text-muted-foreground">
-						{formatToolState(part.state)}
-					</span>
-				</div>
-			);
-		}
-
-		return (
-			<details className="bg-background/70 border-border/60 group my-1.5 rounded-lg border px-2.5 py-1.5 text-[11px]">
-				<summary className="flex cursor-pointer list-none items-center justify-between gap-2 select-none">
-					<span className="inline-flex items-center gap-1.5">
-						<ChevronRight
-							aria-hidden="true"
-							className="text-muted-foreground h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
-						/>
-						<Wrench
-							aria-hidden="true"
-							className="text-primary h-3 w-3 shrink-0"
-						/>
-						<span className="font-medium">{formatToolLabel(toolName)}</span>
-					</span>
-					<span className="text-muted-foreground">
-						{formatToolState(part.state)}
-					</span>
-				</summary>
-				<div className="border-border/50 mt-2 space-y-1.5 border-t pt-2">
-					{inputPreview ? (
-						<div>
-							<div className="text-muted-foreground text-[10px] font-medium">
-								Input
-							</div>
-							<pre className="bg-muted/50 mt-0.5 max-h-32 overflow-auto rounded p-1.5 font-mono text-[10px]">
-								{inputPreview}
-							</pre>
-						</div>
-					) : null}
-					{outputPreview ? (
-						<div>
-							<div className="text-muted-foreground text-[10px] font-medium">
-								Output
-							</div>
-							<pre className="bg-muted/50 mt-0.5 max-h-40 overflow-auto rounded p-1.5 font-mono text-[10px]">
-								{outputPreview}
-							</pre>
-						</div>
-					) : null}
-				</div>
-			</details>
-		);
+		return <ToolMessagePart part={part} />;
 	}
 	return null;
 }

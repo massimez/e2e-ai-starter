@@ -226,6 +226,134 @@ export interface CreateAiChatParams {
 	userId: string;
 }
 
+interface AiErrorDetails {
+	statusCode?: number;
+	text: string;
+}
+
+const AI_ERROR_RULES: ReadonlyArray<{
+	keywords?: readonly string[];
+	message: string;
+	statusCodes?: readonly number[];
+}> = [
+	{
+		keywords: ["rate limit", "resource_exhausted", "quota exceeded"],
+		message:
+			"The AI provider rate limit or quota was exceeded. Please wait a moment and try again.",
+		statusCodes: [429],
+	},
+	{
+		keywords: ["high demand", "overloaded", "unavailable"],
+		message:
+			"The AI model is currently experiencing high demand and is temporarily unavailable. Please try again in a moment.",
+		statusCodes: [503],
+	},
+	{
+		message:
+			"The AI provider rejected the request due to an authentication or permission error. Check your provider API key configuration.",
+		statusCodes: [401, 403],
+	},
+	{
+		message:
+			"The selected AI model was not found or is unavailable for this provider.",
+		statusCodes: [404],
+	},
+	{
+		keywords: ["context", "token", "too long"],
+		message:
+			"The conversation or prompt exceeded the model's context limit. Try starting a new thread or shortening your message.",
+		statusCodes: [400, 422],
+	},
+	{
+		message:
+			"The AI provider rejected the request parameters. Please check your selected model or prompt and try again.",
+		statusCodes: [400, 422],
+	},
+	{
+		keywords: ["timeout", "timed out", "econnreset"],
+		message:
+			"The AI provider encountered a temporary server or network error. Please try again shortly.",
+		statusCodes: [500, 502, 504],
+	},
+];
+
+const DEFAULT_AI_ERROR_MESSAGE =
+	"An error occurred while generating the AI response. Please try again.";
+
+function inspectAiError(error: unknown): AiErrorDetails {
+	let statusCode: number | undefined;
+	const parts: string[] = [];
+	let current: unknown = error;
+
+	for (let depth = 0; depth < 5 && current; depth += 1) {
+		if (typeof current === "string") {
+			parts.push(current);
+			break;
+		}
+		if (typeof current !== "object") {
+			break;
+		}
+		const {
+			cause,
+			message,
+			responseBody,
+			status,
+			statusCode: recordStatusCode,
+		} = current as {
+			cause?: unknown;
+			message?: unknown;
+			responseBody?: unknown;
+			status?: unknown;
+			statusCode?: unknown;
+		};
+		if (statusCode === undefined) {
+			if (typeof recordStatusCode === "number") {
+				statusCode = recordStatusCode;
+			} else if (typeof status === "number") {
+				statusCode = status;
+			}
+		}
+		if (typeof message === "string") {
+			parts.push(message);
+		}
+		if (typeof responseBody === "string") {
+			parts.push(responseBody);
+		}
+		current = cause;
+	}
+
+	return {
+		statusCode,
+		text: parts.join(" ").toLowerCase(),
+	};
+}
+
+export function formatAiStreamErrorMessage(
+	error: unknown,
+	details = inspectAiError(error)
+): string {
+	for (const rule of AI_ERROR_RULES) {
+		const matchesStatus =
+			details.statusCode !== undefined &&
+			(rule.statusCodes?.includes(details.statusCode) ?? false);
+		const matchesKeyword =
+			rule.keywords?.some((keyword) => details.text.includes(keyword)) ?? false;
+
+		// Rules with both statusCodes and keywords (like 400/422 context-limit) require status match if keywords are context-specific
+		if (rule.statusCodes && rule.keywords && rule.statusCodes.includes(400)) {
+			if (matchesStatus && matchesKeyword) {
+				return rule.message;
+			}
+			continue;
+		}
+		if (matchesStatus || matchesKeyword) {
+			return rule.message;
+		}
+	}
+
+	return DEFAULT_AI_ERROR_MESSAGE;
+}
+
 export async function createAiChatResponse(
 	params: CreateAiChatParams,
 	repository: AiRepository = drizzleAiRepository
@@ -287,7 +415,7 @@ export async function createAiChatResponse(
 				threadId,
 				userId: params.userId,
 			});
-			return "An error occurred while generating the AI response.";
+			return formatAiStreamErrorMessage(error);
 		},
 		params: {
 			...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
@@ -449,23 +577,26 @@ export async function runWorkspaceBrief(
 	});
 
 	if (result.status !== "success") {
-		logError(
-			"AIService:WorkspaceBrief",
+		const workflowError =
 			"error" in result
 				? result.error
 				: new Error(
 						`Workspace brief workflow ended with status ${result.status}`
-					),
-			{
-				organizationId: params.organizationId,
-				requestId: params.requestId,
-				status: result.status,
-				userId: params.userId,
-			}
-		);
+					);
+		logError("AIService:WorkspaceBrief", workflowError, {
+			organizationId: params.organizationId,
+			requestId: params.requestId,
+			status: result.status,
+			userId: params.userId,
+		});
+		const errorDetails = inspectAiError(workflowError);
+		const httpStatus =
+			errorDetails.statusCode === 429 || errorDetails.statusCode === 503
+				? errorDetails.statusCode
+				: 502;
 		throw new AppError(
-			"Workspace brief workflow failed to complete",
-			502,
+			formatAiStreamErrorMessage(workflowError, errorDetails),
+			httpStatus,
 			"AI_WORKFLOW_FAILED"
 		);
 	}

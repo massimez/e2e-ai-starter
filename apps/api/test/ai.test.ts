@@ -15,7 +15,10 @@ import { auth } from "../src/lib/auth";
 import { AppError, ForbiddenError, NotFoundError } from "../src/lib/errors";
 import { redis } from "../src/lib/redis/client";
 import { resetMemoryRateLimiter } from "../src/middleware/rate-limiter";
-import { aiService } from "../src/modules/ai/service";
+import {
+	aiService,
+	formatAiStreamErrorMessage,
+} from "../src/modules/ai/service";
 
 function mockSession({
 	activeOrganizationId = "org_1",
@@ -491,6 +494,56 @@ describe("/api/ai routes security and behavior", () => {
 		});
 		expect(res.headers.get("access-control-expose-headers")).toContain(
 			"X-AI-Thread-Id"
+		);
+	});
+});
+
+describe("formatAiStreamErrorMessage", () => {
+	test("maps common provider HTTP error codes to user-friendly messages", () => {
+		const err503 = Object.assign(
+			new Error(
+				"This model is currently experiencing high demand. Please try again later."
+			),
+			{ statusCode: 503 }
+		);
+		expect(formatAiStreamErrorMessage(err503)).toContain("high demand");
+
+		const err429 = new Error("Request failed", {
+			cause: { statusCode: 429 },
+		});
+		expect(formatAiStreamErrorMessage(err429)).toContain("rate limit");
+
+		const err401 = Object.assign(new Error("Unauthorized"), {
+			statusCode: 401,
+		});
+		expect(formatAiStreamErrorMessage(err401)).toContain(
+			"authentication or permission error"
+		);
+
+		const err404 = Object.assign(new Error("Model not found"), {
+			statusCode: 404,
+		});
+		expect(formatAiStreamErrorMessage(err404)).toContain("not found");
+
+		const err400Context = Object.assign(
+			new Error("Input token count exceeds maximum context length"),
+			{ statusCode: 400 }
+		);
+		expect(formatAiStreamErrorMessage(err400Context)).toContain(
+			"context limit"
+		);
+
+		const err502 = Object.assign(new Error("Bad gateway"), {
+			statusCode: 502,
+		});
+		expect(formatAiStreamErrorMessage(err502)).toContain(
+			"temporary server or network error"
+		);
+
+		expect(
+			formatAiStreamErrorMessage(new Error("Unexpected internal bug"))
+		).toBe(
+			"An error occurred while generating the AI response. Please try again."
 		);
 	});
 });

@@ -29,6 +29,8 @@ import {
 import {
 	buildKeyedMessageParts,
 	ChatMessagePart,
+	getStreamingAssistantStatus,
+	hasVisibleMessageContent,
 } from "./ai-chat-message-list";
 
 const STARTER_PROMPTS = [
@@ -129,6 +131,78 @@ function AssistantConfigNotice({
 				</p>
 			</div>
 		</div>
+	);
+}
+
+function StreamingStatusIndicator({
+	className,
+	label,
+}: {
+	className?: string;
+	label: string;
+}) {
+	return (
+		<div
+			className={`text-muted-foreground flex items-center gap-2 ${className ?? ""}`}
+		>
+			<Loader2
+				aria-hidden="true"
+				className="text-primary h-3.5 w-3.5 shrink-0 animate-spin"
+			/>
+			<span>{label}</span>
+		</div>
+	);
+}
+
+function ChatMessageItem({
+	isActiveStream,
+	message,
+}: {
+	isActiveStream: boolean;
+	message: UIMessage;
+}) {
+	const isUser = message.role === "user";
+	if (!(isActiveStream || isUser || hasVisibleMessageContent(message))) {
+		return null;
+	}
+	const streamingStatus =
+		isActiveStream && !isUser ? getStreamingAssistantStatus(message) : null;
+
+	return (
+		<li
+			className={`flex flex-col gap-1.5 ${isUser ? "items-end" : "items-start"}`}
+		>
+			<span className="text-muted-foreground px-1 text-[11px] font-medium">
+				{isUser ? "You" : "Workspace Assistant"}
+			</span>
+			<div
+				aria-busy={isActiveStream && !isUser ? true : undefined}
+				className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+					isUser
+						? "bg-primary text-primary-foreground"
+						: "border-border/70 bg-muted/40 text-foreground border"
+				}`}
+			>
+				{buildKeyedMessageParts(message).map(({ key, part }) => (
+					<ChatMessagePart
+						isUser={isUser}
+						key={key}
+						part={part}
+						partKey={key}
+					/>
+				))}
+				{streamingStatus ? (
+					<StreamingStatusIndicator
+						className="mt-1.5 text-xs"
+						label={
+							streamingStatus === "thinking"
+								? "Thinking..."
+								: "Generating response..."
+						}
+					/>
+				) : null}
+			</div>
+		</li>
 	);
 }
 
@@ -419,48 +493,23 @@ export function AiChatSessionPane({
 						</div>
 					) : (
 						<ul aria-label="Conversation messages" className="space-y-4">
-							{messages.map((message) => {
-								const isUser = message.role === "user";
-								return (
-									<li
-										className={`flex flex-col gap-1.5 ${
-											isUser ? "items-end" : "items-start"
-										}`}
-										key={message.id}
-									>
-										<span className="text-muted-foreground px-1 text-[11px] font-medium">
-											{isUser ? "You" : "Workspace Assistant"}
-										</span>
-										<div
-											className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-												isUser
-													? "bg-primary text-primary-foreground"
-													: "border-border/70 bg-muted/40 text-foreground border"
-											}`}
-										>
-											{buildKeyedMessageParts(message).map(({ key, part }) => (
-												<ChatMessagePart
-													isUser={isUser}
-													key={key}
-													part={part}
-													partKey={key}
-												/>
-											))}
-										</div>
-									</li>
-								);
-							})}
-							{status === "submitted" ? (
+							{messages.map((message, index) => (
+								<ChatMessageItem
+									isActiveStream={isStreaming && index === messages.length - 1}
+									key={message.id}
+									message={message}
+								/>
+							))}
+							{isStreaming && messages.at(-1)?.role !== "assistant" ? (
 								<li className="flex flex-col items-start gap-1.5">
 									<span className="text-muted-foreground px-1 text-[11px] font-medium">
 										Workspace Assistant
 									</span>
-									<div className="border-border/70 bg-muted/40 text-muted-foreground inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm">
-										<Loader2
-											aria-hidden="true"
-											className="text-primary h-3.5 w-3.5 animate-spin"
-										/>
-										<span>Thinking...</span>
+									<div
+										aria-busy="true"
+										className="border-border/70 bg-muted/40 inline-flex rounded-2xl border px-4 py-2.5 text-sm"
+									>
+										<StreamingStatusIndicator label="Thinking..." />
 									</div>
 								</li>
 							) : null}

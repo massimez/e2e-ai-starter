@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const DEFAULT_AI_AGENT_ID = "workspace-assistant";
-export const DEFAULT_CHAT_MODEL = "google/gemini-2.5-flash";
+export const DEFAULT_CHAT_MODEL = "google/gemini-3.5-flash-lite";
 export const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-001";
 export const DEFAULT_EMBEDDING_DIMENSIONS = 768;
 export const DEFAULT_MASTRA_DB_SCHEMA = "mastra";
@@ -20,7 +20,7 @@ export const AI_PROVIDERS = {
 	},
 	google: {
 		apiKeyEnvVars: ["GOOGLE_GENERATIVE_AI_API_KEY", "GOOGLE_API_KEY"],
-		exampleChatModel: "google/gemini-2.5-flash",
+		exampleChatModel: "google/gemini-3.5-flash-lite",
 		label: "Google Gemini",
 		supportsEmbeddings: true,
 	},

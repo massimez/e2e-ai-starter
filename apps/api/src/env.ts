@@ -134,7 +134,7 @@ function createApiEnvSchema(rawInput: Record<string, string | undefined>) {
 					MODEL_ID_REGEX,
 					"MASTRA_DEFAULT_MODEL must use the provider/model format (e.g. openai/gpt-5-mini)"
 				)
-				.default("google/gemini-2.5-flash"),
+				.default("google/gemini-3.5-flash-lite"),
 			MASTRA_EMBEDDING_MODEL: z
 				.string()
 				.trim()
