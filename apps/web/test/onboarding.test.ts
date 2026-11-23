@@ -58,6 +58,14 @@ describe("proxy onboarding gate protection and CSP", () => {
 			"http://localhost:3000/?auth=signin&callbackUrl=%2Fdashboard%2Fai"
 		);
 
+		const unauthWorkspaceSettingsResponse = proxy(
+			new NextRequest("http://localhost:3000/settings/workspace/members")
+		);
+		expect(unauthWorkspaceSettingsResponse.status).toBe(307);
+		expect(unauthWorkspaceSettingsResponse.headers.get("location")).toBe(
+			"http://localhost:3000/?auth=signin&callbackUrl=%2Fsettings%2Fworkspace%2Fmembers"
+		);
+
 		const authRequest = new NextRequest("http://localhost:3000/onboarding", {
 			headers: {
 				cookie: "better-auth.session_token=valid-token",
@@ -71,4 +79,17 @@ describe("proxy onboarding gate protection and CSP", () => {
 		expect(publicResponse.status).toBe(200);
 		expect(publicResponse.headers.get("Content-Security-Policy")).toBeTruthy();
 	});
+});
+
+test.each([
+	"/settings",
+	"/settings/account",
+	"/settings/account/profile",
+	"/settings/account/security",
+])("preserves the destination when signing in to %s", (path) => {
+	const response = proxy(new NextRequest(`http://localhost:3000${path}`));
+	expect(response.status).toBe(307);
+	expect(response.headers.get("location")).toBe(
+		`http://localhost:3000/?auth=signin&callbackUrl=${encodeURIComponent(path)}`
+	);
 });
