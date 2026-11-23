@@ -92,6 +92,8 @@ function isProtectedRoute(pathname: string): boolean {
 	return (
 		pathname === "/dashboard" ||
 		pathname.startsWith("/dashboard/") ||
+		pathname === "/settings" ||
+		pathname.startsWith("/settings/") ||
 		pathname === "/onboarding" ||
 		pathname.startsWith("/onboarding/")
 	);

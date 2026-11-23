@@ -21,6 +21,7 @@ import {
 	Settings,
 	Sparkles,
 	User,
+	UserRoundCog,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -138,10 +139,20 @@ export function UserAccountMenu({
 				<DropdownMenuItem asChild>
 					<Link
 						className="flex cursor-pointer items-center gap-2.5 rounded-lg p-2 text-sm"
-						href="/dashboard/settings"
+						href="/settings/workspace"
 					>
 						<Settings className="text-muted-foreground h-4 w-4" />
 						Workspace Settings
+					</Link>
+				</DropdownMenuItem>
+
+				<DropdownMenuItem asChild>
+					<Link
+						className="flex cursor-pointer items-center gap-2.5 rounded-lg p-2 text-sm"
+						href="/settings/account"
+					>
+						<UserRoundCog className="text-muted-foreground h-4 w-4" />
+						Account Settings
 					</Link>
 				</DropdownMenuItem>
 

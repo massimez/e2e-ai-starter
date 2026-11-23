@@ -24,6 +24,7 @@ interface AuthOpenOptions {
 }
 
 interface AuthContextType {
+	openPasswordReset: () => void;
 	openSignIn: (options?: AuthOpenOptions | string) => void;
 	openSignUp: (options?: AuthOpenOptions | string) => void;
 }
@@ -103,7 +104,9 @@ export function AuthProvider({
 	nonce?: string;
 }) {
 	const [isOpen, setIsOpen] = useState(false);
-	const [view, setView] = useState<"signIn" | "signUp">("signIn");
+	const [view, setView] = useState<"signIn" | "signUp" | "forgetPassword">(
+		"signIn"
+	);
 	const [redirectTo, setRedirectTo] = useState<string | undefined>(undefined);
 	const [socialRedirectTo, setSocialRedirectTo] = useState<string | undefined>(
 		undefined
@@ -131,6 +134,14 @@ export function AuthProvider({
 		setIsOpen(true);
 	}, []);
 
+	const openPasswordReset = useCallback(() => {
+		setRedirectTo("/settings/account/security");
+		setSocialRedirectTo("/settings/account/security");
+		setSuccessHandler(undefined);
+		setView("forgetPassword");
+		setIsOpen(true);
+	}, []);
+
 	const handleSuccess = useCallback(async () => {
 		setIsOpen(false);
 		if (successHandler) {
@@ -146,10 +157,11 @@ export function AuthProvider({
 
 	const value = useMemo(
 		() => ({
+			openPasswordReset,
 			openSignIn,
 			openSignUp,
 		}),
-		[openSignIn, openSignUp]
+		[openPasswordReset, openSignIn, openSignUp]
 	);
 
 	return (

@@ -7,51 +7,61 @@ import {
 	Building,
 	LayoutGrid,
 	ShieldCheck,
+	UserRound,
 	Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const navItems = [
+const workspaceNav = [
 	{
-		href: "/dashboard/settings",
+		href: "/settings/workspace",
 		icon: LayoutGrid,
 		label: "Overview",
 	},
 	{
-		href: "/dashboard/settings/general",
+		href: "/settings/workspace/general",
 		icon: Building,
 		label: "General Profile",
 	},
 	{
-		href: "/dashboard/settings/members",
+		href: "/settings/workspace/members",
 		icon: Users,
 		label: "Members & Team",
 	},
 	{
-		href: "/dashboard/settings/roles",
+		href: "/settings/workspace/roles",
 		icon: ShieldCheck,
 		label: "Roles Matrix",
 	},
 	{
-		href: "/dashboard/settings/notifications",
+		href: "/settings/workspace/notifications",
 		icon: Bell,
 		label: "Notifications",
 	},
 	{
-		href: "/dashboard/settings/advanced",
+		href: "/settings/workspace/advanced",
 		icon: AlertTriangle,
 		label: "Danger Zone",
 	},
 ];
 
-export function SettingsNav() {
+const accountNav = [
+	{ href: "/settings/account", icon: LayoutGrid, label: "Overview" },
+	{ href: "/settings/account/profile", icon: UserRound, label: "Profile" },
+	{ href: "/settings/account/security", icon: ShieldCheck, label: "Security" },
+];
+
+export function SettingsNav({ scope }: { scope: "workspace" | "account" }) {
+	const navItems = scope === "account" ? accountNav : workspaceNav;
 	const pathname = usePathname();
 
 	return (
 		<div className="border-border/50 flex border-b pb-1">
 			<nav
-				aria-label="Settings navigation"
+				aria-label={
+					scope === "account" ? "Account settings" : "Workspace settings"
+				}
 				className="-mb-px flex space-x-1.5 overflow-x-auto sm:space-x-2"
 			>
 				{navItems.map((item) => {
@@ -60,6 +70,7 @@ export function SettingsNav() {
 
 					return (
 						<Link
+							aria-current={isActive ? "page" : undefined}
 							className={cn(
 								"flex items-center gap-2 border-b-2 px-3.5 py-2.5 text-xs font-medium whitespace-nowrap transition-all duration-200 sm:text-sm",
 								isActive
@@ -70,6 +81,7 @@ export function SettingsNav() {
 							key={item.href}
 						>
 							<Icon
+								aria-hidden="true"
 								className={cn(
 									"h-4 w-4 transition-colors",
 									isActive ? "text-primary" : "text-muted-foreground"

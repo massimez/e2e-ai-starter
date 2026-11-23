@@ -78,6 +78,28 @@ const nextConfig: NextConfig = {
 			},
 		];
 	},
+	async redirects() {
+		return [
+			{
+				source: "/dashboard/settings/:path*",
+				destination: "/settings/workspace/:path*",
+				permanent: true,
+			},
+			{
+				source: "/account/settings/:path*",
+				destination: "/settings/account/:path*",
+				permanent: true,
+			},
+		];
+	},
+	async rewrites() {
+		return [
+			{
+				source: "/settings/workspace/:path*",
+				destination: "/dashboard/settings/:path*",
+			},
+		];
+	},
 };
 
 export default withBundleAnalyzer(nextConfig);

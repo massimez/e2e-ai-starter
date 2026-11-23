@@ -37,7 +37,7 @@ export default async function DashboardPage() {
 					</h2>
 					<Link
 						className="text-primary flex items-center gap-1 text-xs font-medium hover:underline"
-						href="/dashboard/settings"
+						href="/settings/workspace"
 					>
 						View all settings <ArrowRight className="h-3 w-3" />
 					</Link>
@@ -58,31 +58,31 @@ export default async function DashboardPage() {
 					/>
 					<DashboardTile
 						description="Configure workspace name, workspace slug, and cloud logo branding."
-						href="/dashboard/settings/general"
+						href="/settings/workspace/general"
 						icon={Building2}
 						title="General Profile"
 					/>
 					<DashboardTile
 						description="Manage active teammates, pending invitations, and grant role permissions."
-						href="/dashboard/settings/members"
+						href="/settings/workspace/members"
 						icon={Users}
 						title="Team & Access"
 					/>
 					<DashboardTile
 						description="Review granular capability boundaries for Owner, Admin, Member, and Viewer."
-						href="/dashboard/settings/roles"
+						href="/settings/workspace/roles"
 						icon={ShieldCheck}
 						title="Roles & Matrix"
 					/>
 					<DashboardTile
 						description="Customize in-app, email, and browser Web Push delivery preferences."
-						href="/dashboard/settings/notifications"
+						href="/settings/workspace/notifications"
 						icon={Bell}
 						title="Notification Preferences"
 					/>
 					<DashboardTile
 						description="Ownership transfer workflows and permanent workspace deletion."
-						href="/dashboard/settings/advanced"
+						href="/settings/workspace/advanced"
 						icon={AlertTriangle}
 						title="Danger Zone"
 					/>

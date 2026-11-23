@@ -36,7 +36,7 @@ const HIGHLIGHTS = [
 		contract: "Better Auth + Organizations",
 		detail:
 			"Email OTP, password + Google OAuth, multi-tenant sessions, and dynamic RBAC built in.",
-		href: "/dashboard/settings/members",
+		href: "/settings/workspace/members",
 		title: "Multi-Tenant Auth",
 	},
 	{
@@ -57,7 +57,7 @@ const HIGHLIGHTS = [
 		contract: `S3 / R2 (${formatBytes(STORAGE_CONFIG.MAX_FILE_SIZE, 0)} max)`,
 		detail:
 			"Presigned S3/MinIO uploads with row-locked quotas, private file streaming, and BullMQ jobs.",
-		href: "/dashboard/settings/notifications",
+		href: "/settings/workspace/notifications",
 		title: "Storage & Background Jobs",
 	},
 ] as const;

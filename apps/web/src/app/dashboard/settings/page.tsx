@@ -12,7 +12,7 @@ const settingsCategories = [
 		badge: "Core",
 		description:
 			"Configure workspace brand identity, workspace slug, and cloud logo imagery.",
-		href: "/dashboard/settings/general",
+		href: "/settings/workspace/general",
 		icon: Building2,
 		title: "General Profile & Branding",
 	},
@@ -20,7 +20,7 @@ const settingsCategories = [
 		badge: "Team",
 		description:
 			"Invite teammates, audit member roster, and adjust granular role allocations.",
-		href: "/dashboard/settings/members",
+		href: "/settings/workspace/members",
 		icon: Users,
 		title: "Members & Access Control",
 	},
@@ -28,7 +28,7 @@ const settingsCategories = [
 		badge: "Security",
 		description:
 			"Review granular permissions matrix for Owner, Admin, Member, and Viewer roles.",
-		href: "/dashboard/settings/roles",
+		href: "/settings/workspace/roles",
 		icon: ShieldCheck,
 		title: "Roles & RBAC Matrix",
 	},
@@ -36,7 +36,7 @@ const settingsCategories = [
 		badge: "Alerts",
 		description:
 			"Configure in-app, email, and browser Web Push preferences by category.",
-		href: "/dashboard/settings/notifications",
+		href: "/settings/workspace/notifications",
 		icon: Bell,
 		title: "Notification Channels",
 	},
@@ -44,7 +44,7 @@ const settingsCategories = [
 		badge: "Critical",
 		description:
 			"Transfer primary workspace ownership or execute permanent organization deletion.",
-		href: "/dashboard/settings/advanced",
+		href: "/settings/workspace/advanced",
 		icon: AlertTriangle,
 		title: "Danger Zone & Governance",
 	},
