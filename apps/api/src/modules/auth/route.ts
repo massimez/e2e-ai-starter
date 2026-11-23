@@ -4,6 +4,14 @@ import { extractClientIp } from "../../lib/ip";
 import { rateLimiter } from "../../middleware/rate-limiter";
 
 export const authRoutes = createRouter()
+	.use(
+		"/list-sessions",
+		async (c, next) => {
+			await next();
+			c.header("Cache-Control", "no-store");
+		},
+		rateLimiter(60_000, 20)
+	)
 	// Stricter rate limits for login/signup attempts (10 per minute)
 	.use("/sign-in/*", rateLimiter(60_000, 10))
 	.use("/sign-up/*", rateLimiter(60_000, 10))
