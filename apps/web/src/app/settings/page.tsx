@@ -4,7 +4,7 @@ import { DashboardTile } from "../dashboard/_components/dashboard-tile";
 
 export default function SettingsIndexPage() {
 	return (
-		<div className="mx-auto max-w-7xl space-y-7 p-6 sm:p-10">
+		<div className="mx-auto w-full max-w-6xl space-y-7 px-4 py-8 sm:px-6 sm:py-10">
 			<SettingsPage
 				description="Choose which settings you want to manage."
 				title="Settings"
