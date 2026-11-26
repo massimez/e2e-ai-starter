@@ -1,4 +1,5 @@
 import { lookup } from "node:dns/promises";
+import { encryptSecretValue } from "@workspace/shared/crypto";
 import { resolveSafePushEndpoint } from "@workspace/shared/network";
 import {
 	type OrganizationRoleName,
@@ -11,6 +12,7 @@ import {
 	NOTIFICATION_CHANNELS,
 	type NotificationJobData,
 } from "@workspace/shared/queues";
+import { env } from "../../env";
 import { ValidationError } from "../../lib/errors";
 import { enqueueNotificationsBulk } from "./queue";
 import {
@@ -140,8 +142,15 @@ export function createNotificationService(
 
 		async savePushSubscription(userId: string, input: PushSubscriptionInput) {
 			await assertSafePushEndpoint(input.endpoint);
+			const encryptedInput: PushSubscriptionInput = {
+				...input,
+				keys: {
+					auth: encryptSecretValue(input.keys.auth, env.ENCRYPTION_SECRET),
+					p256dh: encryptSecretValue(input.keys.p256dh, env.ENCRYPTION_SECRET),
+				},
+			};
 			return await repository.upsertPushSubscription({
-				input,
+				input: encryptedInput,
 				updatedAt: new Date(),
 				userId,
 			});

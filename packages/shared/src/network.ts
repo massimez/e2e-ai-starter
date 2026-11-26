@@ -3,6 +3,48 @@ import { BlockList, isIP } from "node:net";
 
 const TRAILING_DOTS_PATTERN = /\.+$/u;
 
+export function isLocalHostname(hostname: string): boolean {
+	const normalized = hostname.trim().toLowerCase();
+	return (
+		normalized === "localhost" ||
+		normalized === "127.0.0.1" ||
+		normalized === "::1" ||
+		normalized === "[::1]"
+	);
+}
+
+export function isHttpsOrLocalUrl(value: string): boolean {
+	try {
+		const parsed = new URL(value);
+		return parsed.protocol === "https:" || isLocalHostname(parsed.hostname);
+	} catch {
+		return false;
+	}
+}
+
+export function hasDatabaseSslOrLocal(
+	databaseUrl: string,
+	databaseSsl: boolean
+): boolean {
+	if (databaseSsl) {
+		return true;
+	}
+	try {
+		const parsed = new URL(databaseUrl);
+		if (isLocalHostname(parsed.hostname)) {
+			return true;
+		}
+		const sslMode = parsed.searchParams.get("sslmode")?.trim().toLowerCase();
+		return (
+			sslMode === "require" ||
+			sslMode === "verify-ca" ||
+			sslMode === "verify-full"
+		);
+	} catch {
+		return false;
+	}
+}
+
 const BLOCKED_EXACT_HOSTNAMES = new Set([
 	"localhost",
 	"localhost.localdomain",

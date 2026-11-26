@@ -8,6 +8,10 @@
       "types": "./src/config.ts",
       "default": "./src/config.ts"
     },
+    "./crypto": {
+      "types": "./src/crypto.ts",
+      "default": "./src/crypto.ts"
+    },
     "./logger": {
       "types": "./src/logger.ts",
       "default": "./src/logger.ts"

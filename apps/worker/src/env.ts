@@ -4,9 +4,20 @@ import {
 	LOG_LEVELS,
 	normalizeOptionalLogEnv,
 } from "@workspace/shared/logger";
+import { hasDatabaseSslOrLocal } from "@workspace/shared/network";
 import { z } from "zod";
 
+const DEFAULT_DEV_SECRET =
+	"default_development_secret_key_32_characters_minimum";
 const VAPID_SUBJECT_REGEX = /^(?:mailto:|https?:\/\/)/iu;
+
+const optionalTrimmedStringSchema = z
+	.string()
+	.optional()
+	.transform((value) => {
+		const trimmed = value?.trim();
+		return trimmed ? trimmed : undefined;
+	});
 
 function isValidRedisUrl(value: string): boolean {
 	try {
@@ -22,6 +33,15 @@ function isValidRedisUrl(value: string): boolean {
 
 const workerEnvSchema = z
 	.object({
+		AUDIT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(365),
+		BETTER_AUTH_SECRET: z
+			.string()
+			.min(32, "BETTER_AUTH_SECRET must be at least 32 characters")
+			.default(DEFAULT_DEV_SECRET),
+		DATABASE_SSL: z
+			.string()
+			.optional()
+			.transform((value) => value?.trim().toLowerCase() === "true"),
 		DATABASE_URL: z
 			.string()
 			.trim()
@@ -34,6 +54,12 @@ const workerEnvSchema = z
 			.trim()
 			.min(1)
 			.default(`${APP_CONFIG.name} <${APP_CONFIG.defaultFromEmail}>`),
+		ENCRYPTION_SECRET: optionalTrimmedStringSchema.refine(
+			(value) => (value ? value.length >= 32 : true),
+			{
+				message: "ENCRYPTION_SECRET must be at least 32 characters when set",
+			}
+		),
 		LOG_FORMAT: z.preprocess(
 			normalizeOptionalLogEnv,
 			z.enum(LOG_FORMATS).optional()
@@ -45,6 +71,12 @@ const workerEnvSchema = z
 		NODE_ENV: z
 			.enum(["development", "test", "production"])
 			.default("development"),
+		NOTIFICATION_RETENTION_DAYS: z.coerce
+			.number()
+			.int()
+			.min(1)
+			.max(3650)
+			.default(90),
 		REDIS_PREFIX: z
 			.string()
 			.trim()
@@ -90,7 +122,12 @@ const workerEnvSchema = z
 		}
 	});
 
-export type WorkerEnv = z.infer<typeof workerEnvSchema>;
+export type WorkerEnv = Omit<
+	z.infer<typeof workerEnvSchema>,
+	"ENCRYPTION_SECRET"
+> & {
+	ENCRYPTION_SECRET: string;
+};
 
 export function parseWorkerEnv(
 	source: Record<string, string | undefined> = process.env
@@ -104,6 +141,8 @@ export function parseWorkerEnv(
 	}
 
 	const { data } = parsed;
+	const resolvedEncryptionSecret =
+		data.ENCRYPTION_SECRET ?? data.BETTER_AUTH_SECRET;
 
 	if (data.NODE_ENV === "production") {
 		if (!source.DATABASE_URL?.trim()) {
@@ -115,9 +154,26 @@ export function parseWorkerEnv(
 		if (!data.RESEND_API_KEY) {
 			throw new Error("RESEND_API_KEY is required in production");
 		}
+		if (!hasDatabaseSslOrLocal(data.DATABASE_URL, data.DATABASE_SSL)) {
+			throw new Error(
+				"DATABASE_SSL=true or sslmode=require is required for remote PostgreSQL hosts in production"
+			);
+		}
+		if (
+			data.ENCRYPTION_SECRET === DEFAULT_DEV_SECRET ||
+			(data.VAPID_PRIVATE_KEY &&
+				resolvedEncryptionSecret === DEFAULT_DEV_SECRET)
+		) {
+			throw new Error(
+				"ENCRYPTION_SECRET (or BETTER_AUTH_SECRET) must not use the default fallback secret in production"
+			);
+		}
 	}
 
-	return data;
+	return {
+		...data,
+		ENCRYPTION_SECRET: resolvedEncryptionSecret,
+	};
 }
 
 export const env = parseWorkerEnv();

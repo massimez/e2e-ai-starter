@@ -192,7 +192,14 @@ export function createDrizzleNotificationRepository(database = db) {
 					},
 					target: [pushSubscription.userId, pushSubscription.endpoint],
 				})
-				.returning();
+				.returning({
+					createdAt: pushSubscription.createdAt,
+					endpoint: pushSubscription.endpoint,
+					id: pushSubscription.id,
+					updatedAt: pushSubscription.updatedAt,
+					userAgent: pushSubscription.userAgent,
+					userId: pushSubscription.userId,
+				});
 			return sub;
 		},
 	};

@@ -1,7 +1,9 @@
 import { db } from "@workspace/db";
 import { pushSubscription } from "@workspace/db/schema";
+import { decryptSecretValue } from "@workspace/shared/crypto";
 import { UnrecoverableError } from "bullmq";
 import { and, eq, inArray } from "drizzle-orm";
+import { env } from "../../../env";
 import { logError, logInfo, logWarning } from "../../../lib/logger";
 import { PushDeliveryError, sendWebPush } from "../../../lib/push-sender";
 import type { NotificationJobData } from "../types";
@@ -159,9 +161,9 @@ export async function handlePushNotification(
 		pendingSubs.map(async (sub) => {
 			await sendWebPush(
 				{
-					auth: sub.keys.auth,
+					auth: decryptSecretValue(sub.keys.auth, env.ENCRYPTION_SECRET),
 					endpoint: sub.endpoint,
-					p256dh: sub.keys.p256dh,
+					p256dh: decryptSecretValue(sub.keys.p256dh, env.ENCRYPTION_SECRET),
 				},
 				pushPayload
 			);
