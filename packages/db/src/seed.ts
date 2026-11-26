@@ -66,6 +66,8 @@ async function seed() {
 		const demoUserId = "usr_demo_admin";
 		const demoMemberId = "mem_demo_admin";
 		const demoAccountId = "acc_demo_admin";
+		const backofficeUserId = "usr_demo_backoffice";
+		const backofficeAccountId = "acc_demo_backoffice";
 		const explicitDemoPassword = process.env.SEED_DEMO_PASSWORD?.trim();
 		const demoPassword =
 			explicitDemoPassword ||
@@ -89,15 +91,58 @@ async function seed() {
 				})
 				.onConflictDoNothing();
 
-			if (demoPasswordHash) {
+			const [resolvedDemoUser] = await tx
+				.select({ id: user.id })
+				.from(user)
+				.where(eq(user.email, "admin@acme.example"))
+				.limit(1);
+			const activeDemoUserId = resolvedDemoUser?.id ?? demoUserId;
+
+			if (demoPasswordHash && activeDemoUserId === demoUserId) {
 				await tx
 					.insert(account)
 					.values({
-						accountId: demoUserId,
+						accountId: activeDemoUserId,
 						id: demoAccountId,
 						password: demoPasswordHash,
 						providerId: "credential",
-						userId: demoUserId,
+						userId: activeDemoUserId,
+					})
+					.onConflictDoNothing();
+			}
+
+			// Dedicated Platform Backoffice operator (user.role = "admin", not a tenant workspace user)
+			await tx
+				.insert(user)
+				.values({
+					email: "superadmin@acme.example",
+					emailVerified: true,
+					firstName: "Platform",
+					id: backofficeUserId,
+					lastName: "Operator",
+					locale: "en",
+					name: "Platform Operator",
+					role: "admin",
+				})
+				.onConflictDoNothing();
+
+			const [resolvedBackofficeUser] = await tx
+				.select({ id: user.id })
+				.from(user)
+				.where(eq(user.email, "superadmin@acme.example"))
+				.limit(1);
+			const activeBackofficeUserId =
+				resolvedBackofficeUser?.id ?? backofficeUserId;
+
+			if (demoPasswordHash && activeBackofficeUserId === backofficeUserId) {
+				await tx
+					.insert(account)
+					.values({
+						accountId: activeBackofficeUserId,
+						id: backofficeAccountId,
+						password: demoPasswordHash,
+						providerId: "credential",
+						userId: activeBackofficeUserId,
 					})
 					.onConflictDoNothing();
 			}
@@ -111,28 +156,35 @@ async function seed() {
 				})
 				.onConflictDoNothing();
 
+			const [resolvedOrg] = await tx
+				.select({ id: organization.id })
+				.from(organization)
+				.where(eq(organization.slug, "acme-corp"))
+				.limit(1);
+			const activeDemoOrgId = resolvedOrg?.id ?? demoOrgId;
+
 			await tx
 				.insert(member)
 				.values({
 					id: demoMemberId,
-					organizationId: demoOrgId,
+					organizationId: activeDemoOrgId,
 					role: "owner",
-					userId: demoUserId,
+					userId: activeDemoUserId,
 				})
 				.onConflictDoNothing();
 
 			await tx
 				.update(user)
-				.set({ defaultOrganizationId: demoOrgId })
+				.set({ defaultOrganizationId: activeDemoOrgId })
 				.where(
-					and(eq(user.id, demoUserId), isNull(user.defaultOrganizationId))
+					and(eq(user.id, activeDemoUserId), isNull(user.defaultOrganizationId))
 				);
 
 			await tx
 				.insert(organizationStorageLimits)
 				.values({
 					currentUsage: 0,
-					organizationId: demoOrgId,
+					organizationId: activeDemoOrgId,
 					storageLimit: 1024 * 1024 * 1024, // 1GB
 				})
 				.onConflictDoNothing();
@@ -142,7 +194,7 @@ async function seed() {
 					category,
 					channel,
 					enabled: true,
-					userId: demoUserId,
+					userId: activeDemoUserId,
 				}))
 			);
 
@@ -154,8 +206,13 @@ async function seed() {
 
 		console.log(
 			demoPassword
-				? "Demo user seeded: admin@acme.example (password configured for local sign-in)"
-				: "Demo user seeded: admin@acme.example (usr_demo_admin)"
+				? "Demo tenant user seeded: admin@acme.example (user.role=user, org owner)"
+				: "Demo tenant user seeded: admin@acme.example (usr_demo_admin)"
+		);
+		console.log(
+			demoPassword
+				? "Demo backoffice operator seeded: superadmin@acme.example (user.role=admin, /admin access)"
+				: "Demo backoffice operator seeded: superadmin@acme.example (usr_demo_backoffice)"
 		);
 		console.log("Organization seeded: Acme Corporation (org_demo_acme)");
 		console.log("Storage quota allocated: 1 GB for Acme Corporation");
