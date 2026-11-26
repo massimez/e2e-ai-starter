@@ -36,7 +36,7 @@ This is a Bun workspaces monorepo using Turborepo:
 - **Error Handling**: Never swallow errors silently. Catch, log with context, and rethrow or return typed error responses.
 - **Naming Conventions**: Prefer kebab-case filenames (`auth-client.ts`, `sign-in.tsx`), PascalCase React components, and `useXxx` hooks.
 - **Security & Data Rules**:
-  - Guard protected API routes with `authMiddleware`, `hasOrgPermission`, and `tenantBoundaryMiddleware`, and validate all untrusted inputs and env schemas with Zod.
+  - Enforce a 3-scope auth boundary: **Account** (`/settings/account/*`, `/api/notifications/*` → `authMiddleware`), **Tenant** (`/dashboard/*`, `/settings/workspace/*`, `/api/{organizations,storage,ai}/*` → `authMiddleware` + `tenantBoundaryMiddleware` + `hasOrgPermission`), and **Backoffice** (`/admin/*`, `/api/admin/*` → `authMiddleware` + `platformAdminMiddleware` via `user.role`, never `member.role`). Validate all untrusted inputs and env schemas with Zod.
   - Keep object storage private (no SVG uploads), infer Drizzle row types via `typeof table.$inferSelect`, and populate Mastra `RequestContext` + `${organizationId}:${userId}` memory `resourceId` strictly server-side.
   - Declare every package dependency explicitly in its workspace `package.json` (`bunfig.toml` uses `linker = "isolated"`).
 - **Package Boundaries**:

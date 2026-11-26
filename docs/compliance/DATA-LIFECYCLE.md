@@ -11,7 +11,7 @@ This document inventories application data stores, cryptographic protections, ca
 | `two_factor` (`secret`, `backupCodes`) | Secret / MFA | TLS | Encrypted by Better Auth using `BETTER_AUTH_SECRET` | TOTP secret & single-use recovery codes |
 | `session` | Auth Token | HTTPS (`HttpOnly`, `SameSite`) + TLS | Infrastructure / DB + Redis | Lifetimes governed by `SESSION_EXPIRES_IN_SECONDS` (default 7d) & `SESSION_UPDATE_AGE_SECONDS` (default 24h) |
 | `push_subscription` (`keys.auth`, `keys.p256dh`) | Secret / Device Key | HTTPS + TLS | **AES-256-GCM (`enc:v1:`)** via `@workspace/shared/crypto` | Encrypted on API save; decrypted in `apps/worker` before Web Push dispatch |
-| `audit_log` | Security Record | TLS | Infrastructure / DB disk | Protected by PostgreSQL `audit_log_immutability_trigger` (append-only; delete permitted only under `SET LOCAL app.audit_retention_prune = 'on'`) |
+| `audit_log` | Security Record | TLS | Infrastructure / DB disk | Protected by PostgreSQL `audit_log_immutability_trigger` (append-only; pruned only via `SECURITY DEFINER` function `public.prune_expired_audit_logs` with a 30-day minimum floor) |
 | `uploads` / S3 Bucket | Tenant Content | HTTPS / TLS | Private bucket + server-side S3/R2 encryption | Soft-deleted in DB (`deleted_at`); private download streaming / short-lived signed URLs |
 | `mastra` schema (`PostgresStore`, `PgVector`) | Tenant AI Memory & RAG | TLS | Infrastructure / DB disk | Isolated schema (`MASTRA_DB_SCHEMA`); strictly scoped by `${organizationId}:${userId}` and `{ organizationId }` vector metadata |
 
@@ -26,7 +26,7 @@ Registered by [apps/worker/src/index.ts](../../apps/worker/src/index.ts) on cron
 | `invitation` | `status = 'expired' AND expires_at < now() - 30 days` | Hard delete | 30 days post-expiry |
 | `uploads` | `status = 'pending' AND deleted_at IS NULL AND expires_at < now() - 1 hour` | Update `status = 'failed'` | 1 hour post-presign expiry |
 | `notification` | `is_read = true AND created_at < now() - NOTIFICATION_RETENTION_DAYS` | Hard delete | `NOTIFICATION_RETENTION_DAYS` (default `90`) |
-| `audit_log` | `created_at < now() - AUDIT_RETENTION_DAYS` | Hard delete inside retention transaction (`SET LOCAL app.audit_retention_prune = 'on'`) | `AUDIT_RETENTION_DAYS` (default `365`) |
+| `audit_log` | `created_at < now() - AUDIT_RETENTION_DAYS` | Hard delete via `public.prune_expired_audit_logs(integer)` (`SECURITY DEFINER`, 30-day floor) | `AUDIT_RETENTION_DAYS` (min `30`, default `365`) |
 
 ## 3. Cascading Deletion Matrix
 
