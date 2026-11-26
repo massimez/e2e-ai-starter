@@ -20,6 +20,7 @@ const VALID_PROD_ENV: Record<string, string> = {
 	BETTER_AUTH_SECRET: "production_secret_with_at_least_32_characters_total",
 	BETTER_AUTH_URL: "https://api.example.com",
 	CORS_ORIGIN: "https://app.example.com, https://admin.example.com",
+	DATABASE_SSL: "true",
 	DATABASE_URL: "postgresql://user:pass@db.internal:5432/app",
 	NODE_ENV: "production",
 	REDIS_URL: "redis://redis.internal:6379/1",
@@ -90,6 +91,49 @@ describe("API environment validation", () => {
 		]);
 		expect(parsed.TURNSTILE_SECRET_KEY).toBe("");
 		expect(parsed.TURNSTILE_ALLOWED_HOSTNAMES_LIST).toEqual([]);
+	});
+
+	test("rejects insecure HTTP origins, non-SSL remote DB, and short/default ENCRYPTION_SECRET in production", () => {
+		expect(() =>
+			parseApiEnv({
+				...VALID_PROD_ENV,
+				BETTER_AUTH_URL: "http://api.example.com",
+			})
+		).toThrow("Invalid API environment variables");
+
+		expect(() =>
+			parseApiEnv({
+				...VALID_PROD_ENV,
+				CORS_ORIGIN: "http://app.example.com",
+			})
+		).toThrow("Invalid API environment variables");
+
+		expect(() =>
+			parseApiEnv({
+				...VALID_PROD_ENV,
+				DATABASE_SSL: "false",
+			})
+		).toThrow("Invalid API environment variables");
+
+		expect(() =>
+			parseApiEnv({
+				...VALID_PROD_ENV,
+				ENCRYPTION_SECRET: "short",
+			})
+		).toThrow("Invalid API environment variables");
+
+		// sslmode=require in DATABASE_URL satisfies TLS requirement
+		const withSslMode = parseApiEnv({
+			...VALID_PROD_ENV,
+			DATABASE_SSL: "false",
+			DATABASE_URL:
+				"postgresql://user:pass@db.internal:5432/app?sslmode=require",
+		});
+		expect(withSslMode.ENCRYPTION_SECRET).toBe(
+			"production_secret_with_at_least_32_characters_total"
+		);
+		expect(withSslMode.SESSION_EXPIRES_IN_SECONDS).toBe(604_800);
+		expect(withSslMode.SESSION_UPDATE_AGE_SECONDS).toBe(86_400);
 	});
 
 	test("parses Turnstile secret key and allowed hostnames list", () => {
@@ -201,6 +245,36 @@ describe("audit path detection and access audit middleware", () => {
 		expect(recorded[1]?.organizationId).toBe("org_1");
 		expect(recorded[1]?.userId).toBe("user_1");
 	});
+
+	test("records session.impersonatedBy in audit log details when present", async () => {
+		const recorded: AuditLogRecord[] = [];
+		const app = new Hono<AppEnv>()
+			.use("*", async (c, next) => {
+				c.set("user", { id: "target_user" } as never);
+				c.set("session", {
+					activeOrganizationId: "org_1",
+					impersonatedBy: "admin_support_7",
+				} as never);
+				await next();
+			})
+			.use(
+				"*",
+				createAccessAuditMiddleware({
+					scope: "api",
+					writeAuditLog: (record) => {
+						recorded.push(record);
+						return Promise.resolve();
+					},
+				})
+			)
+			.post("/api/organizations/current", (c) => c.json({ ok: true }));
+
+		await app.request("/api/organizations/current", { method: "POST" });
+		await drainAuditLogs();
+
+		expect(recorded).toHaveLength(1);
+		expect(recorded[0]?.details?.impersonatedBy).toBe("admin_support_7");
+	});
 });
 
 describe("errors and fallback counter", () => {
@@ -209,6 +283,7 @@ describe("errors and fallback counter", () => {
 			BETTER_AUTH_SECRET: "production_secret_with_at_least_32_characters_total",
 			BETTER_AUTH_URL: "https://api.example.com",
 			CORS_ORIGIN: "https://app.example.com",
+			DATABASE_SSL: "true",
 			DATABASE_URL: "postgresql://user:pass@db.internal:5432/app",
 			NODE_ENV: "production",
 			QUEUE_DRIVER: "inline",

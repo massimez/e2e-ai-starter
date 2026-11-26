@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { db } from "@workspace/db";
+import { decryptSecretValue, isEncryptedValue } from "@workspace/shared/crypto";
 import { Hono } from "hono";
+import { env } from "../src/env";
 import { auth } from "../src/lib/auth";
 import type { AppEnv } from "../src/lib/create-hono-app";
 import { hasOrgPermission } from "../src/middleware/org-permission";
 import { notificationQueue } from "../src/modules/notification/queue";
+import { drizzleNotificationRepository } from "../src/modules/notification/repository";
 import { notificationRoutes } from "../src/modules/notification/route";
 import {
+	createNotificationService,
 	notificationService,
 	pushEndpointResolver,
 } from "../src/modules/notification/service";
@@ -306,6 +310,44 @@ describe("notification routes and fan-out controls", () => {
 			field: "endpoint",
 			path: ["endpoint"],
 		});
+	});
+
+	test("savePushSubscription encrypts push keys at rest and omits keys from returned record", async () => {
+		spyOn(pushEndpointResolver, "lookup").mockResolvedValueOnce([
+			{ address: "93.184.216.34", family: 4 },
+		]);
+
+		let persistedKeys: { auth: string; p256dh: string } | undefined;
+		const testService = createNotificationService({
+			...drizzleNotificationRepository,
+			upsertPushSubscription: (params) => {
+				persistedKeys = params.input.keys;
+				return Promise.resolve({
+					createdAt: params.updatedAt,
+					endpoint: params.input.endpoint,
+					id: "sub_enc_1",
+					updatedAt: params.updatedAt,
+					userAgent: params.input.userAgent ?? null,
+					userId: params.userId,
+				});
+			},
+		});
+
+		const saved = await testService.savePushSubscription("user_1", {
+			endpoint: "https://push.example.com/v1/enc",
+			keys: { auth: "plain-auth", p256dh: "plain-p256dh" },
+		});
+
+		expect(persistedKeys).toBeDefined();
+		expect(isEncryptedValue(persistedKeys?.auth)).toBe(true);
+		expect(isEncryptedValue(persistedKeys?.p256dh)).toBe(true);
+		expect(
+			decryptSecretValue(persistedKeys?.auth ?? "", env.ENCRYPTION_SECRET)
+		).toBe("plain-auth");
+		expect(
+			decryptSecretValue(persistedKeys?.p256dh ?? "", env.ENCRYPTION_SECRET)
+		).toBe("plain-p256dh");
+		expect("keys" in (saved ?? {})).toBe(false);
 	});
 
 	test("updateOrganizationSchema restricts logo to https://, /api/, empty, or null and transfer-ownership requires owner role", async () => {

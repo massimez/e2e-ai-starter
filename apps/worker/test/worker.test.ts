@@ -8,6 +8,7 @@ import {
 	test,
 } from "bun:test";
 import { db } from "@workspace/db";
+import { encryptSecretValue } from "@workspace/shared/crypto";
 import { type Job, UnrecoverableError } from "bullmq";
 import { WebPushError } from "web-push";
 import { env, parseWorkerEnv } from "../src/env";
@@ -24,6 +25,11 @@ import {
 	processNotificationJob,
 } from "../src/processors/notification";
 import { handlePushNotification } from "../src/processors/notification/handlers/handle-push-notification";
+import {
+	processRetentionJob,
+	type RetentionJobData,
+	runDataRetentionCleanup,
+} from "../src/processors/retention";
 
 function createQueryChain<T>(result: T) {
 	const chain = {
@@ -56,6 +62,15 @@ describe("worker environment validation", () => {
 				REDIS_URL: "redis://localhost:6379",
 			})
 		).toThrow("RESEND_API_KEY is required in production");
+
+		expect(() =>
+			parseWorkerEnv({
+				DATABASE_URL: "postgresql://postgres:postgres@db.internal:5432/app",
+				NODE_ENV: "production",
+				REDIS_URL: "redis://localhost:6379",
+				RESEND_API_KEY: "re_test_123",
+			})
+		).toThrow("DATABASE_SSL=true or sslmode=require is required");
 	});
 
 	test("normalizes optional LOG_LEVEL and LOG_FORMAT overrides", () => {
@@ -642,6 +657,133 @@ describe("web push delivery and notification processor", () => {
 
 		await expect(
 			processNotificationJob(failingCheckpointJob)
+		).rejects.toBeInstanceOf(UnrecoverableError);
+	});
+
+	test("decrypts AES-256-GCM encrypted Web Push keys before dispatching", async () => {
+		(env as { VAPID_PUBLIC_KEY: string }).VAPID_PUBLIC_KEY = "vapid-pub";
+		(env as { VAPID_PRIVATE_KEY: string }).VAPID_PRIVATE_KEY = "vapid-priv";
+
+		spyOn(pushTransport, "lookup").mockResolvedValue([
+			{ address: "93.184.216.34", family: 4 },
+		]);
+
+		const encryptedAuth = encryptSecretValue(
+			"plain-auth-secret",
+			env.ENCRYPTION_SECRET
+		);
+		const encryptedP256dh = encryptSecretValue(
+			"plain-p256dh-secret",
+			env.ENCRYPTION_SECRET
+		);
+
+		spyOn(db, "select").mockImplementation((() =>
+			createQueryChain([
+				{
+					endpoint: "https://push.example.com/encrypted",
+					id: "sub_enc",
+					keys: { auth: encryptedAuth, p256dh: encryptedP256dh },
+					userId: "user_enc",
+				},
+			])) as never);
+
+		const sendSpy = spyOn(
+			pushTransport,
+			"sendNotification"
+		).mockResolvedValueOnce({
+			body: "",
+			headers: {},
+			statusCode: 201,
+		});
+
+		await handlePushNotification({
+			category: "security",
+			content: "New sign-in detected",
+			title: "Security Alert",
+			type: "login",
+			userId: "user_enc",
+		});
+
+		expect(sendSpy).toHaveBeenCalledTimes(1);
+		expect(sendSpy.mock.calls[0]?.[0]).toEqual({
+			endpoint: "https://push.example.com/encrypted",
+			keys: {
+				auth: "plain-auth-secret",
+				p256dh: "plain-p256dh-secret",
+			},
+		});
+	});
+});
+
+describe("automated data retention processor", () => {
+	afterEach(() => {
+		mock.restore();
+	});
+
+	test("runs all 5 cleanup stages and sets audit_retention_prune inside transaction", async () => {
+		const returningChain = (count: number) => ({
+			returning: () =>
+				Promise.resolve(
+					Array.from({ length: count }, (_, idx) => ({ id: `row_${idx}` }))
+				),
+		});
+
+		let deleteCall = 0;
+		spyOn(db, "delete").mockImplementation((() => ({
+			where: () => {
+				deleteCall += 1;
+				return returningChain(deleteCall);
+			},
+		})) as never);
+
+		let updateCall = 0;
+		spyOn(db, "update").mockImplementation((() => ({
+			set: () => ({
+				where: () => {
+					updateCall += 1;
+					return returningChain(updateCall);
+				},
+			}),
+		})) as never);
+
+		let executedSetLocal = false;
+		spyOn(db, "transaction").mockImplementation((async (callback: unknown) => {
+			const tx = {
+				delete: () => ({
+					where: () => returningChain(4),
+				}),
+				execute: () => {
+					executedSetLocal = true;
+					return Promise.resolve([]);
+				},
+			};
+			return await (callback as (txArg: typeof tx) => Promise<unknown>)(tx);
+		}) as never);
+
+		const summary = await runDataRetentionCleanup({
+			auditRetentionDays: 365,
+			notificationRetentionDays: 90,
+			now: new Date("2026-11-26T03:00:00.000Z"),
+		});
+
+		expect(executedSetLocal).toBe(true);
+		expect(summary).toEqual({
+			abandonedUploadsMarkedFailed: 2,
+			expiredAuditLogsDeleted: 4,
+			expiredInvitationsDeleted: 2,
+			expiredInvitationsMarked: 1,
+			expiredVerificationsDeleted: 1,
+			oldReadNotificationsDeleted: 3,
+			ranAt: "2026-11-26T03:00:00.000Z",
+		});
+	});
+
+	test("rejects malformed retention job payloads as UnrecoverableError", async () => {
+		await expect(
+			processRetentionJob({
+				data: { triggeredBy: "invalid" } as unknown as RetentionJobData,
+				id: "ret-bad-1",
+			} as Job<RetentionJobData>)
 		).rejects.toBeInstanceOf(UnrecoverableError);
 	});
 });
