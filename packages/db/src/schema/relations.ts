@@ -11,7 +11,7 @@ import {
 	organization,
 	organizationRole,
 } from "./organization";
-import { account, session } from "./session";
+import { account, session, twoFactor } from "./session";
 import { organizationStorageLimits, storageFolders, uploads } from "./storage";
 import { user } from "./user";
 
@@ -28,6 +28,7 @@ export const userRelations = relations(user, ({ many, one }) => ({
 	pushSubscriptions: many(pushSubscription),
 	sentInvitations: many(invitation),
 	sessions: many(session),
+	twoFactors: many(twoFactor),
 	uploads: many(uploads),
 }));
 
@@ -45,6 +46,13 @@ export const sessionRelations = relations(session, ({ one }) => ({
 export const accountRelations = relations(account, ({ one }) => ({
 	user: one(user, {
 		fields: [account.userId],
+		references: [user.id],
+	}),
+}));
+
+export const twoFactorRelations = relations(twoFactor, ({ one }) => ({
+	user: one(user, {
+		fields: [twoFactor.userId],
 		references: [user.id],
 	}),
 }));

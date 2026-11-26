@@ -12,6 +12,7 @@ import { user } from "./user";
 
 export interface AuditLogDetails {
 	durationMs?: number;
+	impersonatedBy?: string;
 	method?: string;
 	path?: string;
 	reason?: string;

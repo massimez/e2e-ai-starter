@@ -8,6 +8,8 @@ import {
 	type AuditLogWriter,
 	DEFAULT_SENSITIVE_READ_PREFIXES,
 	isSensitiveReadPath,
+	MAX_ACTION_LENGTH,
+	MAX_ENTITY_TYPE_LENGTH,
 	persistAuditLog,
 } from "../lib/audit";
 import type { AppEnv } from "../lib/create-hono-app";
@@ -24,9 +26,6 @@ const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const ACCESS_DENIED_STATUSES = new Set([401, 403, 423]);
 const UUID_OR_ID_SEGMENT_REGEX =
 	/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9_-]{16,}|\d+)$/iu;
-
-const MAX_ACTION_LENGTH = 120;
-const MAX_ENTITY_TYPE_LENGTH = 80;
 
 const pendingAuditWrites = new Set<Promise<void>>();
 
@@ -88,6 +87,7 @@ function methodToVerb(method: string): string {
 
 interface SessionActor {
 	activeOrganizationId?: string | null;
+	impersonatedBy?: string | null;
 	userId?: string | null;
 }
 
@@ -170,6 +170,9 @@ export function createAccessAuditMiddleware(
 			action: action.slice(0, MAX_ACTION_LENGTH),
 			details: {
 				durationMs,
+				...(session?.impersonatedBy
+					? { impersonatedBy: session.impersonatedBy }
+					: {}),
 				method,
 				path: sanitizedPath,
 				...(requestId ? { requestId } : {}),

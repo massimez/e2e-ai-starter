@@ -57,6 +57,13 @@
       "when": 1795258300799,
       "tag": "0007_sweet_freak",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795696645744,
+      "tag": "0008_iso27001_controls",
+      "breakpoints": true
     }
   ]
 }

@@ -21,18 +21,13 @@ export const DEFAULT_SENSITIVE_READ_PREFIXES = [
 	"/auth/admin",
 	"/auth/organization",
 	"/storage/files",
-	"/billing",
 	"/admin",
-	"/audit",
-	"/api-keys",
-	"/settings/security",
-	"/organization/security",
 ] as const;
 
 export const API_PREFIX_REGEX = /^\/api(?=\/|$)/u;
 
-const MAX_ACTION_LENGTH = 120;
-const MAX_ENTITY_TYPE_LENGTH = 80;
+export const MAX_ACTION_LENGTH = 120;
+export const MAX_ENTITY_TYPE_LENGTH = 80;
 
 export function normalizeRoutePath(path: string): string {
 	const stripped = path.replace(API_PREFIX_REGEX, "");

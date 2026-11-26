@@ -1,4 +1,11 @@
-import { index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+	boolean,
+	index,
+	integer,
+	pgTable,
+	text,
+	timestamp,
+} from "drizzle-orm/pg-core";
 import { organization } from "./organization";
 import { user } from "./user";
 
@@ -78,4 +85,24 @@ export const verification = pgTable(
 	]
 );
 
+export const twoFactor = pgTable(
+	"two_factor",
+	{
+		id: text("id").primaryKey(),
+		secret: text("secret").notNull(),
+		backupCodes: text("backup_codes").notNull(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		verified: boolean("verified").default(true),
+		failedVerificationCount: integer("failed_verification_count").default(0),
+		lockedUntil: timestamp("locked_until"),
+	},
+	(table) => [
+		index("twoFactor_userId_idx").on(table.userId),
+		index("twoFactor_secret_idx").on(table.secret),
+	]
+);
+
 export type Session = typeof session.$inferSelect;
+export type TwoFactor = typeof twoFactor.$inferSelect;

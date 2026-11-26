@@ -29,6 +29,7 @@ export const user = pgTable(
 		banExpires: timestamp("ban_expires"),
 		phoneNumber: text("phone_number").unique(),
 		phoneNumberVerified: boolean("phone_number_verified").default(false),
+		twoFactorEnabled: boolean("two_factor_enabled").default(false),
 		firstName: text("first_name"),
 		lastName: text("last_name"),
 		locale: text("locale").default("en").notNull(),
