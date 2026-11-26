@@ -74,9 +74,4 @@ export function toIsoString(value: Date | string): string {
 	return value instanceof Date ? value.toISOString() : String(value);
 }
 
-/**
- * Escapes SQL LIKE/ILIKE wildcards (`\`, `%`, `_`) so user search terms match literally.
- */
-export function escapeLikePattern(value: string): string {
-	return value.replace(/[\\%_]/gu, "\\$&");
-}
+export { escapeLikePattern } from "@workspace/db/schema";

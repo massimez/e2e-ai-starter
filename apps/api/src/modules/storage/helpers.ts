@@ -8,6 +8,8 @@ import type {
 	UploadRow,
 } from "./repository";
 
+export { escapeLikePattern as escapeIlikePattern } from "@workspace/db/schema";
+
 const UNSAFE_DISPOSITION_CHARS_REGEX = /[\r\n"\\]/gu;
 const SAFE_INLINE_IMAGE_TYPES = new Set([
 	"image/jpeg",
@@ -19,10 +21,6 @@ const SAFE_INLINE_IMAGE_TYPES = new Set([
 
 export function getPrivateFileProxyUrl(uploadId: string): string {
 	return `/api/storage/files/${uploadId}`;
-}
-
-export function escapeIlikePattern(value: string): string {
-	return value.replace(/[\\%_]/gu, "\\$&");
 }
 
 export function resolveFilePresentation(
