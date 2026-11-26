@@ -19,9 +19,8 @@ export type AuditLogWriter = (record: AuditLogRecord) => Promise<void>;
 
 export const DEFAULT_SENSITIVE_READ_PREFIXES = [
 	"/auth/admin",
-	"/auth/organization",
 	"/storage/files",
-	"/admin",
+	"/admin/audit/export",
 ] as const;
 
 export const API_PREFIX_REGEX = /^\/api(?=\/|$)/u;

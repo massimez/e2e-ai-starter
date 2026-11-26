@@ -11,7 +11,7 @@ interface MemoryStoreEntry {
 }
 
 export interface RateLimiterOptions {
-	identity?: "actor" | "ip";
+	identity?: "actor" | "ip" | "user";
 	operation?: string;
 }
 
@@ -98,8 +98,15 @@ function getMemoryRateLimitResult(
 
 function resolveIdentifier(
 	c: Context<AppEnv>,
-	identity?: "actor" | "ip"
+	identity?: "actor" | "ip" | "user"
 ): string {
+	if (identity === "user") {
+		const user = c.get("user");
+		if (user?.id) {
+			return `user:${user.id}`;
+		}
+	}
+
 	if (identity === "actor") {
 		const user = c.get("user");
 		if (user?.id) {

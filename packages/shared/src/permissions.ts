@@ -5,13 +5,16 @@ import {
 } from "better-auth/plugins/organization/access";
 
 /**
- * Single source of truth for organization RBAC statements and roles.
- * Extends Better Auth's built-in `defaultStatements` with application resources.
+ * Single source of truth for **tenant / organization** RBAC statements and roles.
+ * Extends Better Auth's built-in `defaultStatements` with tenant-scoped resources only.
+ *
+ * Platform backoffice capabilities (such as global audit log inspection/export) are
+ * intentionally NOT modeled here; they are guarded strictly by `user.role === "admin"`
+ * (`isPlatformAdminRole`) under `/api/admin/*` and `/admin/*`.
  */
 export const statements = {
 	...defaultStatements,
 	ai: ["read", "execute", "manage"],
-	audit: ["read", "export"],
 	member: [...defaultStatements.member, "invite", "remove"],
 	notification: ["read", "manage"],
 	setting: ["read", "update"],
@@ -25,7 +28,6 @@ export const roles = {
 	admin: ac.newRole({
 		...adminAc.statements,
 		ai: ["read", "execute", "manage"],
-		audit: ["read"],
 		member: [...adminAc.statements.member, "invite", "remove"],
 		notification: ["read", "manage"],
 		setting: ["read", "update"],
@@ -197,14 +199,21 @@ export const PERMISSION_MATRIX: readonly PermissionMatrixEntry[] = [
 		"ai",
 		"execute"
 	),
-	matrixEntry(
-		"Workspace & Governance",
-		"View Audit Logs",
-		"Inspect workspace security and activity audit logs",
-		"audit",
-		"read"
-	),
 ];
+
+export const PLATFORM_ADMIN_ROLE = "admin" as const;
+
+/**
+ * Checks whether a **platform-level** Better Auth `user.role` grants backoffice operator
+ * access (`/admin/*` and `/api/admin/*`).
+ *
+ * Never pass an organization `member.role` here — use `isOrgAdminRole` / `hasOrgPermission`
+ * for tenant workspace checks.
+ */
+export function isPlatformAdminRole(role: string | null | undefined): boolean {
+	const parsed = parseMemberRoles(role).map((entry) => entry.toLowerCase());
+	return parsed.includes(PLATFORM_ADMIN_ROLE);
+}
 
 export function parseMemberRoles(role: string | null | undefined): string[] {
 	if (!role) {

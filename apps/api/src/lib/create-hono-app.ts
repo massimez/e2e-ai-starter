@@ -18,11 +18,20 @@ import { requestIdMiddleware } from "../middleware/request-id";
 import type { Session, User } from "./auth/index";
 import { AppError, AuthError } from "./errors";
 
+export interface AuditMetaOverride {
+	action?: string;
+	details?: Record<string, unknown>;
+	entityId?: string | null;
+	entityType?: string | null;
+	organizationId?: string | null;
+}
+
 export interface AppEnv {
 	Bindings: {
 		remoteAddress?: string | null;
 	};
 	Variables: {
+		auditMeta?: AuditMetaOverride;
 		permissionCache?: Set<string>;
 		requestId?: string;
 		securityEvent?: unknown;
@@ -267,6 +276,7 @@ export function createApp() {
 			allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 			credentials: true,
 			exposeHeaders: [
+				"Content-Disposition",
 				"x-request-id",
 				"X-AI-Thread-Id",
 				"X-RateLimit-Limit",

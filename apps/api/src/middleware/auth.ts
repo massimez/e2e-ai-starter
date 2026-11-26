@@ -40,8 +40,9 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
 	}
 
 	if (isActiveUserBan(session.user)) {
-		c.set("session", null);
-		c.set("user", null);
+		// Preserve actor context for auditMiddleware; downstream handlers never run because next() is skipped.
+		c.set("session", session.session as Session["session"]);
+		c.set("user", session.user as User);
 		return c.json(
 			createErrorResponse("UserBanned", "User account is banned"),
 			423
