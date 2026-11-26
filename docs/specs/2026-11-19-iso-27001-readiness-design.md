@@ -1,7 +1,7 @@
 # ISO/IEC 27001:2022 Enterprise Readiness Design (`e2e-ai-starter`)
 
 - **Date:** 2026-11-19
-- **Status:** Draft (Pending User Approval)
+- **Status:** Core Controls Implemented (2026-11-26 — migration `0008_iso27001_controls.sql`, account 2FA & active sessions at `/settings/account/security`, field encryption, production TLS checks, automated retention worker, CI vulnerability audit; backoffice audit viewer tracked in follow-up commit)
 - **Selected Approach:** Approach B — Full Enterprise Suite
 
 ---
