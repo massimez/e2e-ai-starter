@@ -14,6 +14,15 @@ import type {
 	TurnstileHandle,
 	TurnstileTranslations,
 } from "./turnstile-widget";
+import type { TwoFactorChallengeProps } from "./two-factor-challenge";
+
+function isTwoFactorRedirectPayload(data: unknown): boolean {
+	return (
+		typeof data === "object" &&
+		data !== null &&
+		(data as { twoFactorRedirect?: unknown }).twoFactorRedirect === true
+	);
+}
 
 interface UseAuthModalActionsParams {
 	authClient: AuthModalClient;
@@ -60,6 +69,8 @@ export function useAuthModalActions({
 	const [otpProps, setOtpProps] = useState<OtpVerificationProps | null>(null);
 	const [resetPasswordProps, setResetPasswordProps] =
 		useState<ResetPasswordOtpProps | null>(null);
+	const [twoFactorProps, setTwoFactorProps] =
+		useState<TwoFactorChallengeProps | null>(null);
 
 	const resetCaptcha = () => {
 		if (turnstileSiteKey && turnstileRef.current) {
@@ -96,6 +107,64 @@ export function useAuthModalActions({
 			}
 			return null;
 		}
+	};
+
+	const startTwoFactorChallenge = (onSuccess?: () => Promise<void> | void) => {
+		const twoFactorClient = authClient.twoFactor;
+		if (!twoFactorClient) {
+			toast.error("Two-factor authentication client is not configured.");
+			return;
+		}
+
+		const finishTwoFactorSignIn = () => {
+			setTwoFactorProps(null);
+			toast.success(translations.notifications.signed_in);
+			if (onSuccess) {
+				Promise.resolve(onSuccess()).catch((error: unknown) => {
+					console.error(error);
+				});
+			}
+		};
+
+		setTwoFactorProps({
+			onVerifyBackupCode: twoFactorClient.verifyBackupCode
+				? async (code: string, trustDevice: boolean) => {
+						const res = await twoFactorClient.verifyBackupCode?.({
+							code,
+							trustDevice,
+						});
+						if (res?.error) {
+							const message = formatAuthError(
+								res.error,
+								"Invalid backup code",
+								captchaTranslations
+							);
+							toast.error(message);
+							return { error: message };
+						}
+						finishTwoFactorSignIn();
+					}
+				: undefined,
+			onVerifyTotp: async (code: string, trustDevice: boolean) => {
+				const { error } = await twoFactorClient.verifyTotp({
+					code,
+					trustDevice,
+				});
+				if (error) {
+					const message = formatAuthError(
+						error,
+						"Invalid verification code",
+						captchaTranslations
+					);
+					toast.error(message);
+					return { error: message };
+				}
+				finishTwoFactorSignIn();
+			},
+			otpTranslations: translations.otpVerification,
+			translations: translations.twoFactor,
+		});
+		setView("twoFactorOtp");
 	};
 
 	const handleVerification = ({
@@ -157,6 +226,11 @@ export function useAuthModalActions({
 					return;
 				}
 
+				if (isTwoFactorRedirectPayload(signInRes.data)) {
+					startTwoFactorChallenge(onVerificationSuccess);
+					return;
+				}
+
 				if (onVerificationSuccess) {
 					await onVerificationSuccess();
 				}
@@ -198,7 +272,11 @@ export function useAuthModalActions({
 			{ email, password },
 			{
 				...captchaOptions,
-				onSuccess: () => {
+				onSuccess: (ctx) => {
+					if (isTwoFactorRedirectPayload(ctx?.data)) {
+						startTwoFactorChallenge(onSignInSuccess);
+						return;
+					}
 					toast.success(translations.notifications.signed_in);
 					if (onSignInSuccess) {
 						Promise.resolve(onSignInSuccess()).catch((error: unknown) => {
@@ -402,6 +480,7 @@ export function useAuthModalActions({
 	const clearPendingFlows = () => {
 		setOtpProps(null);
 		setResetPasswordProps(null);
+		setTwoFactorProps(null);
 	};
 
 	return {
@@ -412,6 +491,7 @@ export function useAuthModalActions({
 		handleSocialLogin,
 		otpProps,
 		resetPasswordProps,
+		twoFactorProps,
 		verificationOrigin,
 	};
 }

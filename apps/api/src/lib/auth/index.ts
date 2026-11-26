@@ -10,7 +10,7 @@ import {
 import { ac, roles } from "@workspace/shared/permissions";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { admin, emailOTP, organization } from "better-auth/plugins";
+import { admin, emailOTP, organization, twoFactor } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 import { env } from "../../env";
 import { cleanupTenantAiMemory } from "../../modules/ai/runtime";
@@ -91,6 +91,9 @@ return count
 `;
 
 export const auth = betterAuth({
+	account: {
+		encryptOAuthTokens: true,
+	},
 	advanced: {
 		ipAddress: {
 			ipAddressHeaders: ["x-resolved-client-ip"],
@@ -139,6 +142,7 @@ export const auth = betterAuth({
 			organization: schema.organization,
 			organizationRole: schema.organizationRole,
 			session: schema.session,
+			twoFactor: schema.twoFactor,
 			user: schema.user,
 			verification: schema.verification,
 		},
@@ -201,6 +205,9 @@ export const auth = betterAuth({
 	},
 	plugins: [
 		admin(),
+		twoFactor({
+			issuer: APP_CONFIG.name,
+		}),
 		organization({
 			ac,
 			allowUserToCreateOrganization: true,
@@ -280,7 +287,9 @@ export const auth = betterAuth({
 		cookieCache: {
 			enabled: false,
 		},
+		expiresIn: env.SESSION_EXPIRES_IN_SECONDS,
 		storeSessionInDatabase: true,
+		updateAge: env.SESSION_UPDATE_AGE_SECONDS,
 	},
 	socialProviders: {
 		...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET

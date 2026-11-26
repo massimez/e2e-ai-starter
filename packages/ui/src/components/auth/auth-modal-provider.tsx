@@ -16,6 +16,7 @@ import { SignIn } from "./sign-in";
 import { SignUp } from "./sign-up";
 import defaultTranslations from "./translations.json";
 import { type TurnstileHandle, TurnstileWidget } from "./turnstile-widget";
+import { TwoFactorChallenge } from "./two-factor-challenge";
 import { useAuthModalActions } from "./use-auth-modal-actions";
 
 export type {
@@ -64,6 +65,7 @@ export function AuthModalProvider({
 		handleSocialLogin,
 		otpProps,
 		resetPasswordProps,
+		twoFactorProps,
 		verificationOrigin,
 	} = useAuthModalActions({
 		authClient,
@@ -99,6 +101,8 @@ export function AuthModalProvider({
 			setView("forgetPassword");
 		} else if (view === "verificationOtp") {
 			setView(verificationOrigin);
+		} else if (view === "twoFactorOtp") {
+			setView("signIn");
 		}
 	};
 
@@ -159,6 +163,11 @@ export function AuthModalProvider({
 					return <OtpVerification {...otpProps} captchaSlot={captchaSlot} />;
 				}
 				break;
+			case "twoFactorOtp":
+				if (twoFactorProps) {
+					return <TwoFactorChallenge {...twoFactorProps} />;
+				}
+				break;
 			default:
 				break;
 		}
@@ -176,7 +185,7 @@ export function AuthModalProvider({
 
 	return (
 		<Dialog onOpenChange={handleOpenChange} open={open}>
-			<DialogContent className="flex h-dvh w-screen max-w-none flex-col gap-0 rounded-none p-0 sm:h-auto sm:w-full sm:max-w-[500px] sm:rounded-lg sm:p-8">
+			<DialogContent className="flex h-dvh w-screen max-w-none flex-col gap-0 rounded-none p-0 sm:h-auto sm:w-full sm:max-w-125 sm:rounded-lg sm:p-8">
 				{/* Back Button - Only on mobile */}
 				<button
 					aria-label="Go back"

@@ -5,6 +5,7 @@ export type ViewType =
 	| "signIn"
 	| "signUp"
 	| "verificationOtp"
+	| "twoFactorOtp"
 	| "forgetPassword"
 	| "resetPasswordOtp";
 
@@ -13,6 +14,7 @@ export const VIEW_CAPTCHA_ACTION: Record<ViewType, string> = {
 	resetPasswordOtp: "reset-password",
 	signIn: "sign-in",
 	signUp: "sign-up",
+	twoFactorOtp: "two-factor",
 	verificationOtp: "otp",
 };
 
@@ -23,13 +25,14 @@ export interface AuthErrorLike {
 }
 
 export interface AuthResponseLike {
+	data?: unknown;
 	error?: AuthErrorLike | null;
 }
 
 export interface AuthRequestOptions {
 	headers?: Record<string, string>;
 	onError?: (ctx: { error: AuthErrorLike }) => Promise<void> | void;
-	onSuccess?: () => Promise<void> | void;
+	onSuccess?: (ctx: { data?: unknown }) => Promise<void> | void;
 }
 
 export interface AuthModalClient {
@@ -79,6 +82,16 @@ export interface AuthModalClient {
 			},
 			options?: AuthRequestOptions
 		) => Promise<AuthResponseLike>;
+	};
+	twoFactor?: {
+		verifyBackupCode?: (input: {
+			code: string;
+			trustDevice?: boolean;
+		}) => Promise<AuthResponseLike>;
+		verifyTotp: (input: {
+			code: string;
+			trustDevice?: boolean;
+		}) => Promise<AuthResponseLike>;
 	};
 }
 

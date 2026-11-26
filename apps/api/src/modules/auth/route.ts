@@ -23,6 +23,14 @@ export const authRoutes = createRouter()
 	.use("/reset-password/*", rateLimiter(60_000, 5))
 	.use("/send-verification-email", rateLimiter(60_000, 5))
 	.use("/change-password", rateLimiter(60_000, 5))
+	.use(
+		"/two-factor/*",
+		async (c, next) => {
+			await next();
+			c.header("Cache-Control", "no-store");
+		},
+		rateLimiter(60_000, 10)
+	)
 	// Organization management / invitation abuse protection (20 per minute)
 	.use("/organization/*", rateLimiter(60_000, 20))
 	.all("/*", (c) => {

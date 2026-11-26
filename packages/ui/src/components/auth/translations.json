@@ -66,6 +66,18 @@
       "failed": "Security verification failed. Please try again.",
       "unavailable": "Security check could not load. Please disable any blockers for this site or retry.",
       "retry": "Retry security check"
+    },
+    "twoFactor": {
+      "title": "Two-Factor Authentication",
+      "description": "Enter the 6-digit code from your authenticator app to finish signing in.",
+      "backup_title": "Use a Backup Code",
+      "backup_description": "Enter one of your single-use recovery backup codes.",
+      "backup_label": "Backup code",
+      "backup_placeholder": "Enter backup code",
+      "use_backup": "Use a backup code instead",
+      "use_totp": "Use authenticator app code instead",
+      "trust_device": "Trust this device for 30 days",
+      "verify_backup": "Verify backup code"
     }
   },
   "fr": {
@@ -135,6 +147,18 @@
       "failed": "La vérification de sécurité a échoué. Veuillez réessayer.",
       "unavailable": "La vérification de sécurité n'a pas pu se charger. Veuillez désactiver les bloqueurs ou réessayer.",
       "retry": "Réessayer la vérification"
+    },
+    "twoFactor": {
+      "title": "Authentification à deux facteurs",
+      "description": "Saisissez le code à 6 chiffres de votre application d'authentification pour terminer la connexion.",
+      "backup_title": "Utiliser un code de secours",
+      "backup_description": "Saisissez l'un de vos codes de récupération à usage unique.",
+      "backup_label": "Code de secours",
+      "backup_placeholder": "Entrez le code de secours",
+      "use_backup": "Utiliser un code de secours",
+      "use_totp": "Utiliser le code de l'application",
+      "trust_device": "Faire confiance à cet appareil pendant 30 jours",
+      "verify_backup": "Vérifier le code de secours"
     }
   },
   "ar": {
@@ -204,6 +228,18 @@
       "failed": "فشل التحقق الأمني. يرجى المحاولة مرة أخرى.",
       "unavailable": "تعذر تحميل التحقق الأمني. يرجى تعطيل أدوات الحظر أو المحاولة مرة أخرى.",
       "retry": "إعادة محاولة التحقق"
+    },
+    "twoFactor": {
+      "title": "المصادقة الثنائية",
+      "description": "أدخل الرمز المكون من 6 أرقام من تطبيق المصادقة لإكمال تسجيل الدخول.",
+      "backup_title": "استخدام رمز استرداد",
+      "backup_description": "أدخل أحد رموز الاسترداد الاحتياطية ذات الاستخدام الواحد.",
+      "backup_label": "رمز الاسترداد",
+      "backup_placeholder": "أدخل رمز الاسترداد",
+      "use_backup": "استخدام رمز استرداد بدلاً من ذلك",
+      "use_totp": "استخدام رمز تطبيق المصادقة بدلاً من ذلك",
+      "trust_device": "الوثوق بهذا الجهاز لمدة 30 يوماً",
+      "verify_backup": "التحقق من رمز الاسترداد"
     }
   }
 }
