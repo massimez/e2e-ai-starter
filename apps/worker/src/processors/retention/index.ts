@@ -1,6 +1,5 @@
 import { db } from "@workspace/db";
 import {
-	auditLog,
 	invitation,
 	notification,
 	uploads,
@@ -43,7 +42,7 @@ export interface RunDataRetentionOptions {
 /**
  * Runs deterministic ISO 27001 A.8.10 / A.5.33 data retention cleanup across
  * verification tokens, invitations, abandoned uploads, old read notifications,
- * and expired audit logs (using `SET LOCAL app.audit_retention_prune = 'on'`).
+ * and expired audit logs via the `SECURITY DEFINER` function `public.prune_expired_audit_logs`.
  */
 export async function runDataRetentionCleanup(
 	options: RunDataRetentionOptions = {}
@@ -61,7 +60,6 @@ export async function runDataRetentionCleanup(
 	const notificationCutoff = new Date(
 		now.getTime() - notificationRetentionDays * MS_PER_DAY
 	);
-	const auditCutoff = new Date(now.getTime() - auditRetentionDays * MS_PER_DAY);
 
 	// 1. Delete expired verification tokens
 	const deletedVerifications = await db
@@ -111,18 +109,15 @@ export async function runDataRetentionCleanup(
 		)
 		.returning({ id: notification.id });
 
-	// 5. Prune expired audit_log rows inside an authorized retention transaction
-	const deletedAuditLogs = await db.transaction(async (tx) => {
-		await tx.execute(sql`SET LOCAL app.audit_retention_prune = 'on'`);
-		return await tx
-			.delete(auditLog)
-			.where(lt(auditLog.createdAt, auditCutoff))
-			.returning({ id: auditLog.id });
-	});
+	// 5. Prune expired audit_log rows via SECURITY DEFINER function (enforces 30-day floor)
+	const [auditPruneRow] = await db.execute<{ deleted_count: number | string }>(
+		sql`SELECT public.prune_expired_audit_logs(${auditRetentionDays}::integer) AS deleted_count`
+	);
+	const expiredAuditLogsDeleted = Number(auditPruneRow?.deleted_count ?? 0);
 
 	const summary: RetentionCleanupSummary = {
 		abandonedUploadsMarkedFailed: failedUploads.length,
-		expiredAuditLogsDeleted: deletedAuditLogs.length,
+		expiredAuditLogsDeleted,
 		expiredInvitationsDeleted: deletedInvitations.length,
 		expiredInvitationsMarked: markedInvitations.length,
 		expiredVerificationsDeleted: deletedVerifications.length,

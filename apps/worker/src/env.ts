@@ -33,7 +33,12 @@ function isValidRedisUrl(value: string): boolean {
 
 const workerEnvSchema = z
 	.object({
-		AUDIT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(365),
+		AUDIT_RETENTION_DAYS: z.coerce
+			.number()
+			.int()
+			.min(30, "AUDIT_RETENTION_DAYS must be at least 30 days")
+			.max(3650)
+			.default(365),
 		BETTER_AUTH_SECRET: z
 			.string()
 			.min(32, "BETTER_AUTH_SECRET must be at least 32 characters")
