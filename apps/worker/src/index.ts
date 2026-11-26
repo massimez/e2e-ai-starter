@@ -1,6 +1,6 @@
 import { closeDb, db } from "@workspace/db";
 import { withTimeout } from "@workspace/shared/queues";
-import type { Worker } from "bullmq";
+import { Queue, type Worker } from "bullmq";
 import { sql } from "drizzle-orm";
 import { env } from "./env";
 import { logError, logInfo, logWarning } from "./lib/logger";
@@ -8,6 +8,8 @@ import {
 	closeWorkerHealthRedis,
 	createWorker,
 	pingWorkerRedis,
+	queuePrefix,
+	redisConnection,
 } from "./lib/redis";
 import {
 	EMAIL_QUEUE_NAME,
@@ -19,6 +21,11 @@ import {
 	type NotificationJobData,
 	processNotificationJob,
 } from "./processors/notification";
+import {
+	processRetentionJob,
+	RETENTION_QUEUE_NAME,
+	type RetentionJobData,
+} from "./processors/retention";
 
 const SHUTDOWN_TIMEOUT_MS = 15_000;
 const READINESS_TIMEOUT_MS = 3000;
@@ -36,6 +43,25 @@ const notificationWorker = createWorker<NotificationJobData>(
 	NOTIFICATION_QUEUE_NAME,
 	processNotificationJob
 );
+const retentionWorker = createWorker<RetentionJobData>(
+	RETENTION_QUEUE_NAME,
+	processRetentionJob,
+	{ concurrency: 1 }
+);
+const retentionQueue = new Queue<RetentionJobData>(RETENTION_QUEUE_NAME, {
+	connection: redisConnection,
+	defaultJobOptions: {
+		attempts: 3,
+		backoff: { delay: 5000, type: "exponential" },
+		removeOnComplete: { count: 100 },
+		removeOnFail: { count: 500 },
+	},
+	prefix: queuePrefix,
+});
+
+retentionQueue.on("error", (err) => {
+	logError("RetentionQueue", err, { event: "queue_error" });
+});
 
 function attachWorkerListeners(label: string, worker: Worker): void {
 	worker.on("completed", (job) => {
@@ -64,16 +90,39 @@ function attachWorkerListeners(label: string, worker: Worker): void {
 
 attachWorkerListeners("EmailWorker", emailWorker);
 attachWorkerListeners("NotificationWorker", notificationWorker);
+attachWorkerListeners("RetentionWorker", retentionWorker);
+
+void retentionQueue
+	.upsertJobScheduler(
+		"daily-data-retention",
+		{ pattern: "0 3 * * *" },
+		{
+			data: { triggeredBy: "schedule" },
+			name: "scheduled-retention",
+		}
+	)
+	.then(() => {
+		logInfo("RetentionWorker", "Scheduled daily data retention job", {
+			cron: "0 3 * * *",
+		});
+	})
+	.catch((error) => {
+		logError("RetentionWorker", error, {
+			phase: "register-retention-schedule",
+		});
+	});
 
 logInfo("WorkerService", "Workers registered", {
-	queues: [emailWorker.name, notificationWorker.name],
+	queues: [emailWorker.name, notificationWorker.name, retentionWorker.name],
 });
 
 let isShuttingDown = false;
 
 function handleWorkerLivenessRequest(): Response {
 	const workersHealthy =
-		emailWorker.isRunning() && notificationWorker.isRunning();
+		emailWorker.isRunning() &&
+		notificationWorker.isRunning() &&
+		retentionWorker.isRunning();
 	let status = "degraded";
 	if (isShuttingDown) {
 		status = "draining";
@@ -89,6 +138,7 @@ function handleWorkerLivenessRequest(): Response {
 			workers: {
 				email: emailWorker.isRunning(),
 				notification: notificationWorker.isRunning(),
+				retention: retentionWorker.isRunning(),
 			},
 		},
 		{ status: !isShuttingDown && workersHealthy ? 200 : 503 }
@@ -185,6 +235,8 @@ async function shutdown(signal: string): Promise<void> {
 		const workerResults = await Promise.allSettled([
 			emailWorker.close(),
 			notificationWorker.close(),
+			retentionWorker.close(),
+			retentionQueue.close(),
 		]);
 		for (const result of workerResults) {
 			if (result.status === "rejected") {

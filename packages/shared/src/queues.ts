@@ -2,6 +2,13 @@ import { z } from "zod";
 
 export const EMAIL_QUEUE_NAME = "email-queue";
 export const NOTIFICATION_QUEUE_NAME = "notification-queue";
+export const RETENTION_QUEUE_NAME = "retention-queue";
+
+export const retentionJobDataSchema = z.object({
+	triggeredBy: z.enum(["schedule", "manual"]).default("schedule"),
+});
+
+export type RetentionJobData = z.infer<typeof retentionJobDataSchema>;
 
 export const NOTIFICATION_CATEGORIES = [
 	"system",
