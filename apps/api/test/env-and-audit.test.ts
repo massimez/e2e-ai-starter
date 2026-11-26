@@ -201,6 +201,9 @@ describe("audit path detection and access audit middleware", () => {
 	test("flags sensitive read endpoints and ignores benign reads", () => {
 		expect(isSensitiveReadPath("/api/storage/files/123")).toBe(true);
 		expect(isSensitiveReadPath("/api/auth/admin/list-users")).toBe(true);
+		expect(isSensitiveReadPath("/api/admin/audit/export")).toBe(true);
+		expect(isSensitiveReadPath("/api/auth/organization/list")).toBe(false);
+		expect(isSensitiveReadPath("/api/admin/audit")).toBe(false);
 		expect(isSensitiveReadPath("/api/health/ready")).toBe(false);
 	});
 
@@ -274,6 +277,176 @@ describe("audit path detection and access audit middleware", () => {
 
 		expect(recorded).toHaveLength(1);
 		expect(recorded[0]?.details?.impersonatedBy).toBe("admin_support_7");
+	});
+
+	test("resolves authenticated actor and active organization on /api/auth/* routes without authMiddleware", async () => {
+		const recorded: AuditLogRecord[] = [];
+		let signedOut = false;
+		const app = new Hono<AppEnv>()
+			.use(
+				"*",
+				createAccessAuditMiddleware({
+					resolveSession: () => {
+						if (signedOut) {
+							return Promise.resolve(null);
+						}
+						return Promise.resolve({
+							session: {
+								activeOrganizationId: "org_tenant_1",
+								userId: "usr_tenant_1",
+							},
+							user: { id: "usr_tenant_1" },
+						});
+					},
+					scope: "app",
+					writeAuditLog: (record) => {
+						recorded.push(record);
+						return Promise.resolve();
+					},
+				})
+			)
+			.post("/api/auth/organization/invite-member", (c) => c.json({ ok: true }))
+			.post("/api/auth/sign-out", (c) => {
+				signedOut = true;
+				return c.json({ ok: true });
+			});
+
+		await app.request("/api/auth/organization/invite-member", {
+			headers: { cookie: "better-auth.session_token=valid" },
+			method: "POST",
+		});
+		await app.request("/api/auth/sign-out", {
+			headers: { cookie: "better-auth.session_token=valid" },
+			method: "POST",
+		});
+		await drainAuditLogs();
+
+		expect(recorded).toHaveLength(2);
+		expect(recorded[0]?.userId).toBe("usr_tenant_1");
+		expect(recorded[0]?.organizationId).toBe("org_tenant_1");
+		expect(recorded[1]?.userId).toBe("usr_tenant_1");
+		expect(recorded[1]?.organizationId).toBe("org_tenant_1");
+	});
+
+	test("pre-captures stop-impersonating actor, skips double lookup on 401, and avoids org pollution on /api/admin/*", async () => {
+		const recorded: AuditLogRecord[] = [];
+		let resolverCalls = 0;
+		let impersonationStopped = false;
+
+		const app = new Hono<AppEnv>()
+			.use(
+				"*",
+				createAccessAuditMiddleware({
+					resolveSession: () => {
+						resolverCalls += 1;
+						if (impersonationStopped) {
+							return Promise.resolve(null);
+						}
+						return Promise.resolve({
+							session: {
+								activeOrganizationId: "org_customer",
+								impersonatedBy: "usr_superadmin",
+								userId: "usr_customer",
+							},
+							user: { id: "usr_customer" },
+						});
+					},
+					scope: "app",
+					writeAuditLog: (record) => {
+						recorded.push(record);
+						return Promise.resolve();
+					},
+				})
+			)
+			.post("/api/auth/admin/stop-impersonating", (c) => {
+				impersonationStopped = true;
+				c.set("auditMeta", {
+					action: "admin.user.impersonate_stop",
+					entityType: "user",
+					organizationId: null,
+				});
+				return c.json({ ok: true });
+			})
+			.get("/api/protected-401", (c) => {
+				// Simulate authMiddleware rejecting with 401 after setting session/user to null
+				c.set("session", null);
+				c.set("user", null);
+				return c.json({ error: "Unauthorized" }, 401);
+			})
+			.post("/api/admin/users/usr_target/ban", (c) => {
+				c.set("user", { id: "usr_superadmin" } as never);
+				c.set("session", {
+					activeOrganizationId: "org_operator_personal",
+					userId: "usr_superadmin",
+				} as never);
+				c.set("auditMeta", {
+					action: "admin.user.ban",
+					details: { reason: "Abuse" },
+					entityId: "usr_target",
+					entityType: "user",
+					organizationId: null,
+				});
+				return c.json({ ok: true });
+			});
+
+		await app.request("/api/auth/admin/stop-impersonating", {
+			headers: { cookie: "better-auth.session_token=imp" },
+			method: "POST",
+		});
+		expect(resolverCalls).toBe(1);
+
+		await app.request("/api/protected-401", {
+			headers: { cookie: "better-auth.session_token=stale" },
+			method: "GET",
+		});
+		await app.request("/api/admin/users/usr_target/ban", { method: "POST" });
+		await drainAuditLogs();
+
+		// 401 after authMiddleware must NOT call resolveSession a second time
+		expect(resolverCalls).toBe(1);
+		expect(recorded).toHaveLength(3);
+
+		// stop-impersonating keeps pre-captured actor & impersonatedBy
+		expect(recorded[0]?.action).toBe("admin.user.impersonate_stop");
+		expect(recorded[0]?.userId).toBe("usr_customer");
+		expect(recorded[0]?.details?.impersonatedBy).toBe("usr_superadmin");
+		expect(recorded[0]?.organizationId).toBeNull();
+
+		// /api/admin/* uses explicit auditMeta and does NOT inherit operator's activeOrganizationId
+		expect(recorded[2]?.action).toBe("admin.user.ban");
+		expect(recorded[2]?.entityId).toBe("usr_target");
+		expect(recorded[2]?.organizationId).toBeNull();
+		expect(recorded[2]?.details?.reason).toBe("Abuse");
+	});
+
+	test("enforces maxPendingWrites backpressure cap when audit writes stall", async () => {
+		let releaseFirstWrite: (() => void) | undefined;
+		const recorded: AuditLogRecord[] = [];
+		const app = new Hono<AppEnv>()
+			.use(
+				"*",
+				createAccessAuditMiddleware({
+					maxPendingWrites: 1,
+					scope: "api",
+					writeAuditLog: async (record) => {
+						if (!releaseFirstWrite) {
+							await new Promise<void>((resolve) => {
+								releaseFirstWrite = resolve;
+							});
+						}
+						recorded.push(record);
+					},
+				})
+			)
+			.post("/api/items", (c) => c.json({ ok: true }));
+
+		// First write stays in flight; second write hits maxPendingWrites cap and is dropped
+		await app.request("/api/items", { method: "POST" });
+		await app.request("/api/items", { method: "POST" });
+		releaseFirstWrite?.();
+		await drainAuditLogs();
+
+		expect(recorded).toHaveLength(1);
 	});
 });
 

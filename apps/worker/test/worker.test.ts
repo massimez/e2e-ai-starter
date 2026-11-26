@@ -105,6 +105,12 @@ describe("worker environment validation", () => {
 				REDIS_URL: "https://redis.example.com:6379",
 			})
 		).toThrow("Invalid Worker environment variables");
+		expect(() =>
+			parseWorkerEnv({
+				AUDIT_RETENTION_DAYS: "7",
+				NODE_ENV: "development",
+			})
+		).toThrow("Invalid Worker environment variables");
 	});
 });
 
@@ -720,7 +726,7 @@ describe("automated data retention processor", () => {
 		mock.restore();
 	});
 
-	test("runs all 5 cleanup stages and sets audit_retention_prune inside transaction", async () => {
+	test("runs all 5 cleanup stages and prunes expired audit logs via SECURITY DEFINER function", async () => {
 		const returningChain = (count: number) => ({
 			returning: () =>
 				Promise.resolve(
@@ -746,19 +752,9 @@ describe("automated data retention processor", () => {
 			}),
 		})) as never);
 
-		let executedSetLocal = false;
-		spyOn(db, "transaction").mockImplementation((async (callback: unknown) => {
-			const tx = {
-				delete: () => ({
-					where: () => returningChain(4),
-				}),
-				execute: () => {
-					executedSetLocal = true;
-					return Promise.resolve([]);
-				},
-			};
-			return await (callback as (txArg: typeof tx) => Promise<unknown>)(tx);
-		}) as never);
+		const executeSpy = spyOn(db, "execute").mockResolvedValueOnce([
+			{ deleted_count: 4 },
+		] as never);
 
 		const summary = await runDataRetentionCleanup({
 			auditRetentionDays: 365,
@@ -766,7 +762,7 @@ describe("automated data retention processor", () => {
 			now: new Date("2026-11-26T03:00:00.000Z"),
 		});
 
-		expect(executedSetLocal).toBe(true);
+		expect(executeSpy).toHaveBeenCalledTimes(1);
 		expect(summary).toEqual({
 			abandonedUploadsMarkedFailed: 2,
 			expiredAuditLogsDeleted: 4,

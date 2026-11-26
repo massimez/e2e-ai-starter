@@ -82,6 +82,8 @@ describe("proxy onboarding gate protection and CSP", () => {
 });
 
 test.each([
+	"/admin",
+	"/admin/audit",
 	"/settings",
 	"/settings/account",
 	"/settings/account/profile",
