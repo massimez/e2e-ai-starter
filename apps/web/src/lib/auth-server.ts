@@ -6,8 +6,11 @@ export interface ServerSession {
 	session: {
 		activeOrganizationId?: string | null;
 		id: string;
+		impersonatedBy?: string | null;
 	};
 	user: {
+		banExpires?: string | Date | null;
+		banned?: boolean | null;
 		createdAt: string | Date;
 		email: string;
 		id: string;

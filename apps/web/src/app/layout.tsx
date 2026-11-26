@@ -4,6 +4,7 @@ import { Toaster } from "@workspace/ui/components/sonner";
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans, JetBrains_Mono } from "next/font/google";
 import { headers } from "next/headers";
+import { ImpersonationBanner } from "@/components/impersonation-banner";
 import { publicWebEnv } from "@/env";
 import { AuthProvider } from "@/providers/auth-provider";
 import { QueryProvider } from "@/providers/query-provider";
@@ -86,6 +87,7 @@ export default async function RootLayout({
 				>
 					<QueryProvider>
 						<AuthProvider nonce={nonce}>
+							<ImpersonationBanner />
 							{children}
 							<Toaster position="bottom-right" richColors />
 						</AuthProvider>

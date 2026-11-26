@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformAdminRole } from "@workspace/shared/permissions";
 import {
 	Avatar,
 	AvatarFallback,
@@ -19,6 +20,7 @@ import {
 	LayoutDashboard,
 	LogOut,
 	Settings,
+	ShieldAlert,
 	Sparkles,
 	User,
 	UserRoundCog,
@@ -32,6 +34,7 @@ export interface AccountMenuUser {
 	email?: string | null;
 	image?: string | null;
 	name?: string | null;
+	role?: string | null;
 }
 
 interface UserAccountMenuProps {
@@ -47,6 +50,7 @@ export function UserAccountMenu({
 	user,
 }: UserAccountMenuProps) {
 	const router = useRouter();
+	const isPlatformAdmin = isPlatformAdminRole(user?.role);
 
 	const handleSignOut = async () => {
 		const res = await signOut();
@@ -155,6 +159,21 @@ export function UserAccountMenu({
 						Account Settings
 					</Link>
 				</DropdownMenuItem>
+
+				{isPlatformAdmin ? (
+					<>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem asChild>
+							<Link
+								className="flex cursor-pointer items-center gap-2.5 rounded-lg p-2 text-sm font-medium"
+								href="/admin"
+							>
+								<ShieldAlert className="text-primary h-4 w-4" />
+								Platform Backoffice
+							</Link>
+						</DropdownMenuItem>
+					</>
+				) : null}
 
 				<DropdownMenuSeparator />
 				<DropdownMenuItem

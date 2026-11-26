@@ -2,10 +2,13 @@
 
 import { cn } from "@workspace/ui/lib/utils";
 import {
+	Activity,
 	AlertTriangle,
 	Bell,
 	Building,
+	Building2,
 	LayoutGrid,
+	ScrollText,
 	ShieldCheck,
 	UserRound,
 	Users,
@@ -52,21 +55,45 @@ const accountNav = [
 	{ href: "/settings/account/security", icon: ShieldCheck, label: "Security" },
 ];
 
-export function SettingsNav({ scope }: { scope: "workspace" | "account" }) {
-	const navItems = scope === "account" ? accountNav : workspaceNav;
+const adminNav = [
+	{ href: "/admin", icon: LayoutGrid, label: "Overview" },
+	{ href: "/admin/users", icon: Users, label: "Users" },
+	{ href: "/admin/organizations", icon: Building2, label: "Organizations" },
+	{ href: "/admin/audit", icon: ScrollText, label: "Audit Logs" },
+	{ href: "/admin/system", icon: Activity, label: "System" },
+];
+
+const ROOT_SCOPE_HREFS = new Set([
+	"/admin",
+	"/settings/account",
+	"/settings/workspace",
+]);
+
+const NAV_CONFIG = {
+	account: { items: accountNav, label: "Account settings" },
+	admin: { items: adminNav, label: "Platform backoffice navigation" },
+	workspace: { items: workspaceNav, label: "Workspace settings" },
+} as const;
+
+export function SettingsNav({
+	scope,
+}: {
+	scope: "workspace" | "account" | "admin";
+}) {
+	const { items: navItems, label } = NAV_CONFIG[scope];
 	const pathname = usePathname();
 
 	return (
 		<div className="border-border/50 flex border-b pb-1">
 			<nav
-				aria-label={
-					scope === "account" ? "Account settings" : "Workspace settings"
-				}
+				aria-label={label}
 				className="-mb-px flex space-x-1.5 overflow-x-auto sm:space-x-2"
 			>
 				{navItems.map((item) => {
 					const Icon = item.icon;
-					const isActive = pathname === item.href;
+					const isActive = ROOT_SCOPE_HREFS.has(item.href)
+						? pathname === item.href
+						: pathname === item.href || pathname.startsWith(`${item.href}/`);
 
 					return (
 						<Link
