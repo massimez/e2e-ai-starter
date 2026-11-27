@@ -113,7 +113,7 @@ cp apps/web/.env.example apps/web/.env
 ```
 - **Root `.env`** holds backend secrets (Postgres, Redis, `BETTER_AUTH_SECRET`, S3/MinIO, Resend, VAPID, AI provider keys). Local MinIO defaults match `docker-compose.yml`.
 - **`apps/web/.env`** is isolated to web-only configuration (`INTERNAL_API_URL`, `NEXT_PUBLIC_*`) so server secrets are never bundled into Next.js standalone outputs.
-- Review [AI Providers](#ai-providers) and set the API key for your chosen provider in root `.env` to enable live chat in `/dashboard/ai` and Mastra Studio.
+- Set an [AI provider key](#-ai-providers) in root `.env` to enable live chat in `/dashboard/ai` and Mastra Studio. Workspace summaries use workspace credits granted by a platform admin in `/admin/organizations`.
 
 ### 4. Push Schema & Start Development
 ```bash
