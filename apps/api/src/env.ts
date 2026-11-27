@@ -294,7 +294,9 @@ export function parseApiEnv(
 	const rawEnv = parsed.data;
 	return {
 		...rawEnv,
-		CORS_ORIGINS: parseCsvList(rawEnv.CORS_ORIGIN),
+		CORS_ORIGINS: parseCsvList(rawEnv.CORS_ORIGIN).map(
+			(origin) => new URL(origin).origin
+		),
 		ENCRYPTION_SECRET: rawEnv.ENCRYPTION_SECRET ?? rawEnv.BETTER_AUTH_SECRET,
 		TRUSTED_PROXY_CIDRS_LIST: parseCsvList(rawEnv.TRUSTED_PROXY_CIDRS),
 		TURNSTILE_ALLOWED_HOSTNAMES_LIST: parseCsvList(

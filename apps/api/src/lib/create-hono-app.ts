@@ -270,6 +270,7 @@ export function createApp() {
 			allowHeaders: [
 				"Content-Type",
 				"Authorization",
+				"Idempotency-Key",
 				"x-organization-id",
 				"x-request-id",
 			],
