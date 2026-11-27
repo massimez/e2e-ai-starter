@@ -1,6 +1,5 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
 import type {
 	AiThreadsResponse,
 	WorkspaceBriefResponse,
@@ -21,14 +20,22 @@ import {
 	Sparkles,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import {
+	type AiChargeStatus,
+	attemptWorkspaceBrief,
+	type BriefRequest,
+	type BriefRequestOutcome,
+} from "@/lib/ai-request-recovery";
 import { client, parseApiResponse } from "@/lib/api-client";
 import { formatUtcDate } from "@/lib/format";
 import { orgHeadersInit } from "@/lib/organization-hooks";
 import { renderSafeMarkdown } from "./markdown-renderer";
+import type { WorkspaceWallet } from "./use-ai-workspace";
 
 export interface ThreadHistorySidebarProps {
 	activeThreadId: string | null;
+	canDeleteThreads: boolean;
 	deleteError: string | null;
 	deletingThreadId: string | null;
 	hasMore: boolean;
@@ -43,6 +50,7 @@ export interface ThreadHistorySidebarProps {
 
 export function ThreadHistorySidebar({
 	activeThreadId,
+	canDeleteThreads,
 	deleteError,
 	deletingThreadId,
 	hasMore,
@@ -85,7 +93,7 @@ export function ThreadHistorySidebar({
 						<Button
 							aria-label={`Delete conversation: ${title}`}
 							className="text-muted-foreground hover:text-destructive size-8 shrink-0"
-							disabled={isDeleting}
+							disabled={!canDeleteThreads || isDeleting}
 							onClick={() => setThreadToDelete({ id: thread.id, title })}
 							size="icon"
 							type="button"
@@ -195,30 +203,203 @@ export function ThreadHistorySidebar({
 	);
 }
 
+const WALLET_ENTRY_LABELS = {
+	grant: "Credit grant",
+	reversal: "Credits restored",
+	workspace_brief: "Workspace summary",
+} as const;
+
+const BRIEF_RECOVERY_MESSAGES = {
+	charged:
+		"This request used credits. Starting a new request will use credits again.",
+	not_recorded:
+		"No charge is recorded yet. Retrying this request will reuse its original ID.",
+	reversed:
+		"The credits for this request were restored. You can start a new request.",
+	unknown:
+		"The charge status is unavailable. Retry with the same request ID when the connection returns.",
+} as const;
+
+export function WorkspaceWalletCard({
+	wallet,
+	isError,
+}: {
+	wallet?: WorkspaceWallet;
+	isError: boolean;
+}) {
+	return (
+		<Card className="border-border/60 bg-card/70 gap-0 py-0 shadow-xs backdrop-blur-xs">
+			<CardHeader className="border-border/60 border-b px-4 py-3">
+				<CardTitle className="text-sm font-semibold">
+					Workspace credits
+				</CardTitle>
+			</CardHeader>
+			<CardContent className="space-y-2 p-3.5 text-xs">
+				{wallet ? (
+					<>
+						<p className="text-lg font-semibold tabular-nums">
+							{wallet.balance.toLocaleString()} credits
+						</p>
+						<p className="text-muted-foreground">Chat is free</p>
+						<details>
+							<summary className="cursor-pointer font-medium">
+								Recent activity
+							</summary>
+							{wallet.entries.length ? (
+								<ul className="divide-border mt-2 divide-y">
+									{wallet.entries.map((entry) => (
+										<li
+											className="flex justify-between gap-2 py-1.5"
+											key={entry.id}
+										>
+											<div>
+												<p>{WALLET_ENTRY_LABELS[entry.kind]}</p>
+												<time
+													className="text-muted-foreground"
+													dateTime={entry.createdAt}
+												>
+													{formatUtcDate(entry.createdAt)}
+												</time>
+											</div>
+											<span className="tabular-nums">
+												{entry.delta > 0 ? "+" : ""}
+												{entry.delta.toLocaleString()}
+											</span>
+										</li>
+									))}
+								</ul>
+							) : (
+								<p className="text-muted-foreground mt-2">
+									No credit activity yet.
+								</p>
+							)}
+						</details>
+					</>
+				) : (
+					<p className="text-muted-foreground" role="status">
+						{isError
+							? "Credit balance unavailable."
+							: "Loading credit balance…"}
+					</p>
+				)}
+			</CardContent>
+		</Card>
+	);
+}
+
+function BriefOutcomeNotice({
+	onDiscard,
+	outcome,
+}: {
+	onDiscard?: () => void;
+	outcome: BriefRequestOutcome | undefined;
+}) {
+	if (!outcome || outcome.status === "success") {
+		return null;
+	}
+	if (outcome.status === "rejected") {
+		return (
+			<p className="text-destructive text-xs" role="alert">
+				{outcome.message}
+			</p>
+		);
+	}
+	return (
+		<div>
+			<div className="text-muted-foreground space-y-1 text-xs" role="status">
+				<p>{BRIEF_RECOVERY_MESSAGES[outcome.status]}</p>
+				<p>
+					Request ID <code className="break-all">{outcome.requestId}</code>
+				</p>
+			</div>
+			{onDiscard ? (
+				<Button onClick={onDiscard} size="sm" type="button" variant="ghost">
+					Discard retry
+				</Button>
+			) : null}
+		</div>
+	);
+}
+
 export interface WorkspaceBriefCardProps {
 	activeOrgId?: string;
 	canExecuteAi: boolean;
+	creditCost?: number;
 	isConfigured: boolean;
 	modelId?: string;
+	onSettled: () => void;
 }
 
 export function WorkspaceBriefCard({
 	activeOrgId,
 	canExecuteAi,
+	creditCost,
 	isConfigured,
 	modelId,
+	onSettled,
 }: WorkspaceBriefCardProps) {
-	const briefMutation = useMutation<WorkspaceBriefResponse, Error>({
-		mutationFn: async () =>
-			parseApiResponse<WorkspaceBriefResponse>(
-				await client.api.ai.workflows["workspace-brief"].$post(
-					{ json: { ...(modelId ? { modelId } : {}) } },
-					orgHeadersInit(activeOrgId)
-				)
-			),
-	});
+	const [result, setResult] = useState<
+		{ outcome: BriefRequestOutcome; retryRequest?: BriefRequest } | undefined
+	>(undefined);
+	const [isPending, setIsPending] = useState(false);
+	const inFlightRef = useRef<boolean>(false);
 
-	const { data } = briefMutation;
+	const runBrief = async (request: BriefRequest, retry: boolean) => {
+		if (inFlightRef.current || !activeOrgId) {
+			return;
+		}
+		inFlightRef.current = true;
+		setIsPending(true);
+		setResult(undefined);
+		try {
+			const outcome = await attemptWorkspaceBrief(
+				request,
+				async ({ id, modelId: requestedModelId }) =>
+					parseApiResponse<WorkspaceBriefResponse>(
+						await client.api.ai.workflows["workspace-brief"].$post(
+							{ json: { modelId: requestedModelId } },
+							{
+								headers: {
+									...orgHeadersInit(activeOrgId)?.headers,
+									"Idempotency-Key": id,
+									"X-Request-Id": id,
+								},
+							}
+						)
+					),
+				async (operationId) =>
+					parseApiResponse<AiChargeStatus>(
+						await client.api.ai.operations[":operationId"].$get(
+							{ param: { operationId } },
+							orgHeadersInit(activeOrgId)
+						)
+					),
+				retry
+			);
+			setResult({
+				outcome,
+				retryRequest:
+					outcome.status === "not_recorded" || outcome.status === "unknown"
+						? request
+						: undefined,
+			});
+		} finally {
+			inFlightRef.current = false;
+			setIsPending(false);
+			onSettled();
+		}
+	};
+
+	const outcome = result?.outcome;
+	const retryRequest = result?.retryRequest;
+	const data = outcome?.status === "success" ? outcome.data : undefined;
+	const creditUnit = creditCost === 1 ? "credit" : "credits";
+	const generateLabel =
+		creditCost === undefined
+			? "Generate Summary"
+			: `Generate Summary (${creditCost} ${creditUnit})`;
+	const idleLabel = retryRequest ? "Retry same request" : generateLabel;
+	const actionLabel = isPending ? "Working…" : idleLabel;
 
 	return (
 		<Card className="border-border/60 bg-card/70 gap-0 py-0 shadow-xs backdrop-blur-xs">
@@ -237,26 +418,27 @@ export function WorkspaceBriefCard({
 				</p>
 				<Button
 					className="w-full"
-					disabled={!(isConfigured && canExecuteAi) || briefMutation.isPending}
-					onClick={() => briefMutation.mutate()}
+					disabled={!(isConfigured && canExecuteAi) || isPending}
+					onClick={() =>
+						void (retryRequest
+							? runBrief(retryRequest, true)
+							: runBrief({ id: crypto.randomUUID(), modelId }, false))
+					}
 					size="sm"
 					type="button"
 					variant="outline"
 				>
-					{briefMutation.isPending ? (
+					{isPending ? (
 						<Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
 					) : (
 						<Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
 					)}
-					{briefMutation.isPending
-						? "Generating report..."
-						: "Generate Summary"}
+					{actionLabel}
 				</Button>
-				{briefMutation.isError ? (
-					<p className="text-destructive text-[11px] leading-relaxed">
-						{briefMutation.error.message}
-					</p>
-				) : null}
+				<BriefOutcomeNotice
+					onDiscard={retryRequest ? () => setResult(undefined) : undefined}
+					outcome={outcome}
+				/>
 				{data ? (
 					<div className="border-border/60 bg-muted/40 space-y-2.5 rounded-lg border p-2.5 text-[11px]">
 						<div className="text-foreground font-medium">

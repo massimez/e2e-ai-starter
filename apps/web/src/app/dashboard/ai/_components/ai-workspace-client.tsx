@@ -3,9 +3,14 @@
 import type { UIMessage } from "ai";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { getSessionImpersonatedBy } from "@/lib/auth-client";
 import { useCurrentOrganization } from "@/lib/organization-hooks";
 import { AiChatSessionPane } from "./ai-chat-pane";
-import { ThreadHistorySidebar, WorkspaceBriefCard } from "./ai-sidebar-cards";
+import {
+	ThreadHistorySidebar,
+	WorkspaceBriefCard,
+	WorkspaceWalletCard,
+} from "./ai-sidebar-cards";
 import {
 	AiWorkspaceBanner,
 	ThreadErrorCard,
@@ -29,7 +34,9 @@ export function AiWorkspaceClient() {
 		hasPermission,
 		isLoading: orgLoading,
 		isPermissionsPending,
+		session,
 	} = useCurrentOrganization();
+	const impersonated = Boolean(getSessionImpersonatedBy(session));
 
 	const [activeThreadId, setActiveThreadId] = useState<string | null>(
 		initialUrlThread
@@ -67,16 +74,22 @@ export function AiWorkspaceClient() {
 		syncThreadQueryParam(threadId);
 	};
 
+	const canReadWallet = Boolean(session?.user.id && hasPermission("ai:read"));
 	const {
 		agentsQuery,
 		deleteThreadMutation,
 		invalidateConversation,
 		invalidateThreadsList,
+		invalidateWallet,
+		isWalletError,
 		threadDetailQuery,
 		threadsQuery,
+		wallet,
 	} = useAiWorkspaceData({
 		activeOrgId,
 		activeThreadId,
+		canReadWallet,
+		currentUserId: session?.user.id,
 		onDeletedActiveThread: handleNewConversation,
 		page: threadPage,
 		selectedExistingThreadId,
@@ -84,7 +97,7 @@ export function AiWorkspaceClient() {
 
 	const isRoleResolved =
 		!(orgLoading || isPermissionsPending) && currentUserRole !== null;
-	const canExecuteAi = hasPermission("ai:execute");
+	const canExecuteAi = !impersonated && hasPermission("ai:execute");
 	const agentStatus = resolveAgentStatus({
 		data: agentsQuery.data,
 		isError: agentsQuery.isError,
@@ -95,7 +108,8 @@ export function AiWorkspaceClient() {
 			? (threadDetailQuery.data.messages as unknown as UIMessage[])
 			: [];
 
-	const sessionKey = `${activeOrgId ?? "none"}:${activeThreadId ?? "initializing"}`;
+	const workspaceKey = `${session?.user.id ?? "anonymous"}:${activeOrgId ?? "none"}`;
+	const sessionKey = `${workspaceKey}:${activeThreadId ?? "initializing"}`;
 
 	const renderMainChatPane = () => {
 		if (
@@ -128,6 +142,7 @@ export function AiWorkspaceClient() {
 				canExecuteAi={canExecuteAi}
 				initialMessages={loadedMessages}
 				isConfigured={agentStatus.isConfigured}
+				isImpersonated={impersonated}
 				isRoleResolved={isRoleResolved}
 				isStatusPending={agentsQuery.isPending}
 				key={sessionKey}
@@ -159,8 +174,12 @@ export function AiWorkspaceClient() {
 
 			<div className="grid grid-cols-1 gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
 				<div className="order-2 flex flex-col gap-4 lg:order-1">
+					{canReadWallet ? (
+						<WorkspaceWalletCard isError={isWalletError} wallet={wallet} />
+					) : null}
 					<ThreadHistorySidebar
 						activeThreadId={activeThreadId}
+						canDeleteThreads={canExecuteAi}
 						deleteError={
 							deleteThreadMutation.isError
 								? deleteThreadMutation.error.message
@@ -184,10 +203,12 @@ export function AiWorkspaceClient() {
 					/>
 					<WorkspaceBriefCard
 						activeOrgId={activeOrgId}
-						canExecuteAi={!isRoleResolved || canExecuteAi}
+						canExecuteAi={!impersonated && (!isRoleResolved || canExecuteAi)}
+						creditCost={wallet?.prices.workspace_brief}
 						isConfigured={agentStatus.isConfigured}
-						key={activeOrgId ?? "none"}
+						key={workspaceKey}
 						modelId={selectedModelId || undefined}
+						onSettled={invalidateWallet}
 					/>
 				</div>
 

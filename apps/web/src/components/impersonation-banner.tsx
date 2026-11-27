@@ -6,7 +6,11 @@ import { ShieldAlert, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { authClient, useSession } from "@/lib/auth-client";
+import {
+	authClient,
+	getSessionImpersonatedBy,
+	useSession,
+} from "@/lib/auth-client";
 
 /**
  * Global sticky banner rendered whenever an active session carries `impersonatedBy`
@@ -19,9 +23,7 @@ export function ImpersonationBanner() {
 	const { data: sessionData, refetch } = useSession();
 	const [isStopping, setIsStopping] = useState(false);
 
-	const impersonatedBy = (
-		sessionData?.session as { impersonatedBy?: string | null } | undefined
-	)?.impersonatedBy;
+	const impersonatedBy = getSessionImpersonatedBy(sessionData);
 
 	if (!(impersonatedBy && sessionData?.user)) {
 		return null;

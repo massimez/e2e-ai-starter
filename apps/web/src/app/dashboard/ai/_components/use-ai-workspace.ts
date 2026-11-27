@@ -7,8 +7,17 @@ import type {
 	AiThreadDetailResponse,
 	AiThreadsResponse,
 } from "@workspace/ai-core/contracts";
-import { client, parseApiResponse } from "@/lib/api-client";
-import { orgHeadersInit } from "@/lib/organization-hooks";
+import {
+	client,
+	type InferResponseType,
+	parseApiResponse,
+} from "@/lib/api-client";
+import { organizationKeys, orgHeadersInit } from "@/lib/organization-hooks";
+
+export type WorkspaceWallet = InferResponseType<
+	typeof client.api.organizations.current.wallet.$get,
+	200
+>["data"];
 
 export function createThreadId(): string {
 	return crypto.randomUUID();
@@ -74,18 +83,40 @@ export function resolveAgentStatus({
 export function useAiWorkspaceData({
 	activeOrgId,
 	activeThreadId,
+	canReadWallet,
+	currentUserId,
 	onDeletedActiveThread,
 	page,
 	selectedExistingThreadId,
 }: {
 	activeOrgId: string | undefined;
 	activeThreadId: string | null;
+	canReadWallet: boolean;
+	currentUserId: string | undefined;
 	onDeletedActiveThread: () => void;
 	page: number;
 	selectedExistingThreadId: string | null;
 }) {
 	const queryClient = useQueryClient();
 	const orgScope = activeOrgId ?? "none";
+
+	const walletQuery = useQuery({
+		enabled: Boolean(activeOrgId && currentUserId && canReadWallet),
+		queryFn: async () =>
+			parseApiResponse<WorkspaceWallet>(
+				await client.api.organizations.current.wallet.$get(
+					{},
+					orgHeadersInit(activeOrgId)
+				)
+			),
+		queryKey: organizationKeys.wallet(orgScope, currentUserId),
+	});
+
+	const invalidateWallet = () => {
+		void queryClient.invalidateQueries({
+			queryKey: organizationKeys.wallet(orgScope),
+		});
+	};
 
 	const agentsQuery = useQuery<AiAgentsResponse>({
 		enabled: Boolean(activeOrgId),
@@ -175,7 +206,10 @@ export function useAiWorkspaceData({
 		deleteThreadMutation,
 		invalidateConversation,
 		invalidateThreadsList,
+		invalidateWallet,
+		isWalletError: walletQuery.isError,
 		threadDetailQuery,
 		threadsQuery,
+		wallet: walletQuery.data,
 	};
 }

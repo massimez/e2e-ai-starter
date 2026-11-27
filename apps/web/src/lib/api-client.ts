@@ -124,6 +124,10 @@ export const client: TypedApiClient = hc<AppType>(getBrowserApiBaseUrl(), {
 export async function parseApiResponse<T>(
 	response: Pick<Response, "json" | "ok" | "status">
 ): Promise<T> {
+	if (response.ok && response.status === 204) {
+		return undefined as T;
+	}
+
 	let body: unknown = null;
 	try {
 		body = await response.json();
@@ -144,6 +148,14 @@ export async function parseApiResponse<T>(
 			response.status,
 			envelope?.error?.name || "ApiError",
 			envelope?.error?.issues
+		);
+	}
+
+	if (body === null) {
+		throw new ApiError(
+			"Received an invalid response from the server",
+			response.status,
+			"InvalidResponseError"
 		);
 	}
 

@@ -14,19 +14,22 @@ import { Label } from "@workspace/ui/components/label";
 import { Skeleton } from "@workspace/ui/components/skeleton";
 import { HardDrive, ScrollText } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { runAdminAction } from "@/app/admin/_components/admin-table-frame";
 import {
 	type AdminOrganizationDetailResponse,
 	useAdminOrganizationDetail,
+	useGrantAdminWorkspaceCredits,
 	useUpdateAdminOrganizationStorageLimit,
 } from "@/lib/admin-hooks";
 import { formatBytes, formatDateTime } from "@/lib/format";
+import { WalletChargeLookup } from "./wallet-charge-lookup";
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
 const MAX_STORAGE_LIMIT_MB = 10 * 1024 * 1024; // 10 TB
+const MAX_GRANT_CREDITS = 1_000_000;
 
 const QUOTA_PRESETS = [
 	{ bytes: 1 * GB, label: "1 GB" },
@@ -35,6 +38,116 @@ const QUOTA_PRESETS = [
 	{ bytes: 50 * GB, label: "50 GB" },
 	{ bytes: 100 * GB, label: "100 GB" },
 ] as const;
+
+function WalletGrantForm({ organizationId }: { organizationId: string }) {
+	const formId = useId();
+	const pendingGrant = useRef<{
+		credits: number;
+		operationId: string;
+		reason: string;
+	} | null>(null);
+	const [validationError, setValidationError] = useState<string | null>(null);
+	const grant = useGrantAdminWorkspaceCredits();
+
+	const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		const form = event.currentTarget;
+		const data = new FormData(form);
+		const credits = Number(data.get("credits"));
+		const reason = String(data.get("reason") ?? "").trim();
+
+		if (
+			!Number.isInteger(credits) ||
+			credits < 1 ||
+			credits > MAX_GRANT_CREDITS
+		) {
+			setValidationError(
+				`Credits must be a whole number between 1 and ${MAX_GRANT_CREDITS.toLocaleString()}.`
+			);
+			return;
+		}
+		if (reason.length === 0) {
+			setValidationError("Please provide a reason for granting credits.");
+			return;
+		}
+		setValidationError(null);
+
+		if (
+			pendingGrant.current?.credits !== credits ||
+			pendingGrant.current.reason !== reason
+		) {
+			pendingGrant.current = {
+				credits,
+				operationId: crypto.randomUUID(),
+				reason,
+			};
+		}
+		const request = pendingGrant.current;
+		try {
+			const { applied } = await grant.mutateAsync({
+				...request,
+				organizationId,
+			});
+			if (pendingGrant.current?.operationId === request.operationId) {
+				pendingGrant.current = null;
+			}
+			form.reset();
+			toast.success(
+				applied
+					? "Workspace credits granted."
+					: "This grant was already applied."
+			);
+		} catch {
+			// Error state is rendered via grant.error; keep pendingGrant for safe idempotent retry.
+		}
+	};
+
+	const errorMessage =
+		validationError ?? (grant.isError ? grant.error.message : null);
+
+	return (
+		<form
+			className="border-border space-y-3 rounded-lg border p-4"
+			onSubmit={(event) => void handleSubmit(event)}
+		>
+			<h3 className="font-medium">Grant workspace credits</h3>
+			<fieldset
+				className="grid gap-2 sm:grid-cols-[8rem_1fr_auto] sm:items-end"
+				disabled={grant.isPending}
+			>
+				<div className="space-y-1">
+					<Label htmlFor={`${formId}-credits`}>Credits</Label>
+					<Input
+						id={`${formId}-credits`}
+						max={MAX_GRANT_CREDITS}
+						min={1}
+						name="credits"
+						required
+						step={1}
+						type="number"
+					/>
+				</div>
+				<div className="space-y-1">
+					<Label htmlFor={`${formId}-reason`}>Reason</Label>
+					<Input
+						id={`${formId}-reason`}
+						maxLength={240}
+						name="reason"
+						required
+					/>
+				</div>
+				<Button type="submit">
+					{grant.isPending ? "Granting…" : "Grant credits"}
+				</Button>
+			</fieldset>
+			{errorMessage ? (
+				<p className="text-destructive text-xs" role="alert">
+					{errorMessage}
+				</p>
+			) : null}
+		</form>
+	);
+}
 
 function StorageQuotaEditor({
 	isSaving,
@@ -203,10 +316,12 @@ function OrganizationDetailBody({
 
 			<StorageQuotaEditor
 				isSaving={isSavingQuota}
-				key={org.id}
+				key={`storage:${org.id}`}
 				onSave={onSaveQuota}
 				storage={storage}
 			/>
+			<WalletGrantForm key={`grant:${org.id}`} organizationId={org.id} />
+			<WalletChargeLookup key={`lookup:${org.id}`} organizationId={org.id} />
 
 			<div className="space-y-2">
 				<h3 className="text-xs font-semibold tracking-wide uppercase">

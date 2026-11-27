@@ -26,6 +26,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { parseApiResponse } from "@/lib/api-client";
 import {
 	buildKeyedMessageParts,
 	ChatMessagePart,
@@ -34,7 +35,7 @@ import {
 } from "./ai-chat-message-list";
 
 const STARTER_PROMPTS = [
-	"Summarize my active workspace, role, and storage quota usage.",
+	"What is my workspace role and current storage usage?",
 	"List the members and roles in this workspace.",
 	"Search committed files and indexed knowledge in our workspace.",
 ] as const;
@@ -214,6 +215,7 @@ export interface AiChatSessionPaneProps {
 	canExecuteAi: boolean;
 	initialMessages: UIMessage[];
 	isConfigured: boolean;
+	isImpersonated?: boolean;
 	isRoleResolved: boolean;
 	isStatusPending: boolean;
 	modelId?: string;
@@ -233,6 +235,7 @@ export function AiChatSessionPane({
 	canExecuteAi,
 	initialMessages,
 	isConfigured,
+	isImpersonated = false,
 	isRoleResolved,
 	isStatusPending,
 	modelId,
@@ -260,6 +263,13 @@ export function AiChatSessionPane({
 					...(modelId ? { modelId } : {}),
 				},
 				credentials: "include",
+				fetch: async (resource, init) => {
+					const response = await fetch(resource, init);
+					if (!response.ok) {
+						await parseApiResponse(response);
+					}
+					return response;
+				},
 				...(activeOrgId
 					? { headers: { "x-organization-id": activeOrgId } }
 					: {}),
@@ -292,12 +302,14 @@ export function AiChatSessionPane({
 			onError: (err) => {
 				setLiveAnnouncement(`Assistant request failed: ${err.message}`);
 			},
-			onFinish: ({ isAbort }) => {
-				setLiveAnnouncement(
-					isAbort
-						? "Assistant response stopped."
-						: "Assistant response complete."
-				);
+			onFinish: ({ isAbort, isDisconnect, isError }) => {
+				if (!(isError || isDisconnect)) {
+					setLiveAnnouncement(
+						isAbort
+							? "Assistant response stopped."
+							: "Assistant response complete."
+					);
+				}
 				onConversationFinished();
 			},
 			transport,
@@ -305,7 +317,9 @@ export function AiChatSessionPane({
 
 	const isStreaming = status === "submitted" || status === "streaming";
 	const isInputDisabled =
-		!(threadId && isConfigured) || (isRoleResolved && !canExecuteAi);
+		!(activeOrgId && threadId && isConfigured) ||
+		isImpersonated ||
+		(isRoleResolved && !canExecuteAi);
 	const canSubmit =
 		!(isInputDisabled || isStreaming) && input.trim().length > 0;
 
@@ -349,17 +363,22 @@ export function AiChatSessionPane({
 	};
 
 	const handleSubmitPrompt = async () => {
-		const trimmed = input.trim();
-		if (!(trimmed && threadId) || isStreaming) {
+		if (!canSubmit) {
 			return;
 		}
 		isNearBottomRef.current = true;
+		const text = input.trim();
 		setInput("");
 		setLiveAnnouncement("Assistant responding.");
 		try {
-			await sendMessage({ text: trimmed });
-		} catch {
-			setInput((current) => (current ? current : trimmed));
+			await sendMessage({ text });
+		} catch (sendError) {
+			setInput((current) => current || text);
+			setLiveAnnouncement(
+				sendError instanceof Error
+					? sendError.message
+					: "Assistant request failed."
+			);
 		}
 	};
 
@@ -421,7 +440,7 @@ export function AiChatSessionPane({
 					statusError={statusError}
 				/>
 
-				{isRoleResolved && !canExecuteAi ? (
+				{isImpersonated || (isRoleResolved && !canExecuteAi) ? (
 					<div
 						className="border-border bg-muted/40 mx-5 mt-4 flex items-start gap-2.5 rounded-lg border p-3.5 text-xs"
 						role="status"
@@ -431,26 +450,20 @@ export function AiChatSessionPane({
 							className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0"
 						/>
 						<p className="text-muted-foreground leading-relaxed">
-							Your current workspace role has read-only AI access. Ask an admin
-							to grant member or higher access to send prompts.
+							{isImpersonated
+								? "AI chat and workspace mutations are disabled during impersonation sessions."
+								: "Your current workspace role has read-only AI access. Ask an admin to grant member or higher access to send prompts."}
 						</p>
 					</div>
 				) : null}
 
 				{error ? (
-					<div
-						className="border-destructive/30 bg-destructive/10 text-destructive mx-5 mt-4 flex items-start gap-2.5 rounded-lg border p-3.5 text-xs"
+					<p
+						className="border-destructive/30 bg-destructive/10 text-destructive mx-5 mt-4 rounded-lg border p-3.5 text-xs break-words"
 						role="alert"
 					>
-						<AlertCircle
-							aria-hidden="true"
-							className="mt-0.5 h-4 w-4 shrink-0"
-						/>
-						<div className="min-w-0 space-y-0.5">
-							<p className="font-medium">Unable to complete AI request</p>
-							<p className="wrap-break-word">{error.message}</p>
-						</div>
-					</div>
+						{error.message}
+					</p>
 				) : null}
 
 				<div

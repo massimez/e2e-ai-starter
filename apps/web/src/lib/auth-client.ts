@@ -53,4 +53,13 @@ export const authClient = createAuthClient({
 	],
 });
 
+export function getSessionImpersonatedBy(
+	sessionData: { session?: unknown } | null | undefined
+): string | null {
+	const value = (
+		sessionData?.session as { impersonatedBy?: unknown } | undefined
+	)?.impersonatedBy;
+	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
 export const { signOut, useSession } = authClient;

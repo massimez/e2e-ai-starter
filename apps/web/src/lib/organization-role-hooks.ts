@@ -32,6 +32,10 @@ export const organizationKeys = {
 		[...organizationKeys.all, "roles", organizationId, "me", roleKey] as const,
 	roles: (organizationId: string) =>
 		[...organizationKeys.all, "roles", organizationId] as const,
+	wallet: (organizationId: string, userId?: string) =>
+		userId
+			? ([...organizationKeys.all, "wallet", organizationId, userId] as const)
+			: ([...organizationKeys.all, "wallet", organizationId] as const),
 };
 
 export function unwrapAuthResult<T>(

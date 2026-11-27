@@ -13,6 +13,7 @@ import {
 	type InferResponseType,
 	parseApiResponse,
 } from "./api-client";
+import { organizationKeys } from "./organization-role-hooks";
 
 export type AdminOverviewResponse = InferResponseType<
 	typeof client.api.admin.overview.$get,
@@ -35,6 +36,18 @@ export type AdminOrganizationListItem =
 	AdminOrganizationsPageResponse["items"][number];
 export type AdminOrganizationDetailResponse = InferResponseType<
 	(typeof client.api.admin.organizations)[":organizationId"]["$get"],
+	200
+>["data"];
+export type AdminWalletChargesResponse = InferResponseType<
+	(typeof client.api.admin.organizations)[":organizationId"]["wallet"]["charges"]["$get"],
+	200
+>["data"];
+export type AdminWalletGrantResponse = InferResponseType<
+	(typeof client.api.admin.organizations)[":organizationId"]["wallet"]["grants"]["$post"],
+	200
+>["data"];
+export type AdminWalletReverseResponse = InferResponseType<
+	(typeof client.api.admin.organizations)[":organizationId"]["wallet"]["charges"][":entryId"]["reverse"]["$post"],
 	200
 >["data"];
 export type AuditLogsPageResponse = InferResponseType<
@@ -309,6 +322,68 @@ export function useUpdateAdminOrganizationStorageLimit() {
 			),
 		onSuccess: (_data, { organizationId }) =>
 			invalidateOrganizationQueries(queryClient, organizationId),
+	});
+}
+
+export function useGrantAdminWorkspaceCredits() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (params: {
+			credits: number;
+			operationId: string;
+			organizationId: string;
+			reason: string;
+		}) =>
+			await parseApiResponse<AdminWalletGrantResponse>(
+				await client.api.admin.organizations[
+					":organizationId"
+				].wallet.grants.$post(
+					{
+						json: { credits: params.credits, reason: params.reason },
+						param: { organizationId: params.organizationId },
+					},
+					{ headers: { "Idempotency-Key": params.operationId } }
+				)
+			),
+		onSuccess: (_data, { organizationId }) => {
+			void queryClient.invalidateQueries({
+				queryKey: organizationKeys.wallet(organizationId),
+			});
+		},
+	});
+}
+
+export function useFindAdminWalletCharges(organizationId: string) {
+	return useMutation({
+		mutationFn: async (requestId: string) =>
+			await parseApiResponse<AdminWalletChargesResponse>(
+				await client.api.admin.organizations[
+					":organizationId"
+				].wallet.charges.$get({
+					param: { organizationId },
+					query: { requestId },
+				})
+			),
+	});
+}
+
+export function useReverseAdminWalletCharge(organizationId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (params: { entryId: string; reason: string }) =>
+			await parseApiResponse<AdminWalletReverseResponse>(
+				await client.api.admin.organizations[":organizationId"].wallet.charges[
+					":entryId"
+				].reverse.$post({
+					json: { reason: params.reason },
+					param: { entryId: params.entryId, organizationId },
+				})
+			),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({
+				queryKey: organizationKeys.wallet(organizationId),
+			});
+		},
 	});
 }
 
