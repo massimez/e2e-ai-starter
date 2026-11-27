@@ -14,6 +14,7 @@ import {
 } from "../../middleware/org-permission";
 import { rateLimiter } from "../../middleware/rate-limiter";
 import { tenantBoundaryMiddleware } from "../../middleware/tenant-boundary";
+import { walletService } from "../wallet/service";
 import { resolveSessionOrganizationOnConnect } from "./default-organization";
 import {
 	memberIdParamSchema,
@@ -61,6 +62,13 @@ export const organizationRoutes = createRouter()
 			throw new NotFoundError("Organization");
 		}
 		return c.json(createSuccessResponse(org));
+	})
+	.get("/current/wallet", hasOrgPermission("ai:read"), async (c) => {
+		const { organizationId } = getActiveOrgContext(c);
+		c.header("Cache-Control", "no-store");
+		return c.json(
+			createSuccessResponse(await walletService.getWallet(organizationId))
+		);
 	})
 
 	// Update current active organization profile

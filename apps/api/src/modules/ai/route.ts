@@ -9,7 +9,17 @@ import { getActiveOrgContext } from "../../lib/tenant";
 import { authMiddleware } from "../../middleware/auth";
 import { hasOrgPermission } from "../../middleware/org-permission";
 import { rateLimiter } from "../../middleware/rate-limiter";
+import {
+	requireJsonContentType,
+	requireNonImpersonatedSession,
+	requireTrustedOrigin,
+} from "../../middleware/request-guards";
 import { tenantBoundaryMiddleware } from "../../middleware/tenant-boundary";
+import {
+	requireWalletOperationId,
+	walletOperationParamSchema,
+} from "../wallet/schema";
+import { walletService } from "../wallet/service";
 import {
 	aiChatRequestSchema,
 	aiThreadIdParamSchema,
@@ -29,10 +39,32 @@ export const aiRoutes = createRouter()
 		const agents = aiService.listAiAgents();
 		return c.json(createSuccessResponse(agents));
 	})
+	.get(
+		"/operations/:operationId",
+		hasOrgPermission("ai:execute"),
+		paramValidator(walletOperationParamSchema),
+		async (c) => {
+			const { organizationId, userId } = getActiveOrgContext(c);
+			const { operationId } = c.req.valid("param");
+			c.header("Cache-Control", "no-store");
+			return c.json(
+				createSuccessResponse(
+					await walletService.getAiChargeStatus({
+						actorId: userId,
+						operationId,
+						organizationId,
+					})
+				)
+			);
+		}
+	)
 	.post(
 		"/chat",
 		hasOrgPermission("ai:execute"),
 		rateLimiter(60_000, 30, { identity: "actor", operation: "ai:chat" }),
+		requireNonImpersonatedSession,
+		requireTrustedOrigin,
+		requireJsonContentType,
 		jsonValidator(aiChatRequestSchema),
 		async (c) => {
 			const { organizationId, userId } = getActiveOrgContext(c);
@@ -81,6 +113,8 @@ export const aiRoutes = createRouter()
 	.delete(
 		"/threads/:id",
 		hasOrgPermission("ai:execute"),
+		requireNonImpersonatedSession,
+		requireTrustedOrigin,
 		paramValidator(aiThreadIdParamSchema),
 		async (c) => {
 			const { organizationId, userId } = getActiveOrgContext(c);
@@ -100,6 +134,9 @@ export const aiRoutes = createRouter()
 			identity: "actor",
 			operation: "ai:workflow:workspace-brief",
 		}),
+		requireNonImpersonatedSession,
+		requireTrustedOrigin,
+		requireJsonContentType,
 		jsonValidator(workspaceBriefRequestSchema),
 		async (c) => {
 			const { organizationId, userId } = getActiveOrgContext(c);
@@ -107,6 +144,7 @@ export const aiRoutes = createRouter()
 			const result = await aiService.runWorkspaceBrief({
 				headers: c.req.raw.headers,
 				input,
+				operationId: requireWalletOperationId(c.req.header("Idempotency-Key")),
 				organizationId,
 				requestId: c.get("requestId"),
 				userId,

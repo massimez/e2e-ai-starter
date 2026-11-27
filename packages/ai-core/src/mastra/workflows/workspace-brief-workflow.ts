@@ -123,6 +123,8 @@ const gatherWorkspaceMetricsStep = createStep({
 	},
 });
 
+const BRIEF_GENERATION_TIMEOUT_MS = 45_000;
+
 const synthesizeWorkspaceBriefStep = createStep({
 	description:
 		"Synthesizes an executive workspace brief from the gathered tenant metrics using the workspace assistant agent.",
@@ -143,7 +145,9 @@ const synthesizeWorkspaceBriefStep = createStep({
 				focusLine,
 			].join("\n\n"),
 			{
+				abortSignal: AbortSignal.timeout(BRIEF_GENERATION_TIMEOUT_MS),
 				maxSteps: 1,
+				modelSettings: { maxOutputTokens: 2048, maxRetries: 1 },
 				requestContext,
 				structuredOutput: {
 					schema: workspaceBriefStructuredOutputSchema,

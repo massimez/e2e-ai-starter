@@ -18,9 +18,11 @@ import {
 } from "@workspace/ai-core";
 import { logError, logWarning } from "@workspace/shared/logger";
 import { isOrgAdminRole } from "@workspace/shared/permissions";
-import { createUIMessageStreamResponse } from "ai";
+import { createUIMessageStreamResponse, type UIMessageChunk } from "ai";
+import { type AuditLogWriter, persistAuditLog } from "../../lib/audit";
 import { auth } from "../../lib/auth/index";
 import { AppError, ForbiddenError, NotFoundError } from "../../lib/errors";
+import { type WalletService, walletService } from "../wallet/service";
 import { type AiRepository, drizzleAiRepository } from "./repository";
 import {
 	assertModelProviderConfigured,
@@ -405,6 +407,7 @@ export async function createAiChatResponse(
 		agentId,
 		defaultOptions: {
 			maxSteps: 5,
+			modelSettings: { maxOutputTokens: 2048, maxRetries: 1 },
 		},
 		mastra: runtime.mastra,
 		onError: (error) => {
@@ -442,9 +445,7 @@ export async function createAiChatResponse(
 
 	const response = createUIMessageStreamResponse({
 		headers,
-		stream: stream as unknown as Parameters<
-			typeof createUIMessageStreamResponse
-		>[0]["stream"],
+		stream: stream as unknown as ReadableStream<UIMessageChunk>,
 	});
 
 	return withSseHeartbeat(response, SSE_HEARTBEAT_MS);
@@ -545,6 +546,7 @@ export async function deleteAiThread(
 export interface RunWorkspaceBriefParams {
 	headers?: Headers;
 	input: WorkspaceBriefRequest;
+	operationId: string;
 	organizationId: string;
 	requestId?: string;
 	userId: string;
@@ -552,7 +554,12 @@ export interface RunWorkspaceBriefParams {
 
 export async function runWorkspaceBrief(
 	params: RunWorkspaceBriefParams,
-	repository: AiRepository = drizzleAiRepository
+	repository: AiRepository = drizzleAiRepository,
+	wallet: Pick<
+		WalletService,
+		"chargeWorkspaceBrief" | "reverseCharge"
+	> = walletService,
+	writeAuditLog: AuditLogWriter = persistAuditLog
 ): Promise<WorkspaceBriefResponse> {
 	const selectedModel = assertModelProviderConfigured(params.input.modelId);
 
@@ -571,41 +578,84 @@ export async function runWorkspaceBrief(
 
 	const workflow = runtime.mastra.getWorkflowById("workspace-brief");
 	const run = await workflow.createRun();
-	const result = await run.start({
-		inputData: params.input,
-		requestContext,
+	const entryId = await wallet.chargeWorkspaceBrief({
+		actorId: params.userId,
+		operationId: params.operationId,
+		organizationId: params.organizationId,
 	});
 
-	if (result.status !== "success") {
-		const workflowError =
-			"error" in result
-				? result.error
-				: new Error(
-						`Workspace brief workflow ended with status ${result.status}`
-					);
-		logError("AIService:WorkspaceBrief", workflowError, {
-			organizationId: params.organizationId,
-			requestId: params.requestId,
-			status: result.status,
-			userId: params.userId,
+	try {
+		const result = await run.start({
+			inputData: params.input,
+			requestContext,
 		});
-		const errorDetails = inspectAiError(workflowError);
-		const httpStatus =
-			errorDetails.statusCode === 429 || errorDetails.statusCode === 503
-				? errorDetails.statusCode
-				: 502;
-		throw new AppError(
-			formatAiStreamErrorMessage(workflowError, errorDetails),
-			httpStatus,
-			"AI_WORKFLOW_FAILED"
-		);
-	}
 
-	return workspaceBriefResponseSchema.parse(result.result);
+		if (result.status !== "success") {
+			const workflowError =
+				"error" in result
+					? result.error
+					: new Error(
+							`Workspace brief workflow ended with status ${result.status}`
+						);
+			logError("AIService:WorkspaceBrief", workflowError, {
+				organizationId: params.organizationId,
+				requestId: params.requestId,
+				status: result.status,
+				userId: params.userId,
+			});
+			const errorDetails = inspectAiError(workflowError);
+			const httpStatus =
+				errorDetails.statusCode === 429 || errorDetails.statusCode === 503
+					? errorDetails.statusCode
+					: 502;
+			throw new AppError(
+				formatAiStreamErrorMessage(workflowError, errorDetails),
+				httpStatus,
+				"AI_WORKFLOW_FAILED"
+			);
+		}
+
+		return workspaceBriefResponseSchema.parse(result.result);
+	} catch (error) {
+		try {
+			await wallet.reverseCharge({
+				entryId,
+				organizationId: params.organizationId,
+				reason: "Workspace summary failed",
+			});
+		} catch (reversalError) {
+			logError("AIService:WalletReversal", reversalError, {
+				entryId,
+				event: "wallet.reversal_failed",
+				operationId: params.operationId,
+				organizationId: params.organizationId,
+				requestId: params.requestId,
+			});
+			await writeAuditLog({
+				action: "ai.workspace_brief.reversal_failed",
+				details: {
+					chargeEntryId: entryId,
+					operationId: params.operationId,
+					requestId: params.requestId,
+					reversalFailed: true,
+				},
+				entityId: entryId,
+				entityType: "wallet_entry",
+				organizationId: params.organizationId,
+				userId: params.userId,
+			});
+		}
+		throw error;
+	}
 }
 
 export function createAiService(
-	repository: AiRepository = drizzleAiRepository
+	repository: AiRepository = drizzleAiRepository,
+	wallet: Pick<
+		WalletService,
+		"chargeWorkspaceBrief" | "reverseCharge"
+	> = walletService,
+	writeAuditLog: AuditLogWriter = persistAuditLog
 ) {
 	return {
 		cleanupTenantAiMemory,
@@ -617,7 +667,7 @@ export function createAiService(
 		listAiAgents,
 		listAiThreads,
 		runWorkspaceBrief: (params: RunWorkspaceBriefParams) =>
-			runWorkspaceBrief(params, repository),
+			runWorkspaceBrief(params, repository, wallet, writeAuditLog),
 	};
 }
 
