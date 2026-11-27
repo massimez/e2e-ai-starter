@@ -71,6 +71,13 @@
       "when": 1795721000000,
       "tag": "0009_audit_retention_prune_fn",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795782250191,
+      "tag": "0010_workspace_wallet",
+      "breakpoints": true
     }
   ]
 }
