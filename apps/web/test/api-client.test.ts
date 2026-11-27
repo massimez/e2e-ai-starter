@@ -61,6 +61,16 @@ describe("@workspace/web api client helpers", () => {
 		);
 	});
 
+	test("parseApiResponse throws ApiError when a 200 response has an empty or non-JSON body", async () => {
+		const emptyOk = new Response(null, { status: 200 });
+		await expect(parseApiResponse(emptyOk)).rejects.toThrow(
+			"Received an invalid response from the server"
+		);
+
+		const noContent = new Response(null, { status: 204 });
+		await expect(parseApiResponse<void>(noContent)).resolves.toBeUndefined();
+	});
+
 	test("fetchWithTimeout rejects immediately when user signal is aborted", async () => {
 		const controller = new AbortController();
 		controller.abort();

@@ -7,24 +7,33 @@ import {
 	spyOn,
 	test,
 } from "bun:test";
+import * as mastraSdk from "@mastra/ai-sdk";
 import { db } from "@workspace/db";
 import { PERMISSION_MATRIX, roleAllows } from "@workspace/shared/permissions";
-import { app } from "../src/app";
-import { env } from "../src/env";
-import { auth } from "../src/lib/auth";
-import { AppError, ForbiddenError, NotFoundError } from "../src/lib/errors";
-import { redis } from "../src/lib/redis/client";
-import { resetMemoryRateLimiter } from "../src/middleware/rate-limiter";
-import {
-	aiService,
-	formatAiStreamErrorMessage,
-} from "../src/modules/ai/service";
+import { app } from "../../app";
+import { env } from "../../env";
+import { auth } from "../../lib/auth";
+import { AppError, ForbiddenError, NotFoundError } from "../../lib/errors";
+import { redis } from "../../lib/redis/client";
+import { resetMemoryRateLimiter } from "../../middleware/rate-limiter";
+import { walletService } from "../wallet/service";
+import { drizzleAiRepository } from "./repository";
+import { aiService, formatAiStreamErrorMessage } from "./service";
+
+const walletOperationId = "550e8400-e29b-41d4-a716-446655440000";
+const jsonHeaders = { "content-type": "application/json" };
+const billableJsonHeaders = {
+	...jsonHeaders,
+	"Idempotency-Key": walletOperationId,
+};
 
 function mockSession({
 	activeOrganizationId = "org_1",
+	impersonatedBy,
 	userId = "user_1",
 }: {
 	activeOrganizationId?: string | null;
+	impersonatedBy?: string;
 	userId?: string;
 } = {}) {
 	return spyOn(auth.api, "getSession").mockResolvedValue({
@@ -32,6 +41,7 @@ function mockSession({
 			activeOrganizationId,
 			expiresAt: new Date(Date.now() + 3_600_000),
 			id: "sess_test",
+			impersonatedBy,
 			userId,
 		},
 		user: {
@@ -39,6 +49,7 @@ function mockSession({
 			email: "tester@example.com",
 			id: userId,
 			name: "Tester",
+			role: "user",
 		},
 	} as never);
 }
@@ -265,7 +276,7 @@ describe("/api/ai routes security and behavior", () => {
 						},
 					],
 				}),
-				headers: { "content-type": "application/json" },
+				headers: jsonHeaders,
 				method: "POST",
 			});
 			expect(chatRes.status).toBe(503);
@@ -338,37 +349,212 @@ describe("/api/ai routes security and behavior", () => {
 		expect(missingRes.status).toBe(404);
 	});
 
-	test("passes through streamed Response from createAiChatResponse on valid chat", async () => {
+	test("streams free chat without a wallet or an idempotency key", async () => {
 		mockSession({ activeOrganizationId: "org_1", userId: "user_1" });
 		spyOn(auth.api, "hasPermission").mockResolvedValue({
 			error: null,
 			success: true,
 		});
-		spyOn(aiService, "createAiChatResponse").mockResolvedValue(
-			new Response("data: ok\n\n", {
-				headers: { "content-type": "text/event-stream" },
-				status: 200,
+		spyOn(drizzleAiRepository, "findMemberRole").mockResolvedValue("member");
+		const debit = spyOn(
+			walletService,
+			"chargeWorkspaceBrief"
+		).mockRejectedValue(new AppError("Insufficient credits", 402));
+		const stream = spyOn(mastraSdk, "handleChatStream").mockResolvedValue(
+			new ReadableStream({
+				start(controller) {
+					controller.enqueue({ type: "start", messageId: "assistant" });
+					controller.enqueue({ type: "finish", finishReason: "stop" });
+					controller.close();
+				},
 			})
 		);
+		const wallet = spyOn(walletService, "getWallet").mockResolvedValue({
+			balance: 0,
+			entries: [],
+			prices: { workspace_brief: 3 },
+		});
+		const previousKey = env.GOOGLE_GENERATIVE_AI_API_KEY;
+		env.GOOGLE_GENERATIVE_AI_API_KEY = "test-chat-key";
+		try {
+			const res = await app.request("/api/ai/chat", {
+				body: JSON.stringify({
+					messages: [
+						{ parts: [{ text: "Hello", type: "text" }], role: "user" },
+					],
+					modelId: "google/gemini-3.5-flash-lite",
+				}),
+				headers: jsonHeaders,
+				method: "POST",
+			});
+			expect(res.status).toBe(200);
+			expect(res.headers.get("content-type")).toContain("text/event-stream");
+			expect(await res.text()).toContain('"finishReason":"stop"');
+			expect(stream).toHaveBeenCalledTimes(1);
+			expect(wallet).not.toHaveBeenCalled();
+			expect(debit).not.toHaveBeenCalled();
+		} finally {
+			env.GOOGLE_GENERATIVE_AI_API_KEY = previousKey;
+		}
+	});
 
-		const res = await app.request("/api/ai/chat", {
-			body: JSON.stringify({
-				id: "550e8400-e29b-41d4-a716-446655440000",
-				messages: [
-					{
-						id: "msg_1",
-						parts: [{ text: "Summarize my org", type: "text" }],
-						role: "user",
-					},
-				],
-			}),
-			headers: { "content-type": "application/json" },
+	test("requires a UUID idempotency key before running Workspace Summary", async () => {
+		mockSession();
+		spyOn(auth.api, "hasPermission").mockResolvedValue({
+			error: null,
+			success: true,
+		});
+		const brief = spyOn(aiService, "runWorkspaceBrief");
+
+		const missingKey = await app.request("/api/ai/workflows/workspace-brief", {
+			body: "{}",
+			headers: jsonHeaders,
 			method: "POST",
 		});
+		const briefResponse = await app.request(
+			"/api/ai/workflows/workspace-brief",
+			{
+				body: "{}",
+				headers: {
+					"content-type": "application/json",
+					"Idempotency-Key": "invalid",
+				},
+				method: "POST",
+			}
+		);
+		expect(missingKey.status).toBe(400);
+		expect(briefResponse.status).toBe(400);
+		expect(brief).not.toHaveBeenCalled();
+	});
 
-		expect(res.status).toBe(200);
-		expect(res.headers.get("content-type")).toContain("text/event-stream");
-		expect(await res.text()).toContain("data: ok");
+	test("blocks impersonated AI execution and thread deletion", async () => {
+		mockSession({ impersonatedBy: "platform_support" });
+		spyOn(auth.api, "hasPermission").mockResolvedValue({
+			error: null,
+			success: true,
+		});
+		const chat = spyOn(aiService, "createAiChatResponse");
+		const brief = spyOn(aiService, "runWorkspaceBrief");
+		const del = spyOn(aiService, "deleteAiThread");
+
+		const responses = await Promise.all([
+			app.request("/api/ai/chat", {
+				body: JSON.stringify({
+					messages: [
+						{ parts: [{ text: "Hello", type: "text" }], role: "user" },
+					],
+				}),
+				headers: jsonHeaders,
+				method: "POST",
+			}),
+			app.request("/api/ai/workflows/workspace-brief", {
+				body: "{}",
+				headers: billableJsonHeaders,
+				method: "POST",
+			}),
+			app.request("/api/ai/threads/thread_1", {
+				method: "DELETE",
+			}),
+		]);
+		expect(responses.map(({ status }) => status)).toEqual([403, 403, 403]);
+		expect(chat).not.toHaveBeenCalled();
+		expect(brief).not.toHaveBeenCalled();
+		expect(del).not.toHaveBeenCalled();
+	});
+
+	test("requires a trusted browser origin and explicit JSON on billable wallet requests", async () => {
+		mockSession();
+		spyOn(auth.api, "hasPermission").mockResolvedValue({
+			error: null,
+			success: true,
+		});
+		const brief = spyOn(aiService, "runWorkspaceBrief");
+		const path = "/api/ai/workflows/workspace-brief";
+		const untrusted = await app.request(path, {
+			body: "{}",
+			headers: { ...billableJsonHeaders, Origin: "https://untrusted.example" },
+			method: "POST",
+		});
+		const crossSite = await app.request(path, {
+			body: "{}",
+			headers: { ...billableJsonHeaders, "Sec-Fetch-Site": "cross-site" },
+			method: "POST",
+		});
+		const wrongType = await app.request(path, {
+			body: "{}",
+			headers: { ...billableJsonHeaders, "content-type": "text/plain" },
+			method: "POST",
+		});
+		expect(untrusted.status).toBe(403);
+		expect(crossSite.status).toBe(403);
+		expect(wrongType.status).toBe(415);
+		expect(brief).not.toHaveBeenCalled();
+	});
+
+	test("scopes wallet reads to the active workspace and keeps the response private", async () => {
+		mockSession({ activeOrganizationId: "org_active" });
+		spyOn(auth.api, "hasPermission").mockResolvedValue({
+			error: null,
+			success: true,
+		});
+		const getWallet = spyOn(walletService, "getWallet").mockResolvedValue({
+			balance: 2,
+			entries: [],
+			prices: { workspace_brief: 3 },
+		});
+		const path = "/api/organizations/current/wallet";
+		const mismatched = await app.request(path, {
+			headers: { "x-organization-id": "org_other" },
+		});
+		expect(mismatched.status).toBe(403);
+		expect(getWallet).not.toHaveBeenCalled();
+
+		const response = await app.request(path);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("Cache-Control")).toBe("no-store");
+		expect(getWallet).toHaveBeenCalledWith("org_active");
+	});
+
+	test("workspace membership alone cannot grant credits", async () => {
+		mockSession();
+		const grant = spyOn(walletService, "grantCredits");
+		const response = await app.request(
+			"/api/admin/organizations/org_1/wallet/grants",
+			{
+				body: JSON.stringify({ credits: 1, reason: "Test" }),
+				headers: billableJsonHeaders,
+				method: "POST",
+			}
+		);
+		expect(response.status).toBe(403);
+		expect(grant).not.toHaveBeenCalled();
+	});
+
+	test("requires AI execution permission and scopes charge status to the active actor", async () => {
+		mockSession({ activeOrganizationId: "org_active", userId: "user_active" });
+		const permission = spyOn(auth.api, "hasPermission").mockResolvedValue({
+			error: null,
+			success: false,
+		});
+		const getStatus = spyOn(
+			walletService,
+			"getAiChargeStatus"
+		).mockResolvedValue({
+			requestId: null,
+			status: "not_recorded",
+		});
+		const path = `/api/ai/operations/${walletOperationId}`;
+		expect((await app.request(path)).status).toBe(403);
+		expect(getStatus).not.toHaveBeenCalled();
+		permission.mockResolvedValue({ error: null, success: true });
+		const response = await app.request(path);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("Cache-Control")).toBe("no-store");
+		expect(getStatus).toHaveBeenCalledWith({
+			actorId: "user_active",
+			operationId: walletOperationId,
+			organizationId: "org_active",
+		});
 	});
 
 	test("maps AppError subclasses cleanly if service throws", async () => {
@@ -391,7 +577,7 @@ describe("/api/ai routes security and behavior", () => {
 					},
 				],
 			}),
-			headers: { "content-type": "application/json" },
+			headers: jsonHeaders,
 			method: "POST",
 		});
 
@@ -423,7 +609,7 @@ describe("/api/ai routes security and behavior", () => {
 
 		const res = await app.request("/api/ai/workflows/workspace-brief", {
 			body: JSON.stringify({ focus: "storage health" }),
-			headers: { "content-type": "application/json" },
+			headers: { ...billableJsonHeaders, Origin: env.CORS_ORIGINS[0] ?? "" },
 			method: "POST",
 		});
 
@@ -431,6 +617,7 @@ describe("/api/ai routes security and behavior", () => {
 		expect(briefSpy).toHaveBeenCalledWith(
 			expect.objectContaining({
 				input: { focus: "storage health" },
+				operationId: walletOperationId,
 				organizationId: "org_1",
 				userId: "user_1",
 			})

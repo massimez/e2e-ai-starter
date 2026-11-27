@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import type { AuditLogRecord } from "../../lib/audit";
+import { auth } from "../../lib/auth/index";
 import { createApp } from "../../lib/create-hono-app";
 import {
 	ConflictError,
@@ -6,8 +8,10 @@ import {
 	NotFoundError,
 	ValidationError,
 } from "../../lib/errors";
+import { createAccessAuditMiddleware } from "../../middleware/audit";
 import { isActiveUserBan } from "../../middleware/auth";
 import { authRoutes } from "../auth/route";
+import { walletService } from "../wallet/service";
 import type { AuditRepository } from "./audit/repository";
 import type {
 	AdminOrganizationListItem,
@@ -186,6 +190,15 @@ describe("admin backoffice router & Better Auth admin lockdown", () => {
 			{ method: "GET", path: "/api/admin/organizations" },
 			{ method: "GET", path: "/api/admin/organizations/org_1" },
 			{ method: "PATCH", path: "/api/admin/organizations/org_1/storage-limit" },
+			{
+				method: "GET",
+				path: "/api/admin/organizations/org_1/wallet/charges?requestId=request-1",
+			},
+			{ method: "POST", path: "/api/admin/organizations/org_1/wallet/grants" },
+			{
+				method: "POST",
+				path: "/api/admin/organizations/org_1/wallet/charges/550e8400-e29b-41d4-a716-446655440000/reverse",
+			},
 			{ method: "GET", path: "/api/admin/system" },
 			{ method: "POST", path: "/api/admin/system/retention/run" },
 		];
@@ -234,7 +247,186 @@ describe("admin backoffice router & Better Auth admin lockdown", () => {
 		);
 		expect(unauthImpersonate.status).toBe(401);
 	});
+
+	test("audits admin wallet lookup, grants, failures, and reversals with org attribution and CSRF guards", async () => {
+		const auditRecords: AuditLogRecord[] = [];
+		spyOn(auth.api, "getSession").mockResolvedValue({
+			session: {
+				activeOrganizationId: null,
+				id: "sess_admin",
+				impersonatedBy: null,
+				userId: "usr_admin",
+			},
+			user: {
+				banned: false,
+				email: "admin@example.com",
+				id: "usr_admin",
+				name: "Platform Admin",
+				role: "admin",
+			},
+		} as unknown as Awaited<ReturnType<typeof auth.api.getSession>>);
+
+		const entryId = "550e8400-e29b-41d4-a716-446655440000";
+		const reversalId = "550e8400-e29b-41d4-a716-446655440001";
+		const operationId = "550e8400-e29b-41d4-a716-446655440002";
+
+		spyOn(walletService, "findChargesByRequestId").mockResolvedValue([
+			{
+				actorEmail: "member@example.com",
+				actorId: "usr_member",
+				createdAt: new Date("2026-11-27T10:00:00.000Z"),
+				delta: -3,
+				entryId,
+				requestId: operationId,
+				reversalEntryId: null,
+			},
+		]);
+		spyOn(walletService, "grantCredits").mockResolvedValue({
+			applied: true,
+			entryId,
+		});
+		spyOn(walletService, "reverseCharge").mockResolvedValue({
+			applied: true,
+			credits: 3,
+			entryId: reversalId,
+		});
+
+		const app = createApp();
+		app.use(
+			"/api/admin/*",
+			createAccessAuditMiddleware({
+				writeAuditLog: (record) => {
+					auditRecords.push(record);
+					return Promise.resolve();
+				},
+			})
+		);
+		app.route("/api/admin", adminRoutes);
+
+		try {
+			const lookupRes = await app.request(
+				`/api/admin/organizations/org_1/wallet/charges?requestId=${operationId}`
+			);
+			expect(lookupRes.status).toBe(200);
+
+			const grantRes = await app.request(
+				"/api/admin/organizations/org_1/wallet/grants",
+				{
+					body: JSON.stringify({ credits: 25, reason: "Onboarding pack" }),
+					headers: {
+						"content-type": "application/json",
+						"Idempotency-Key": operationId,
+					},
+					method: "POST",
+				}
+			);
+			expect(grantRes.status).toBe(200);
+
+			const badKeyRes = await app.request(
+				"/api/admin/organizations/org_1/wallet/grants",
+				{
+					body: JSON.stringify({ credits: 25, reason: "Missing key test" }),
+					headers: { "content-type": "application/json" },
+					method: "POST",
+				}
+			);
+			expect(badKeyRes.status).toBe(400);
+
+			const reverseRes = await app.request(
+				`/api/admin/organizations/org_1/wallet/charges/${entryId}/reverse`,
+				{
+					body: JSON.stringify({ reason: "Confirmed provider outage" }),
+					headers: { "content-type": "application/json" },
+					method: "POST",
+				}
+			);
+			expect(reverseRes.status).toBe(200);
+
+			const badOriginRes = await app.request(
+				"/api/admin/organizations/org_1/wallet/grants",
+				{
+					body: JSON.stringify({ credits: 10, reason: "Evil" }),
+					headers: {
+						"content-type": "application/json",
+						"Idempotency-Key": operationId,
+						Origin: "https://evil.example",
+					},
+					method: "POST",
+				}
+			);
+			expect(badOriginRes.status).toBe(403);
+
+			const nonJsonRes = await app.request(
+				"/api/admin/organizations/org_1/wallet/grants",
+				{
+					body: "{}",
+					headers: {
+						"content-type": "text/plain",
+						"Idempotency-Key": operationId,
+					},
+					method: "POST",
+				}
+			);
+			expect(nonJsonRes.status).toBe(415);
+
+			// Wait a tick for async audit writes to flush
+			await Bun.sleep(10);
+
+			expect(
+				auditRecords.find(
+					(r) => r.action === "admin.organization.wallet_charge_lookup"
+				)
+			).toMatchObject({
+				details: { lookupRequestId: operationId },
+				organizationId: "org_1",
+			});
+
+			const grantAudits = auditRecords.filter(
+				(r) => r.action === "admin.organization.wallet_grant"
+			);
+			expect(grantAudits).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						details: expect.objectContaining({
+							applied: true,
+							credits: 25,
+							operationId,
+							reason: "Onboarding pack",
+						}),
+						entityId: entryId,
+						organizationId: "org_1",
+					}),
+					expect.objectContaining({
+						details: expect.objectContaining({
+							credits: 25,
+							reason: "Missing key test",
+						}),
+						organizationId: "org_1",
+					}),
+				])
+			);
+
+			expect(
+				auditRecords.find(
+					(r) => r.action === "admin.organization.wallet_charge_reversal"
+				)
+			).toMatchObject({
+				details: {
+					applied: true,
+					credits: 3,
+					reason: "Confirmed provider outage",
+					reversalEntryId: reversalId,
+				},
+				entityId: entryId,
+				organizationId: "org_1",
+			});
+		} finally {
+			mock.restore();
+		}
+	});
 });
+
+afterEach(() => mock.restore());
 
 describe("admin overview service", () => {
 	test("computes 2FA adoption percentage and queries recent events without full count", async () => {

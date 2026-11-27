@@ -79,8 +79,11 @@ describe("API environment validation", () => {
 		).toThrow("Invalid API environment variables");
 	});
 
-	test("splits CORS origins and trusted proxy CIDRs in production", () => {
-		const parsed = parseApiEnv(VALID_PROD_ENV);
+	test("splits and normalizes CORS origins and trusted proxy CIDRs in production", () => {
+		const parsed = parseApiEnv({
+			...VALID_PROD_ENV,
+			CORS_ORIGIN: "https://App.Example.com/, https://admin.example.com/",
+		});
 		expect(parsed.CORS_ORIGINS).toEqual([
 			"https://app.example.com",
 			"https://admin.example.com",
